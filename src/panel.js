@@ -46,7 +46,7 @@ export function renderPanel(container, spec, state, handlers) {
     container.appendChild(sliderField("Radius", spec.radius, 6, 90, 1, (v) => set({ radius: v })));
   }
   if (fields.includes("size")) {
-    container.appendChild(sliderField("Size", spec.size, 30, 400, 5, (v) => set({ size: v })));
+    container.appendChild(sliderField("Size", spec.size ?? 130, 30, 400, 5, (v) => set({ size: v })));
   }
   if (fields.includes("width") || fields.includes("height")) {
     container.appendChild(fieldRow([

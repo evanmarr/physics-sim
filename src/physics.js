@@ -495,7 +495,10 @@ function areaOf(spec) {
   if (spec.type === "ball" || spec.type === "bomb" || spec.type === "ballBearing" || spec.type === "peg") {
     return Math.PI * spec.radius * spec.radius;
   }
-  if (spec.type === "triangle") return (Math.sqrt(3) / 4) * spec.size * spec.size;
+  if (spec.type === "triangle") {
+    const size = spec.size ?? 130;
+    return (Math.sqrt(3) / 4) * size * size;
+  }
   return (spec.width || 40) * (spec.height || 40);
 }
 

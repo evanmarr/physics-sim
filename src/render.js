@@ -186,7 +186,7 @@ const ROTATABLE = new Set(["board", "triangle", "cannon", "button"]);
 
 function handleDistance(d) {
   if (d.type === "board" || d.type === "button") return d.height / 2 + 26;
-  if (d.type === "triangle") return (d.size * Math.sqrt(3)) / 3 + 26;
+  if (d.type === "triangle") return ((d.size ?? 130) * Math.sqrt(3)) / 3 + 26;
   if (d.type === "cannon") return d.height / 2 + 26;
   return 40;
 }
@@ -297,7 +297,7 @@ function updateShape(g, d, editable) {
 }
 
 // Equilateral triangle (all sides = size), centroid at the origin, apex up.
-export function equilateralPoints(size) {
+export function equilateralPoints(size = 130) {
   const h = (size * Math.sqrt(3)) / 2;
   return [
     { x: 0, y: (-2 * h) / 3 },
