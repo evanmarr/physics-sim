@@ -1,5 +1,6 @@
 import { materialOf } from "./materials.js";
-import { makeId } from "./objectTypes.js";
+import { makeId, cannonCatchRadius } from "./objectTypes.js";
+import { equilateralPoints } from "./render.js";
 
 const { Engine, World, Composite, Bodies, Body, Constraint, Events, Vector } = Matter;
 
@@ -8,6 +9,10 @@ const DEG = 180 / Math.PI;
 const DENSITY_SCALE = 0.001;
 const BUOYANCY_DRAG = 0.16;
 const BOMB_FORCE_SCALE = 0.02;
+// Much smaller than BOMB_FORCE_SCALE: a bomb's force is a one-off impulse,
+// but a fan applies its force every single tick a body stays in range, so it
+// compounds — this needs to be roughly gravity-scale, not impulse-scale.
+const FAN_FORCE_SCALE = 0.00025;
 const CANNON_LAUNCH_SCALE = 1.0;
 const BUTTON_COOLDOWN_MS = 700;
 
@@ -25,6 +30,7 @@ export class PhysicsSim {
     this.byId = new Map(); // gameId -> body
     this.cannonMeta = new Map(); // cannonId -> {barrel, catcher, spec}
     this.buttonMeta = new Map();
+    this.fanMeta = new Map(); // fanId -> {body, spec}
     this._build();
     this._wireEvents();
   }
@@ -33,14 +39,29 @@ export class PhysicsSim {
     const world = this.engine.world;
     const specById = new Map(this.specs.map((s) => [s.id, s]));
 
+    // Figure out which boards/triangles get a ball-bearing pivot *before*
+    // creating bodies: a pivoted object must be dynamic to actually swing,
+    // so a bearing overrides that host's own "Fixed" checkbox — otherwise
+    // dropping a bearing onto the default (fixed) board would silently do
+    // nothing, which is exactly the "why won't this swing" trap.
+    const pivots = []; // { bearingSpec, hostSpec }
+    const pivotHostIds = new Set();
     for (const spec of this.specs) {
-      const body = this._createBody(spec);
+      if (spec.type !== "ballBearing") continue;
+      const host = this._findPivotHost(spec, specById);
+      if (!host) continue;
+      pivots.push({ bearingSpec: spec, hostSpec: host });
+      pivotHostIds.add(host.id);
+    }
+
+    for (const spec of this.specs) {
+      const body = this._createBody(spec, pivotHostIds.has(spec.id));
       if (!body) continue;
       this.byId.set(spec.id, body);
       Composite.add(world, body);
 
       if (spec.type === "cannon") {
-        const catcher = Bodies.circle(spec.x, spec.y, Math.max(spec.width, spec.height) * 0.55, {
+        const catcher = Bodies.circle(spec.x, spec.y, cannonCatchRadius(spec), {
           isStatic: true, isSensor: true, label: `cannonCatch:${spec.id}`,
         });
         catcher.plugin = { render: { hidden: true } };
@@ -50,16 +71,17 @@ export class PhysicsSim {
       if (spec.type === "button") {
         this.buttonMeta.set(spec.id, { spec, cooldownUntil: 0 });
       }
+      if (spec.type === "fan") {
+        this.fanMeta.set(spec.id, { body, spec });
+      }
     }
 
-    // ball bearing pivots: attach a constraint from the bearing's fixed point
-    // to whatever dynamic board/triangle spec physically contains that point.
-    for (const spec of this.specs) {
-      if (spec.type !== "ballBearing") continue;
-      const host = this._findPivotHost(spec, specById);
-      if (!host) continue;
+    // ball bearing pivots: attach a frictionless point constraint from the
+    // bearing's fixed point to the host's corresponding local point, so the
+    // host can rotate/swing freely around that point.
+    for (const { bearingSpec: spec, hostSpec: host } of pivots) {
       const hostBody = this.byId.get(host.id);
-      if (!hostBody || hostBody.isStatic) continue;
+      if (!hostBody) continue;
       const cos = Math.cos(-host.rotation * RAD);
       const sin = Math.sin(-host.rotation * RAD);
       const dx = spec.x - host.x, dy = spec.y - host.y;
@@ -71,7 +93,7 @@ export class PhysicsSim {
         pointB: { x: localX, y: localY },
         length: 0,
         stiffness: 1,
-        damping: 0.1,
+        damping: 0,
       });
       Composite.add(world, constraint);
     }
@@ -88,11 +110,11 @@ export class PhysicsSim {
     return best;
   }
 
-  _createBody(spec) {
+  _createBody(spec, forceDynamic = false) {
     const mat = materialOf(spec.material);
     const isFluid = !!mat.isFluid;
     const common = {
-      isStatic: isFluid ? true : !!spec.fixed,
+      isStatic: isFluid ? true : (forceDynamic ? false : !!spec.fixed),
       isSensor: isFluid,
       angle: (spec.rotation || 0) * RAD,
       friction: mat.friction,
@@ -111,6 +133,7 @@ export class PhysicsSim {
         body = Bodies.circle(spec.x, spec.y, spec.radius, common);
         break;
       case "ballBearing":
+      case "peg":
         body = Bodies.circle(spec.x, spec.y, spec.radius, { ...common, isStatic: true, isSensor: false });
         break;
       case "board":
@@ -120,12 +143,11 @@ export class PhysicsSim {
         body = Bodies.rectangle(spec.x, spec.y, spec.width, spec.height, { ...common, isStatic: true, isSensor: true });
         break;
       case "triangle": {
-        const w = spec.width, h = spec.height;
-        const verts = [{ x: -w / 2, y: h / 2 }, { x: w / 2, y: h / 2 }, { x: w / 2, y: -h / 2 }];
-        body = Bodies.fromVertices(spec.x, spec.y, [verts], common, true);
+        body = Bodies.fromVertices(spec.x, spec.y, [equilateralPoints(spec.size)], common, true);
         break;
       }
       case "cannon":
+      case "fan":
         body = Bodies.rectangle(spec.x, spec.y, spec.width, spec.height, { ...common, isStatic: true });
         break;
       default:
@@ -164,7 +186,32 @@ export class PhysicsSim {
     // not from collision events: Matter integrates position/consumes forces
     // before collision events fire each step, so a force added later is
     // effectively dropped rather than lagged. beforeUpdate runs first.
-    Events.on(this.engine, "beforeUpdate", () => this._applyBuoyancy());
+    Events.on(this.engine, "beforeUpdate", () => {
+      this._applyBuoyancy();
+      this._applyFans();
+    });
+  }
+
+  _applyFans() {
+    if (!this.fanMeta.size) return;
+    const bodies = Composite.allBodies(this.engine.world);
+    for (const { body: fan, spec } of this.fanMeta.values()) {
+      const angle = fan.angle;
+      const dir = { x: Math.cos(angle), y: Math.sin(angle) };
+      const cos = Math.cos(-angle), sin = Math.sin(-angle);
+      for (const body of bodies) {
+        if (body === fan || body.isStatic || body.isSensor) continue;
+        const dx = body.position.x - fan.position.x;
+        const dy = body.position.y - fan.position.y;
+        const lx = dx * cos - dy * sin;
+        const ly = dx * sin + dy * cos;
+        const reach = spec.width / 2 + spec.range;
+        if (lx < spec.width / 2 || lx > reach || Math.abs(ly) > spec.height / 2) continue;
+        const falloff = 1 - (lx - spec.width / 2) / spec.range;
+        const mag = spec.power * FAN_FORCE_SCALE * falloff * body.mass;
+        Body.applyForce(body, body.position, { x: dir.x * mag, y: dir.y * mag });
+      }
+    }
   }
 
   _applyBuoyancy() {
@@ -445,10 +492,10 @@ export class PhysicsSim {
 }
 
 function areaOf(spec) {
-  if (spec.type === "ball" || spec.type === "bomb" || spec.type === "ballBearing") {
+  if (spec.type === "ball" || spec.type === "bomb" || spec.type === "ballBearing" || spec.type === "peg") {
     return Math.PI * spec.radius * spec.radius;
   }
-  if (spec.type === "triangle") return 0.5 * spec.width * spec.height;
+  if (spec.type === "triangle") return (Math.sqrt(3) / 4) * spec.size * spec.size;
   return (spec.width || 40) * (spec.height || 40);
 }
 
@@ -461,8 +508,7 @@ function pointInShape(px, py, spec) {
     return Math.abs(lx) <= spec.width / 2 && Math.abs(ly) <= spec.height / 2;
   }
   if (spec.type === "triangle") {
-    const w = spec.width, h = spec.height;
-    const p0 = { x: -w / 2, y: h / 2 }, p1 = { x: w / 2, y: h / 2 }, p2 = { x: w / 2, y: -h / 2 };
+    const [p0, p1, p2] = equilateralPoints(spec.size);
     return sameSide(lx, ly, p0, p1, p2) && sameSide(lx, ly, p1, p2, p0) && sameSide(lx, ly, p2, p0, p1);
   }
   return false;

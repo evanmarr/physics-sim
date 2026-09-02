@@ -1,5 +1,6 @@
 import { materialOf } from "./materials.js";
 import { WORLD, GRID_SIZE, snap } from "./world.js";
+import { cannonCatchRadius } from "./objectTypes.js";
 
 const RAD = Math.PI / 180;
 
@@ -120,7 +121,7 @@ export class Renderer {
       .attr("transform", (d) => `translate(${d.x},${d.y}) rotate(${d.rotation || 0})`)
       .style("cursor", editable ? "grab" : "default");
 
-    merged.each((d, i, nodes) => updateShape(d3.select(nodes[i]), d));
+    merged.each((d, i, nodes) => updateShape(d3.select(nodes[i]), d, editable));
 
     // rotate handle for editable, rotatable, selected, non-transient items
     this.objectLayer.selectAll(".rotate-handle").remove();
@@ -185,7 +186,7 @@ const ROTATABLE = new Set(["board", "triangle", "cannon", "button"]);
 
 function handleDistance(d) {
   if (d.type === "board" || d.type === "button") return d.height / 2 + 26;
-  if (d.type === "triangle") return d.height / 2 + 26;
+  if (d.type === "triangle") return (d.size * Math.sqrt(3)) / 3 + 26;
   if (d.type === "cannon") return d.height / 2 + 26;
   return 40;
 }
@@ -201,6 +202,9 @@ function buildShape(g, d) {
       g.append("circle").attr("class", "shape").attr("r", d.radius);
       g.append("circle").attr("r", 2.5).attr("fill", "#1b1e24");
       break;
+    case "peg":
+      g.append("circle").attr("class", "shape").attr("r", d.radius);
+      break;
     case "board":
       g.append("rect").attr("class", "shape");
       break;
@@ -211,14 +215,27 @@ function buildShape(g, d) {
       g.append("polygon").attr("class", "shape");
       break;
     case "cannon": {
+      g.append("circle").attr("class", "catch-zone")
+        .attr("fill", "none").attr("stroke", "var(--accent-2)")
+        .attr("stroke-width", 1.5).attr("stroke-dasharray", "5 4").attr("pointer-events", "none");
       g.append("rect").attr("class", "shape barrel");
-      g.append("circle").attr("class", "mouth").attr("r", 6).attr("fill", "#222");
+      g.append("polygon").attr("class", "muzzle-arrow").attr("fill", "#1b1e24");
+      break;
+    }
+    case "fan": {
+      g.append("rect").attr("class", "wind-zone")
+        .attr("fill", "var(--accent)").attr("fill-opacity", 0.08)
+        .attr("stroke", "var(--accent)").attr("stroke-width", 1).attr("stroke-dasharray", "4 4")
+        .attr("pointer-events", "none");
+      g.append("rect").attr("class", "shape body");
+      g.append("text").attr("class", "icon-label").text("🌀").attr("text-anchor", "middle")
+        .attr("dominant-baseline", "central");
       break;
     }
   }
 }
 
-function updateShape(g, d) {
+function updateShape(g, d, editable) {
   const mat = materialOf(d.material);
   const fillOpacity = mat.fillOpacity ?? 1;
   const isFluid = !!mat.isFluid;
@@ -234,6 +251,7 @@ function updateShape(g, d) {
     case "ball":
     case "bomb":
     case "ballBearing":
+    case "peg":
       g.select(".shape").attr("r", d.radius);
       g.select("text.icon-label").attr("font-size", d.radius);
       break;
@@ -244,8 +262,7 @@ function updateShape(g, d) {
         .attr("width", d.width).attr("height", d.height);
       break;
     case "triangle": {
-      const w = d.width, h = d.height;
-      const pts = `${-w / 2},${h / 2} ${w / 2},${h / 2} ${w / 2},${-h / 2}`;
+      const pts = equilateralPoints(d.size).map((p) => `${p.x},${p.y}`).join(" ");
       g.select(".shape").attr("points", pts);
       break;
     }
@@ -254,11 +271,37 @@ function updateShape(g, d) {
         .attr("x", -d.width / 2).attr("y", -d.height / 2)
         .attr("width", d.width).attr("height", d.height)
         .attr("fill", mat.color).attr("stroke", mat.strokeColor).attr("stroke-width", 2);
-      g.select(".mouth").attr("cx", d.width / 2).attr("cy", 0);
+      const mx = d.width / 2;
+      g.select(".muzzle-arrow").attr("points", `${mx},-10 ${mx + 16},0 ${mx},10`);
+      g.select(".catch-zone")
+        .attr("r", cannonCatchRadius(d))
+        .style("display", editable && !d.transient ? null : "none");
+      break;
+    }
+    case "fan": {
+      g.select(".body")
+        .attr("x", -d.width / 2).attr("y", -d.height / 2)
+        .attr("width", d.width).attr("height", d.height)
+        .attr("fill", mat.color).attr("stroke", mat.strokeColor).attr("stroke-width", 2);
+      g.select("text.icon-label").attr("font-size", Math.min(d.width, d.height) * 0.6);
+      g.select(".wind-zone")
+        .attr("x", d.width / 2).attr("y", -d.height / 2)
+        .attr("width", d.range ?? 400).attr("height", d.height)
+        .style("display", editable && !d.transient ? null : "none");
       break;
     }
   }
 
   // fixed objects get a subtle hatch stroke to distinguish from dynamic
   g.classed("is-fixed", !!d.fixed);
+}
+
+// Equilateral triangle (all sides = size), centroid at the origin, apex up.
+export function equilateralPoints(size) {
+  const h = (size * Math.sqrt(3)) / 2;
+  return [
+    { x: 0, y: (-2 * h) / 3 },
+    { x: size / 2, y: h / 3 },
+    { x: -size / 2, y: h / 3 },
+  ];
 }

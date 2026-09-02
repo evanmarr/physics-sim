@@ -39,8 +39,8 @@ function boot() {
   const svg = document.getElementById("canvas");
   const renderer = new Renderer(svg, {
     onSelect: (id) => { if (!state.playing) { state.selectedId = id; renderAll(); renderPanelUI(); } },
-    onMove: (id, x, y) => { patchObject(id, { x, y }); },
-    onRotate: (id, deg) => { patchObject(id, { rotation: deg }); },
+    onMove: (id, x, y) => { patchObject(id, { x, y }); renderPanelUI(); },
+    onRotate: (id, deg) => { patchObject(id, { rotation: deg }); renderPanelUI(); },
   });
   window._renderer = renderer;
 
@@ -74,7 +74,6 @@ function patchObject(id, patch) {
   if (!spec) return;
   Object.assign(spec, patch);
   renderAll();
-  renderPanelUI();
   scheduleSave();
 }
 
@@ -93,7 +92,7 @@ function renderPaletteUI() {
 function renderPanelUI() {
   const spec = state.objects.find((o) => o.id === state.selectedId) || null;
   renderPanel(document.getElementById("prop-panel"), spec, state, {
-    onChange: (id, patch) => { patchObject(id, patch); renderPanelUI(); },
+    onChange: (id, patch) => { patchObject(id, patch); },
     onDelete: (id) => { deleteObject(id); },
   });
 }
@@ -141,7 +140,10 @@ function togglePlay(renderer) {
     const clones = state.objects.map(cloneSpec);
     tracker = state.activeChallengeId ? new ChallengeTracker(findChallenge(state.activeChallengeId)) : null;
     sim = new PhysicsSim(clones, state.gravity, {
-      onFrame: (items) => renderer.render(items, { editable: false }),
+      onFrame: (items) => {
+        renderer.render(items, { editable: false });
+        checkChallengeFrame(items);
+      },
       onEvent: (event) => handleSimEvent(event),
     });
     sim.start();
@@ -162,17 +164,22 @@ function togglePlay(renderer) {
 
 function handleSimEvent(event) {
   if (!tracker) return;
-  const justCompleted = tracker.onEvent(event);
-  if (justCompleted) {
-    const challenge = tracker.challenge;
-    if (!state.completedChallenges.has(challenge.id)) {
-      state.completedChallenges.add(challenge.id);
-      state.coins += challenge.reward;
-      updateCoinUI();
-      scheduleSave();
-    }
-    showToast(`Challenge complete: ${challenge.name} (+${challenge.reward})`);
+  if (tracker.onEvent(event)) awardChallenge(tracker.challenge);
+}
+
+function checkChallengeFrame(items) {
+  if (!tracker) return;
+  if (tracker.onFrame(items)) awardChallenge(tracker.challenge);
+}
+
+function awardChallenge(challenge) {
+  if (!state.completedChallenges.has(challenge.id)) {
+    state.completedChallenges.add(challenge.id);
+    state.coins += challenge.reward;
+    updateCoinUI();
+    scheduleSave();
   }
+  showToast(`Challenge complete: ${challenge.name} (+${challenge.reward})`);
 }
 
 function updateCoinUI() {

@@ -5,6 +5,12 @@ export function makeId(type) {
   return `${type}_${nextId++}_${Date.now().toString(36)}`;
 }
 
+// A ball that falls within this radius of a cannon's center gets caught and
+// re-fired. Shared by the physics build and the edit-mode preview circle.
+export function cannonCatchRadius(spec) {
+  return Math.max(spec.width, spec.height) * 0.55;
+}
+
 // Each definition describes: palette label/icon, default spec, and which
 // property-panel fields apply to it. Specs are the *authored blueprint* —
 // physics bodies are (re)built from specs each time Play starts.
@@ -27,8 +33,10 @@ export const OBJECT_DEFS = {
     label: "Triangle",
     icon: "▲",
     category: "core",
-    defaultSpec: () => ({ type: "triangle", x: 0, y: 0, rotation: 0, width: 120, height: 100, material: "wood", fixed: true }),
-    fields: ["width", "height", "material", "fixed"],
+    // Always equilateral (all three sides equal length `size`) — simpler to
+    // reason about than independent width/height for a ramp/wedge shape.
+    defaultSpec: () => ({ type: "triangle", x: 0, y: 0, rotation: 0, size: 130, material: "wood", fixed: true }),
+    fields: ["size", "material", "fixed"],
   },
   ballBearing: {
     label: "Ball Bearing",
@@ -36,6 +44,25 @@ export const OBJECT_DEFS = {
     category: "core",
     defaultSpec: () => ({ type: "ballBearing", x: 0, y: 0, rotation: 0, radius: 9, material: "metal", fixed: true }),
     fields: [],
+  },
+  peg: {
+    label: "Peg",
+    icon: "◉",
+    category: "core",
+    // A small fixed bouncer/obstacle — unlike a Ball Bearing it never pivots
+    // anything, it's just something for balls to ricochet off of.
+    defaultSpec: () => ({ type: "peg", x: 0, y: 0, rotation: 0, radius: 14, material: "rubber" }),
+    fields: ["radius", "material"],
+  },
+  fan: {
+    label: "Fan",
+    icon: "🌀",
+    category: "core",
+    // Blows a constant wind force out of its front face (local +x, same
+    // convention as the cannon muzzle) over `range` world units, tapering
+    // to zero at the edge of that range.
+    defaultSpec: () => ({ type: "fan", x: 0, y: 0, rotation: -90, width: 50, height: 60, material: "metal", power: 18, range: 400 }),
+    fields: ["width", "height", "power", "range", "material"],
   },
   cannon: {
     label: "Cannon",

@@ -20,6 +20,14 @@ export function renderPanel(container, spec, state, handlers) {
   title.innerHTML = `<span>${def.label}</span>`;
   container.appendChild(title);
 
+  if (spec.type === "cannon") {
+    container.appendChild(
+      helpText(
+        "A ball that falls into the dashed circle (shown while editing) is caught and re-fired at the Fire Angle/Power. Rest Angle is how it sits before catching one."
+      )
+    );
+  }
+
   const set = (patch) => handlers.onChange(spec.id, patch);
 
   // position
@@ -37,6 +45,9 @@ export function renderPanel(container, spec, state, handlers) {
   if (fields.includes("radius")) {
     container.appendChild(sliderField("Radius", spec.radius, 6, 90, 1, (v) => set({ radius: v })));
   }
+  if (fields.includes("size")) {
+    container.appendChild(sliderField("Size", spec.size, 30, 400, 5, (v) => set({ size: v })));
+  }
   if (fields.includes("width") || fields.includes("height")) {
     container.appendChild(fieldRow([
       fields.includes("width") ? sliderField("Width", spec.width, 10, 600, 5, (v) => set({ width: v })) : null,
@@ -50,16 +61,20 @@ export function renderPanel(container, spec, state, handlers) {
     container.appendChild(checkboxField("Fixed (ignores gravity/forces)", spec.fixed, (v) => set({ fixed: v })));
   }
   if (fields.includes("startRotation")) {
-    container.appendChild(sliderField("Start Angle°", spec.startRotation, -180, 180, 1, (v) => set({ startRotation: v })));
+    container.appendChild(sliderField("Rest Angle°", spec.startRotation, -180, 180, 1, (v) => set({ startRotation: v })));
   }
   if (fields.includes("launchRotation")) {
-    container.appendChild(sliderField("Launch Angle°", spec.launchRotation, -180, 180, 1, (v) => set({ launchRotation: v })));
+    container.appendChild(sliderField("Fire Angle°", spec.launchRotation, -180, 180, 1, (v) => set({ launchRotation: v })));
   }
   if (fields.includes("power")) {
-    container.appendChild(sliderField(spec.type === "bomb" ? "Blast Power" : "Launch Power", spec.power, 4, 50, 1, (v) => set({ power: v })));
+    const powerLabel = { bomb: "Blast Power", fan: "Wind Force" }[spec.type] || "Launch Power";
+    container.appendChild(sliderField(powerLabel, spec.power, 4, 50, 1, (v) => set({ power: v })));
   }
   if (fields.includes("radiusOfEffect")) {
     container.appendChild(sliderField("Blast Radius", spec.radiusOfEffect, 60, 600, 10, (v) => set({ radiusOfEffect: v })));
+  }
+  if (fields.includes("range")) {
+    container.appendChild(sliderField("Range", spec.range, 80, 1000, 10, (v) => set({ range: v })));
   }
   if (fields.includes("targetId")) {
     container.appendChild(targetField(spec, state, (v) => set({ targetId: v })));
@@ -70,6 +85,13 @@ export function renderPanel(container, spec, state, handlers) {
   del.textContent = "Delete";
   del.addEventListener("click", () => handlers.onDelete(spec.id));
   container.appendChild(del);
+}
+
+function helpText(text) {
+  const p = document.createElement("div");
+  p.className = "panel-help";
+  p.textContent = text;
+  return p;
 }
 
 function fieldRow(fields) {
@@ -142,12 +164,22 @@ function materialField(current, onChange) {
   const row = document.createElement("div");
   row.className = "material-swatches";
   MATERIAL_LIST.forEach((m) => {
+    const item = document.createElement("div");
+    item.className = "material-option" + (m === current ? " selected" : "");
+    item.title = materialOf(m).label;
+    item.addEventListener("click", () => onChange(m));
+
     const sw = document.createElement("div");
-    sw.className = "material-swatch" + (m === current ? " selected" : "");
+    sw.className = "material-swatch";
     sw.style.background = materialOf(m).color;
-    sw.title = materialOf(m).label;
-    sw.addEventListener("click", () => onChange(m));
-    row.appendChild(sw);
+
+    const name = document.createElement("span");
+    name.className = "material-name";
+    name.textContent = materialOf(m).label;
+
+    item.appendChild(sw);
+    item.appendChild(name);
+    row.appendChild(item);
   });
   wrap.appendChild(row);
   return wrap;
