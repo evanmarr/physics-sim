@@ -7,6 +7,7 @@ import { OBJECT_DEFS, createSpec, cloneSpec, makeId } from "./objectTypes.js";
 import { PhysicsSim } from "./physics.js";
 import { loadState, saveState, clearSave } from "./storage.js";
 import { snap, WORLD } from "./world.js";
+import { ChemistryMode } from "./chemistry.js";
 
 const state = {
   objects: [],
@@ -22,6 +23,7 @@ const state = {
 let sim = null;
 let tracker = null;
 let clipboard = null; // in-app copy/paste buffer — a spec, not the OS clipboard
+let chemistryMode = null;
 
 function starterScene() {
   return [
@@ -57,6 +59,7 @@ function boot() {
   wireChallenges();
   wireCanvasDrop(renderer);
   wireKeyboard(renderer);
+  wireModeTabs();
 
   window.addEventListener("beforeunload", () => saveState(state));
 }
@@ -261,8 +264,58 @@ function wireChallenges() {
   document.getElementById("challenges-close").addEventListener("click", () => modal.classList.add("hidden"));
 }
 
+function wireModeTabs() {
+  const physicsBtn = document.getElementById("mode-physics-btn");
+  const chemistryBtn = document.getElementById("mode-chemistry-btn");
+  const workspace = document.getElementById("workspace");
+  const chemRoot = document.getElementById("chemistry-root");
+  const physicsOnlyControls = [
+    document.getElementById("run-controls"),
+    document.getElementById("gravity-controls"),
+    document.getElementById("shop-btn"),
+    document.getElementById("challenges-btn"),
+    document.getElementById("file-controls"),
+  ];
+
+  const chemEconomy = {
+    state,
+    award(amount, challengeId) {
+      const key = "chem_" + challengeId;
+      if (state.completedChallenges.has(key)) return;
+      state.completedChallenges.add(key);
+      state.coins += amount;
+      updateCoinUI();
+      scheduleSave();
+      showToast(`Challenge complete: +${amount} coins`);
+    },
+  };
+
+  function setMode(mode) {
+    if (state.mode === mode) return;
+    if (state.mode === "physics" && state.playing) togglePlay(window._renderer);
+    state.mode = mode;
+    physicsBtn.classList.toggle("active", mode === "physics");
+    chemistryBtn.classList.toggle("active", mode === "chemistry");
+    workspace.classList.toggle("hidden", mode !== "physics");
+    chemRoot.classList.toggle("hidden", mode !== "chemistry");
+    physicsOnlyControls.forEach((el) => el && (el.style.display = mode === "physics" ? "" : "none"));
+
+    if (mode === "chemistry") {
+      if (!chemistryMode) chemistryMode = new ChemistryMode(chemRoot, chemEconomy);
+      chemistryMode.mount();
+    } else {
+      chemistryMode?.unmount();
+    }
+  }
+
+  physicsBtn.addEventListener("click", () => setMode("physics"));
+  chemistryBtn.addEventListener("click", () => setMode("chemistry"));
+  state.mode = "physics";
+}
+
 function wireKeyboard(renderer) {
   window.addEventListener("keydown", (e) => {
+    if (state.mode !== "physics") return;
     const tag = document.activeElement?.tagName;
     if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return;
 

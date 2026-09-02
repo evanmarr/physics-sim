@@ -10,6 +10,10 @@
 
 <header id="topbar">
   <div class="brand">Contraption</div>
+  <div id="mode-tabs">
+    <button id="mode-physics-btn" class="mode-tab active">⚙ Physics</button>
+    <button id="mode-chemistry-btn" class="mode-tab">⚗ Chemistry</button>
+  </div>
   <div id="run-controls">
     <button id="play-btn" title="Space">▶ Play</button>
     <span class="hint">space</span>
@@ -41,6 +45,8 @@
   </aside>
 </div>
 
+<div id="chemistry-root" class="hidden"></div>
+
 <div id="shop-modal" class="modal hidden">
   <div class="modal-box">
     <h2>Shop</h2>
@@ -61,6 +67,8 @@
 
 <script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/matter-js@0.19.0/build/matter.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
 <script type="module" src="src/main.js"></script>
 </body>
 </html>
