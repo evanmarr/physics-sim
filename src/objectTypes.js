@@ -75,6 +75,16 @@ export const OBJECT_DEFS = {
     }),
     fields: ["startRotation", "launchRotation", "power"],
   },
+  springPad: {
+    label: "Spring Pad",
+    icon: "⏫",
+    category: "core",
+    // A static platform that gives anything touching it a one-shot launch
+    // along its own "up" (away from its face) at Power, on top of whatever
+    // its material's normal restitution already does.
+    defaultSpec: () => ({ type: "springPad", x: 0, y: 0, rotation: 0, width: 100, height: 20, material: "rubber", power: 30 }),
+    fields: ["width", "height", "power", "material"],
+  },
   bomb: {
     label: "Bomb",
     icon: "💣",
@@ -90,6 +100,16 @@ export const OBJECT_DEFS = {
     price: 25,
     defaultSpec: () => ({ type: "button", x: 0, y: 0, rotation: 0, width: 40, height: 14, material: "wood", fixed: true, targetId: null }),
     fields: ["targetId"],
+  },
+  magnet: {
+    label: "Magnet",
+    icon: "🧲",
+    category: "shop",
+    price: 45,
+    // Continuous radial force on metal objects within range: positive power
+    // attracts, negative repels.
+    defaultSpec: () => ({ type: "magnet", x: 0, y: 0, rotation: 0, radius: 20, material: "metal", power: 20, range: 350 }),
+    fields: ["power", "range"],
   },
 };
 

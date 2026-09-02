@@ -1,7 +1,8 @@
 import { MATERIAL_LIST, materialOf } from "./materials.js";
 import { OBJECT_DEFS } from "./objectTypes.js";
+import { physicsMath } from "./physicsEdu.js";
 
-const ROTATABLE = new Set(["board", "triangle", "cannon", "button"]);
+const ROTATABLE = new Set(["board", "triangle", "cannon", "button", "springPad", "fan"]);
 
 export function renderPanel(container, spec, state, handlers) {
   container.innerHTML = "";
@@ -67,8 +68,12 @@ export function renderPanel(container, spec, state, handlers) {
     container.appendChild(sliderField("Fire Angle°", spec.launchRotation, -180, 180, 1, (v) => set({ launchRotation: v })));
   }
   if (fields.includes("power")) {
-    const powerLabel = { bomb: "Blast Power", fan: "Wind Force" }[spec.type] || "Launch Power";
-    container.appendChild(sliderField(powerLabel, spec.power, 4, 50, 1, (v) => set({ power: v })));
+    const powerLabel = { bomb: "Blast Power", fan: "Wind Force", magnet: "Magnet Force" }[spec.type] || "Launch Power";
+    const [min, max] = spec.type === "magnet" ? [-50, 50] : [4, 50];
+    container.appendChild(sliderField(powerLabel, spec.power, min, max, 1, (v) => set({ power: v })));
+    if (spec.type === "magnet") {
+      container.appendChild(helpText(spec.power >= 0 ? "Positive force attracts metal objects." : "Negative force repels metal objects."));
+    }
   }
   if (fields.includes("radiusOfEffect")) {
     container.appendChild(sliderField("Blast Radius", spec.radiusOfEffect, 60, 600, 10, (v) => set({ radiusOfEffect: v })));
@@ -80,11 +85,40 @@ export function renderPanel(container, spec, state, handlers) {
     container.appendChild(targetField(spec, state, (v) => set({ targetId: v })));
   }
 
+  const mathLines = physicsMath(spec);
+  if (mathLines && mathLines.length) {
+    container.appendChild(mathSection(mathLines));
+  }
+
   const del = document.createElement("button");
   del.className = "panel-delete danger";
   del.textContent = "Delete";
   del.addEventListener("click", () => handlers.onDelete(spec.id));
   container.appendChild(del);
+}
+
+function mathSection(lines) {
+  const details = document.createElement("details");
+  details.className = "math-section";
+  const summary = document.createElement("summary");
+  summary.textContent = "Show the physics";
+  details.appendChild(summary);
+
+  lines.forEach(({ formula, note }) => {
+    const row = document.createElement("div");
+    row.className = "math-row";
+    const f = document.createElement("div");
+    f.className = "math-formula";
+    f.textContent = formula;
+    const n = document.createElement("div");
+    n.className = "math-note";
+    n.textContent = note;
+    row.appendChild(f);
+    row.appendChild(n);
+    details.appendChild(row);
+  });
+
+  return details;
 }
 
 function helpText(text) {

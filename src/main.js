@@ -3,7 +3,7 @@ import { renderPalette } from "./palette.js";
 import { renderPanel } from "./panel.js";
 import { renderShop, tryPurchase } from "./economy.js";
 import { CHALLENGES, findChallenge, ChallengeTracker } from "./challenges.js";
-import { OBJECT_DEFS, createSpec, cloneSpec } from "./objectTypes.js";
+import { OBJECT_DEFS, createSpec, cloneSpec, makeId } from "./objectTypes.js";
 import { PhysicsSim } from "./physics.js";
 import { loadState, saveState, clearSave } from "./storage.js";
 import { snap, WORLD } from "./world.js";
@@ -21,6 +21,7 @@ const state = {
 
 let sim = null;
 let tracker = null;
+let clipboard = null; // in-app copy/paste buffer — a spec, not the OS clipboard
 
 function starterScene() {
   return [
@@ -163,6 +164,7 @@ function togglePlay(renderer) {
 }
 
 function handleSimEvent(event) {
+  if (event.type === "shatter") window._renderer.burst(event.x, event.y, event.radius);
   if (!tracker) return;
   if (tracker.onEvent(event)) awardChallenge(tracker.challenge);
 }
@@ -228,10 +230,14 @@ function wireChallenges() {
       const name = document.createElement("div");
       name.className = "name";
       name.textContent = c.name + (state.completedChallenges.has(c.id) ? " ✓" : "");
+      const concept = document.createElement("div");
+      concept.className = "concept-tag";
+      concept.textContent = c.concept;
       const desc = document.createElement("div");
       desc.className = "desc";
       desc.textContent = `${c.description} Reward: ${c.reward} coins.`;
       info.appendChild(name);
+      info.appendChild(concept);
       info.appendChild(desc);
       const btn = document.createElement("button");
       btn.className = "primary";
@@ -260,6 +266,8 @@ function wireKeyboard(renderer) {
     const tag = document.activeElement?.tagName;
     if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return;
 
+    const cmd = e.metaKey || e.ctrlKey;
+
     if (e.code === "Space") {
       e.preventDefault();
       togglePlay(renderer);
@@ -270,8 +278,37 @@ function wireKeyboard(renderer) {
       state.selectedId = null;
       renderAll();
       renderPanelUI();
+    } else if (cmd && e.code === "KeyC" && state.selectedId && !state.playing) {
+      e.preventDefault();
+      copySelected();
+    } else if (cmd && e.code === "KeyV" && clipboard && !state.playing) {
+      e.preventDefault();
+      pasteClipboard();
     }
   });
+}
+
+function copySelected() {
+  const spec = state.objects.find((o) => o.id === state.selectedId);
+  if (!spec) return;
+  clipboard = cloneSpec(spec);
+  showToast("Copied");
+}
+
+function pasteClipboard() {
+  if (!clipboard) return;
+  const spec = cloneSpec(clipboard);
+  spec.id = makeId(spec.type);
+  spec.x = snap(spec.x + 40);
+  spec.y = snap(spec.y + 40);
+  if (spec.targetId) spec.targetId = null; // don't silently share a trigger link with the original
+  state.objects.push(spec);
+  state.selectedId = spec.id;
+  renderAll();
+  renderPanelUI();
+  scheduleSave();
+  // paste again from the same spot, so repeated ⌘V lays out a diagonal trail
+  clipboard = cloneSpec(spec);
 }
 
 function beginPaletteDrag(type, pointerEvent) {

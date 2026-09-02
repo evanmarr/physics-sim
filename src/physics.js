@@ -13,8 +13,12 @@ const BOMB_FORCE_SCALE = 0.02;
 // but a fan applies its force every single tick a body stays in range, so it
 // compounds — this needs to be roughly gravity-scale, not impulse-scale.
 const FAN_FORCE_SCALE = 0.00025;
+const SHARD_LIFESPAN_MS = 3200;
+const SHARD_FADE_MS = 900; // fade out over the last stretch of life, not a hard pop
 const CANNON_LAUNCH_SCALE = 1.0;
 const BUTTON_COOLDOWN_MS = 700;
+const SPRING_COOLDOWN_MS = 350;
+const PIVOT_ANGULAR_DAMPING = 0.25;
 
 export class PhysicsSim {
   constructor(specs, gravity, callbacks) {
@@ -31,6 +35,9 @@ export class PhysicsSim {
     this.cannonMeta = new Map(); // cannonId -> {barrel, catcher, spec}
     this.buttonMeta = new Map();
     this.fanMeta = new Map(); // fanId -> {body, spec}
+    this.magnetMeta = new Map(); // magnetId -> {body, spec}
+    this.springMeta = new Map(); // springPadId -> {spec, cooldownUntil}
+    this.pivotHostBodies = []; // bodies pivoted on a ball bearing, for settling damping
     this._build();
     this._wireEvents();
   }
@@ -74,6 +81,12 @@ export class PhysicsSim {
       if (spec.type === "fan") {
         this.fanMeta.set(spec.id, { body, spec });
       }
+      if (spec.type === "magnet") {
+        this.magnetMeta.set(spec.id, { body, spec });
+      }
+      if (spec.type === "springPad") {
+        this.springMeta.set(spec.id, { spec, cooldownUntil: 0 });
+      }
     }
 
     // ball bearing pivots: attach a frictionless point constraint from the
@@ -82,6 +95,7 @@ export class PhysicsSim {
     for (const { bearingSpec: spec, hostSpec: host } of pivots) {
       const hostBody = this.byId.get(host.id);
       if (!hostBody) continue;
+      this.pivotHostBodies.push(hostBody);
       const cos = Math.cos(-host.rotation * RAD);
       const sin = Math.sin(-host.rotation * RAD);
       const dx = spec.x - host.x, dy = spec.y - host.y;
@@ -134,6 +148,7 @@ export class PhysicsSim {
         break;
       case "ballBearing":
       case "peg":
+      case "magnet":
         body = Bodies.circle(spec.x, spec.y, spec.radius, { ...common, isStatic: true, isSensor: false });
         break;
       case "board":
@@ -141,6 +156,9 @@ export class PhysicsSim {
         break;
       case "button":
         body = Bodies.rectangle(spec.x, spec.y, spec.width, spec.height, { ...common, isStatic: true, isSensor: true });
+        break;
+      case "springPad":
+        body = Bodies.rectangle(spec.x, spec.y, spec.width, spec.height, { ...common, isStatic: true });
         break;
       case "triangle": {
         body = Bodies.fromVertices(spec.x, spec.y, [equilateralPoints(spec.size)], common, true);
@@ -189,7 +207,21 @@ export class PhysicsSim {
     Events.on(this.engine, "beforeUpdate", () => {
       this._applyBuoyancy();
       this._applyFans();
+      this._applyMagnets();
+      this._dampPivots();
     });
+  }
+
+  // Matter's constraint `damping` barely touches angular swing on a
+  // zero-length pin joint — it only damps relative velocity along the
+  // constraint's own axis, not rotation about it. Without this, a pivoted
+  // board just keeps windmilling on its own low frictionAir. This settles
+  // it back to hanging still when nothing's actively pushing on it, while
+  // still swinging freely in response to an active push.
+  _dampPivots() {
+    for (const body of this.pivotHostBodies) {
+      Body.setAngularVelocity(body, body.angularVelocity * (1 - PIVOT_ANGULAR_DAMPING));
+    }
   }
 
   _applyFans() {
@@ -208,6 +240,24 @@ export class PhysicsSim {
         const reach = spec.width / 2 + spec.range;
         if (lx < spec.width / 2 || lx > reach || Math.abs(ly) > spec.height / 2) continue;
         const falloff = 1 - (lx - spec.width / 2) / spec.range;
+        const mag = spec.power * FAN_FORCE_SCALE * falloff * body.mass;
+        Body.applyForce(body, body.position, { x: dir.x * mag, y: dir.y * mag });
+      }
+    }
+  }
+
+  _applyMagnets() {
+    if (!this.magnetMeta.size) return;
+    const bodies = Composite.allBodies(this.engine.world);
+    for (const { body: magnet, spec } of this.magnetMeta.values()) {
+      for (const body of bodies) {
+        if (body === magnet || body.isStatic || body.isSensor) continue;
+        if (body.plugin?.material !== "metal") continue;
+        const delta = Vector.sub(magnet.position, body.position);
+        const dist = Vector.magnitude(delta);
+        if (dist > spec.range || dist < 0.01) continue;
+        const falloff = 1 - dist / spec.range;
+        const dir = Vector.normalise(delta);
         const mag = spec.power * FAN_FORCE_SCALE * falloff * body.mass;
         Body.applyForce(body, body.position, { x: dir.x * mag, y: dir.y * mag });
       }
@@ -240,11 +290,28 @@ export class PhysicsSim {
     this._checkButton(b, a, phase);
     this._checkBomb(a, b, phase);
     this._checkBomb(b, a, phase);
+    this._checkSpring(a, b, phase);
+    this._checkSpring(b, a, phase);
+  }
+
+  _checkSpring(body, other, phase) {
+    if (phase !== "start") return;
+    if (!body.plugin || body.plugin.render?.type !== "springPad") return;
+    if (other.isStatic || other.isSensor) return;
+    const meta = this.springMeta.get(body.plugin.gameId);
+    if (!meta) return;
+    const now = performance.now();
+    if (now < meta.cooldownUntil) return;
+    meta.cooldownUntil = now + SPRING_COOLDOWN_MS;
+    const dir = { x: Math.sin(body.angle), y: -Math.cos(body.angle) }; // local "up" off the pad's face
+    Body.setVelocity(other, { x: dir.x * meta.spec.power, y: dir.y * meta.spec.power });
+    this.callbacks.onEvent?.({ type: "springLaunch", padId: body.plugin.gameId, ballGameId: other.plugin?.gameId });
   }
 
   _checkGlass(body, other, phase) {
     if (phase !== "start") return;
     if (!body.plugin || body.plugin.material !== "glass" || body.plugin.shattered) return;
+    if (other.isSensor) return; // water, cannon catch zones, buttons — not a hard impact
     const mat = materialOf("glass");
     const rv = Vector.sub(body.velocity, other.velocity);
     const speed = Vector.magnitude(rv);
@@ -331,11 +398,12 @@ export class PhysicsSim {
     });
     Composite.remove(world, body);
 
-    const shardCount = 6;
+    const now = performance.now();
+    const shardCount = 12;
     for (let i = 0; i < shardCount; i++) {
-      const sx = cx + (Math.random() - 0.5) * w * 0.6;
-      const sy = cy + (Math.random() - 0.5) * h * 0.6;
-      const size = 6 + Math.random() * 10;
+      const sx = cx + (Math.random() - 0.5) * w * 0.7;
+      const sy = cy + (Math.random() - 0.5) * h * 0.7;
+      const size = 4 + Math.random() * 11;
       const shard = Bodies.polygon(sx, sy, 3, size, {
         friction: materialOf("glass").friction,
         restitution: materialOf("glass").restitution,
@@ -343,8 +411,12 @@ export class PhysicsSim {
         angle: Math.random() * Math.PI * 2,
       });
       const dir = Vector.normalise({ x: sx - cx || 0.01, y: sy - cy || 0.01 });
-      const speed = 4 + Math.random() * 5;
-      Body.setVelocity(shard, { x: dir.x * speed + body.velocity.x, y: dir.y * speed + body.velocity.y - 2 });
+      const speed = 5 + Math.random() * 9;
+      Body.setVelocity(shard, {
+        x: dir.x * speed + body.velocity.x * 0.5,
+        y: dir.y * speed + body.velocity.y * 0.5 - 2,
+      });
+      Body.setAngularVelocity(shard, (Math.random() - 0.5) * 0.6);
       shard.plugin = {
         gameId: makeId("shard"),
         material: "glass",
@@ -352,11 +424,24 @@ export class PhysicsSim {
         gameArea: size * size,
         shattered: true,
         transient: true,
+        spawnedAt: now,
+        lifespanMs: SHARD_LIFESPAN_MS,
         render: { type: "shard", material: "glass", radius: size, fixed: false },
       };
       Composite.add(world, shard);
     }
-    this.callbacks.onEvent?.({ type: "shatter", gameId: body.plugin.gameId });
+    this.callbacks.onEvent?.({ type: "shatter", gameId: body.plugin.gameId, x: cx, y: cy, radius: Math.max(w, h) / 2 });
+  }
+
+  _cullExpiredShards() {
+    const now = performance.now();
+    const world = this.engine.world;
+    for (const body of Composite.allBodies(world)) {
+      const p = body.plugin;
+      if (p?.spawnedAt && now - p.spawnedAt > p.lifespanMs) {
+        Composite.remove(world, body);
+      }
+    }
   }
 
   _doCannonFire(cannonId, ballBody) {
@@ -456,6 +541,7 @@ export class PhysicsSim {
       this.lastTime = time;
       Engine.update(this.engine, delta);
       this.processPending();
+      this._cullExpiredShards();
       this.callbacks.onFrame?.(this.collectRenderItems());
       this.rafId = requestAnimationFrame(loop);
     };
@@ -472,19 +558,29 @@ export class PhysicsSim {
 
   collectRenderItems() {
     const items = [];
+    const now = performance.now();
     for (const body of Composite.allBodies(this.engine.world)) {
       const r = body.plugin?.render;
       if (!r || r.hidden) continue;
+      let opacity = 1;
+      if (body.plugin.spawnedAt) {
+        const age = now - body.plugin.spawnedAt;
+        const remaining = body.plugin.lifespanMs - age;
+        opacity = clamp(remaining / SHARD_FADE_MS, 0, 1);
+      }
       items.push({
         id: body.plugin.gameId,
         type: r.type,
         x: body.position.x,
         y: body.position.y,
+        vx: body.velocity.x,
+        vy: body.velocity.y,
         rotation: body.angle * DEG,
         width: r.width, height: r.height, radius: r.radius,
         material: r.material,
         fixed: body.isStatic,
         transient: !!body.plugin.transient,
+        opacity,
       });
     }
     return items;
@@ -492,7 +588,7 @@ export class PhysicsSim {
 }
 
 function areaOf(spec) {
-  if (spec.type === "ball" || spec.type === "bomb" || spec.type === "ballBearing" || spec.type === "peg") {
+  if (spec.type === "ball" || spec.type === "bomb" || spec.type === "ballBearing" || spec.type === "peg" || spec.type === "magnet") {
     return Math.PI * spec.radius * spec.radius;
   }
   if (spec.type === "triangle") {

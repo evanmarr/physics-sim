@@ -31,6 +31,11 @@ export function renderPalette(container, state, handlers) {
     if (!state.unlocked.has(type)) continue;
     container.appendChild(buildItem(type, def, state, handlers, true));
   }
+
+  const shortcuts = document.createElement("div");
+  shortcuts.className = "palette-shortcuts";
+  shortcuts.innerHTML = "<div>⌘C copy · ⌘V paste</div><div>Del delete · Esc deselect</div>";
+  container.appendChild(shortcuts);
 }
 
 function buildItem(type, def, state, handlers, draggable) {

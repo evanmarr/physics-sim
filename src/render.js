@@ -81,6 +81,38 @@ export class Renderer {
     svg.call(this.zoom);
   }
 
+  // A one-off, non-physics visual burst — a flash, an expanding ring, and a
+  // handful of glinting shards — for effects like glass shattering. Lives
+  // entirely on its own timer via d3 transitions, decoupled from the physics
+  // render loop, and removes itself when done.
+  burst(x, y, radius = 60) {
+    const g = this.objectLayer.append("g").attr("class", "burst-fx").attr("transform", `translate(${x},${y})`);
+
+    g.append("circle")
+      .attr("r", radius * 0.5).attr("fill", "#eaf7fb").attr("opacity", 0.6)
+      .transition().duration(220).ease(d3.easeCubicOut)
+      .attr("r", radius * 0.9).attr("opacity", 0).remove();
+
+    g.append("circle")
+      .attr("r", radius * 0.3).attr("fill", "none").attr("stroke", "#bfe6f2").attr("stroke-width", 3).attr("opacity", 0.9)
+      .transition().duration(450).ease(d3.easeCubicOut)
+      .attr("r", radius * 1.8).attr("stroke-width", 0.5).attr("opacity", 0).remove();
+
+    const glints = 8;
+    for (let i = 0; i < glints; i++) {
+      const angle = (i / glints) * Math.PI * 2 + Math.random() * 0.6;
+      const dist = radius * (0.9 + Math.random() * 0.9);
+      g.append("line")
+        .attr("x1", 0).attr("y1", 0).attr("x2", 0).attr("y2", 0)
+        .attr("stroke", "#eaf7fb").attr("stroke-width", 2).attr("stroke-linecap", "round").attr("opacity", 0.95)
+        .transition().duration(280 + Math.random() * 180).ease(d3.easeCubicOut)
+        .attr("x2", Math.cos(angle) * dist).attr("y2", Math.sin(angle) * dist)
+        .attr("opacity", 0);
+    }
+
+    g.transition().delay(500).remove();
+  }
+
   centerOn(worldX, worldY, scale) {
     const rect = this.svg.node().getBoundingClientRect();
     const t = d3.zoomIdentity
@@ -119,7 +151,8 @@ export class Renderer {
       .classed("selected", (d) => d.id === selectedId)
       .classed("fixed", (d) => d.fixed)
       .attr("transform", (d) => `translate(${d.x},${d.y}) rotate(${d.rotation || 0})`)
-      .style("cursor", editable ? "grab" : "default");
+      .style("cursor", editable ? "grab" : "default")
+      .style("opacity", (d) => d.opacity ?? 1);
 
     merged.each((d, i, nodes) => updateShape(d3.select(nodes[i]), d, editable));
 
@@ -182,10 +215,10 @@ export class Renderer {
   }
 }
 
-const ROTATABLE = new Set(["board", "triangle", "cannon", "button"]);
+const ROTATABLE = new Set(["board", "triangle", "cannon", "button", "springPad", "fan"]);
 
 function handleDistance(d) {
-  if (d.type === "board" || d.type === "button") return d.height / 2 + 26;
+  if (d.type === "board" || d.type === "button" || d.type === "springPad" || d.type === "fan") return d.height / 2 + 26;
   if (d.type === "triangle") return ((d.size ?? 130) * Math.sqrt(3)) / 3 + 26;
   if (d.type === "cannon") return d.height / 2 + 26;
   return 40;
@@ -205,11 +238,22 @@ function buildShape(g, d) {
     case "peg":
       g.append("circle").attr("class", "shape").attr("r", d.radius);
       break;
+    case "magnet":
+      g.append("circle").attr("class", "shape").attr("r", d.radius);
+      g.append("text").attr("class", "icon-label").text("🧲").attr("text-anchor", "middle").attr("dy", 5);
+      break;
+    case "shard":
+      g.append("polygon").attr("class", "shape");
+      break;
     case "board":
       g.append("rect").attr("class", "shape");
       break;
     case "button":
       g.append("rect").attr("class", "shape").attr("rx", 4);
+      break;
+    case "springPad":
+      g.append("rect").attr("class", "shape").attr("rx", 3);
+      g.append("polygon").attr("class", "spring-arrow").attr("fill", "#1b1e24");
       break;
     case "triangle":
       g.append("polygon").attr("class", "shape");
@@ -252,6 +296,7 @@ function updateShape(g, d, editable) {
     case "bomb":
     case "ballBearing":
     case "peg":
+    case "magnet":
       g.select(".shape").attr("r", d.radius);
       g.select("text.icon-label").attr("font-size", d.radius);
       break;
@@ -261,8 +306,21 @@ function updateShape(g, d, editable) {
         .attr("x", -d.width / 2).attr("y", -d.height / 2)
         .attr("width", d.width).attr("height", d.height);
       break;
+    case "springPad": {
+      g.select(".shape")
+        .attr("x", -d.width / 2).attr("y", -d.height / 2)
+        .attr("width", d.width).attr("height", d.height);
+      const ay = -d.height / 2;
+      g.select(".spring-arrow").attr("points", `-10,${ay} 10,${ay} 0,${ay - 16}`);
+      break;
+    }
     case "triangle": {
       const pts = equilateralPoints(d.size).map((p) => `${p.x},${p.y}`).join(" ");
+      g.select(".shape").attr("points", pts);
+      break;
+    }
+    case "shard": {
+      const pts = equilateralPoints(d.radius * 1.8).map((p) => `${p.x},${p.y}`).join(" ");
       g.select(".shape").attr("points", pts);
       break;
     }
