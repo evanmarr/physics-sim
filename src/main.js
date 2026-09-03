@@ -408,7 +408,7 @@ function wireModeTabs() {
     for (const [m, btn] of Object.entries(modeButtons)) btn.classList.toggle("active", mode === m);
     for (const [m, el] of Object.entries(roots)) el.classList.toggle("hidden", mode !== m);
     physicsOnlyControls.forEach((el) => el && (el.style.display = mode === "physics" ? "" : "none"));
-    challengeBtn.style.display = mode === "astronomy" ? "" : (mode === "physics" ? "" : "none");
+    challengeBtn.style.display = mode === "physics" ? "" : "none";
     quizBtn.style.display = mode === "chemistry" || mode === "anatomy" ? "" : "none";
 
     if (mode === "physics") startParticleLoop(); else stopParticleLoop();

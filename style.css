@@ -375,7 +375,7 @@ button:disabled { opacity: .4; cursor: default; }
 
 /* ---------- Anatomy mode ---------- */
 
-#anatomy-root {
+#anatomy-root, #astronomy-root {
   position: absolute;
   top: 52px; left: 0; right: 0; bottom: 0;
   display: flex;
@@ -433,3 +433,14 @@ button:disabled { opacity: .4; cursor: default; }
 .quiz-explanation.quiz-incorrect { color: var(--danger); }
 .quiz-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .quiz-score { font-size: 20px; font-weight: 700; margin: 14px 0 18px; }
+
+/* ---------- Astronomy ---------- */
+
+.astro-date-input {
+  width: 100%; background: var(--panel-alt); color: var(--text); border: 1px solid var(--border);
+  border-radius: 6px; padding: 7px 8px; font-family: inherit; font-size: 13px;
+}
+#astronomy-root .anat-viewer canvas { border-radius: 8px; }
+.astro-date-label { font-size: 11.5px; color: var(--text-dim); margin-bottom: 14px; padding-bottom: 10px; border-bottom: 1px solid var(--border); }
+.astro-eclipse-result { margin-top: 10px; background: var(--panel-alt); border: 1px solid var(--border); border-radius: 8px; padding: 12px; text-align: center; }
+.astro-eclipse-result button { width: 100%; margin-top: 10px; }
