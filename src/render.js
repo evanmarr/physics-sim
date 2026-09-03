@@ -58,6 +58,9 @@ export class Renderer {
       .attr("fill", "none").attr("stroke", "#454c5a").attr("stroke-width", 3);
 
     this.objectLayer = this.viewport.append("g").attr("class", "object-layer");
+    this.particleLayer = this.viewport.append("g").attr("class", "particle-layer").attr("pointer-events", "none");
+    this.trajectoryLayer = this.viewport.append("g").attr("class", "trajectory-layer").attr("pointer-events", "none");
+    this.rayLayer = this.viewport.append("g").attr("class", "ray-layer").attr("pointer-events", "none");
 
     svg.on("click", (event) => {
       if (event.target === svg.node() || event.target.classList?.contains("grid-bg")) {
@@ -79,6 +82,48 @@ export class Renderer {
       });
 
     svg.call(this.zoom);
+  }
+
+  // Light Mode: redraws every ray as a polyline. Call with [] to clear.
+  renderLightRays(rays) {
+    const sel = this.rayLayer.selectAll("polyline").data(rays);
+    sel.exit().remove();
+    sel.enter().append("polyline")
+      .attr("fill", "none").attr("stroke", "#ffd76b").attr("stroke-width", 1.6).attr("stroke-opacity", 0.85)
+      .merge(sel)
+      .attr("points", (ray) => ray.map((p) => `${p.x},${p.y}`).join(" "));
+  }
+
+  // The cannon's predicted-trajectory preview (edit mode, selected cannon
+  // only) — a dashed line through a few sampled points. Call with null to
+  // clear.
+  renderTrajectory(points) {
+    this.trajectoryLayer.selectAll("*").remove();
+    if (!points || points.length < 2) return;
+    this.trajectoryLayer.append("polyline")
+      .attr("points", points.map((p) => `${p.x},${p.y}`).join(" "))
+      .attr("fill", "none").attr("stroke", "var(--accent-2)").attr("stroke-width", 2.5)
+      .attr("stroke-dasharray", "2 8").attr("stroke-linecap", "round");
+  }
+
+  // Cosmetic water-bubble / wind-streak particles, purely decorative.
+  renderParticles(particles) {
+    const sel = this.particleLayer.selectAll(".p").data(particles, (p) => p.id);
+    sel.exit().remove();
+    const enter = sel.enter().append(function (d) {
+      return document.createElementNS("http://www.w3.org/2000/svg", d.kind === "bubble" ? "circle" : "line");
+    }).attr("class", "p");
+    enter.merge(sel).each(function (d) {
+      const el = d3.select(this);
+      if (d.kind === "bubble") {
+        el.attr("cx", d.x).attr("cy", d.y).attr("r", d.r)
+          .attr("fill", "#cfe9ff").attr("fill-opacity", d.opacity ?? 0.5);
+      } else {
+        el.attr("x1", d.x).attr("y1", d.y).attr("x2", d.x2).attr("y2", d.y2)
+          .attr("stroke", "#e9f2ff").attr("stroke-width", 1.5).attr("stroke-opacity", d.opacity ?? 0.4)
+          .attr("stroke-linecap", "round");
+      }
+    });
   }
 
   // A one-off, non-physics visual burst — a flash, an expanding ring, and a
@@ -215,10 +260,12 @@ export class Renderer {
   }
 }
 
-const ROTATABLE = new Set(["board", "triangle", "cannon", "button", "springPad", "fan"]);
+const ROTATABLE = new Set(["board", "triangle", "cannon", "button", "springPad", "fan", "rope", "lens", "lightSource"]);
 
 function handleDistance(d) {
-  if (d.type === "board" || d.type === "button" || d.type === "springPad" || d.type === "fan") return d.height / 2 + 26;
+  if (d.type === "board" || d.type === "button" || d.type === "springPad" || d.type === "fan" || d.type === "lens") return d.height / 2 + 26;
+  if (d.type === "rope") return (d.length || 240) + 26;
+  if (d.type === "lightSource") return 40;
   if (d.type === "triangle") return ((d.size ?? 130) * Math.sqrt(3)) / 3 + 26;
   if (d.type === "cannon") return d.height / 2 + 26;
   return 40;
@@ -274,6 +321,19 @@ function buildShape(g, d) {
       g.append("rect").attr("class", "shape body");
       g.append("text").attr("class", "icon-label").text("🌀").attr("text-anchor", "middle")
         .attr("dominant-baseline", "central");
+      break;
+    }
+    case "rope": {
+      g.append("line").attr("class", "shape rope-preview").attr("x1", 0).attr("y1", 0);
+      break;
+    }
+    case "lens": {
+      g.append("path").attr("class", "shape");
+      break;
+    }
+    case "lightSource": {
+      g.append("rect").attr("class", "shape").attr("width", 26).attr("height", 18).attr("x", -13).attr("y", -9).attr("rx", 3);
+      g.append("polygon").attr("class", "light-arrow").attr("fill", "#ffd76b").attr("points", "13,-8 30,0 13,8");
       break;
     }
   }
@@ -346,6 +406,28 @@ function updateShape(g, d, editable) {
         .attr("x", d.width / 2).attr("y", -d.height / 2)
         .attr("width", d.range ?? 400).attr("height", d.height)
         .style("display", editable && !d.transient ? null : "none");
+      break;
+    }
+    case "rope": {
+      g.select(".shape").attr("x2", d.length ?? 240).attr("y2", 0).attr("stroke-width", d.thickness ?? 10).attr("stroke-linecap", "round");
+      break;
+    }
+    case "lens": {
+      const w = d.width, h = d.height;
+      const k = Math.max(-1, Math.min(1, d.curvature ?? 0.6));
+      let path;
+      if (k >= 0) {
+        const bulge = (w / 2) * (0.25 + 0.75 * k);
+        path = `M0,${-h / 2} Q${bulge},0 0,${h / 2} Q${-bulge},0 0,${-h / 2} Z`;
+      } else {
+        const pinch = (w / 2) * (0.25 + 0.75 * -k);
+        const edge = w / 4;
+        path = `M${edge},${-h / 2} Q${edge - pinch},0 ${edge},${h / 2} L${-edge},${h / 2} Q${-edge + pinch},0 ${-edge},${-h / 2} Z`;
+      }
+      g.select(".shape").attr("d", path);
+      break;
+    }
+    case "lightSource": {
       break;
     }
   }

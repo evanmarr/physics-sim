@@ -4,8 +4,6 @@ export function saveState(state) {
   try {
     const payload = {
       objects: state.objects,
-      coins: state.coins,
-      unlocked: [...state.unlocked],
       completedChallenges: [...state.completedChallenges],
     };
     localStorage.setItem(KEY, JSON.stringify(payload));
@@ -21,8 +19,6 @@ export function loadState() {
     const data = JSON.parse(raw);
     return {
       objects: data.objects || [],
-      coins: typeof data.coins === "number" ? data.coins : 0,
-      unlocked: new Set(data.unlocked || []),
       completedChallenges: new Set(data.completedChallenges || []),
     };
   } catch (e) {

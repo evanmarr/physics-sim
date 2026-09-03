@@ -39,6 +39,7 @@ export const MATERIALS = {
     fillOpacity: 0.45,
     shatters: true,
     shatterImpactThreshold: 9, // relative speed (world units/step-ish) needed to shatter
+    refractiveIndex: 1.5, // used by Light Mode's ray tracer
   },
   ice: {
     label: "Ice",
@@ -48,6 +49,7 @@ export const MATERIALS = {
     friction: 0.02,
     restitution: 0.05,
     frictionAir: 0.01,
+    refractiveIndex: 1.31,
   },
   water: {
     label: "Water",
@@ -59,6 +61,7 @@ export const MATERIALS = {
     frictionAir: 0.01,
     fillOpacity: 0.5,
     isFluid: true,
+    refractiveIndex: 1.33,
   },
 };
 

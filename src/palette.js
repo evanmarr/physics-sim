@@ -10,26 +10,7 @@ export function renderPalette(container, state, handlers) {
   container.appendChild(coreSection);
 
   for (const [type, def] of Object.entries(OBJECT_DEFS)) {
-    if (def.category !== "core") continue;
-    container.appendChild(buildItem(type, def, state, handlers, true));
-  }
-
-  const shopSection = document.createElement("div");
-  shopSection.className = "palette-section-title";
-  shopSection.textContent = "Unlocked";
-  container.appendChild(shopSection);
-
-  const shopItems = Object.entries(OBJECT_DEFS).filter(([, d]) => d.category === "shop");
-  const anyUnlocked = shopItems.some(([type]) => state.unlocked.has(type));
-  if (!anyUnlocked) {
-    const p = document.createElement("div");
-    p.style.cssText = "color:var(--text-dim);font-size:11.5px;padding:4px 6px;";
-    p.textContent = "Buy items in the Shop to unlock them here.";
-    container.appendChild(p);
-  }
-  for (const [type, def] of shopItems) {
-    if (!state.unlocked.has(type)) continue;
-    container.appendChild(buildItem(type, def, state, handlers, true));
+    container.appendChild(buildItem(type, def, handlers));
   }
 
   const shortcuts = document.createElement("div");
@@ -38,7 +19,7 @@ export function renderPalette(container, state, handlers) {
   container.appendChild(shortcuts);
 }
 
-function buildItem(type, def, state, handlers, draggable) {
+function buildItem(type, def, handlers) {
   const el = document.createElement("div");
   el.className = "palette-item";
   el.dataset.type = type;

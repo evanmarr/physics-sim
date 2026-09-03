@@ -111,6 +111,88 @@ export class PhysicsSim {
       });
       Composite.add(world, constraint);
     }
+
+    // ropes: a chain of small segment bodies, anchored at the rope's placed
+    // point (to a nearby static object there, if any, else to a fixed point
+    // in space) and hanging/swinging freely from it.
+    for (const spec of this.specs) {
+      if (spec.type === "rope") this._buildRope(spec, specById);
+    }
+  }
+
+  _buildRope(spec, specById) {
+    const world = this.engine.world;
+    const mat = materialOf(spec.material);
+    const length = spec.length ?? 240;
+    const thickness = Math.max(3, spec.thickness ?? 10);
+    const segCount = Math.max(3, Math.min(24, Math.round(length / (thickness * 2.2))));
+    const segLen = length / segCount;
+    const stiffness = Math.max(0.05, 1 - (spec.elasticity ?? 0.15) * 0.9);
+    const angle = (spec.rotation || 0) * RAD;
+    const dir = { x: Math.cos(angle), y: Math.sin(angle) };
+    // Adjacent segments overlap slightly (the *1.05 below) so there's no
+    // visible gap between chain links — but as separate rigid bodies they'd
+    // then also collide with each other, and that collision response fights
+    // the constraint holding them together, creeping the whole chain longer
+    // every step. A shared negative collision group (Matter's standard
+    // chain/rope technique) makes segments of this rope never collide with
+    // each other, while still colliding normally with everything else.
+    const noSelfCollideGroup = Body.nextGroup(true);
+
+    const segments = [];
+    for (let i = 0; i < segCount; i++) {
+      const cx = spec.x + dir.x * segLen * (i + 0.5);
+      const cy = spec.y + dir.y * segLen * (i + 0.5);
+      const seg = Bodies.rectangle(cx, cy, segLen * 1.05, thickness, {
+        angle,
+        friction: mat.friction,
+        frictionAir: mat.frictionAir ?? 0.01,
+        restitution: mat.restitution,
+        density: Math.max(mat.density * DENSITY_SCALE, 0.0001),
+        collisionFilter: { group: noSelfCollideGroup },
+        label: `ropeSegment:${spec.id}:${i}`,
+      });
+      seg.plugin = {
+        gameId: makeId("ropeseg"),
+        material: spec.material,
+        gameDensity: mat.density,
+        gameArea: segLen * thickness,
+        shattered: false,
+        transient: true,
+        render: { type: "board", material: spec.material, width: segLen * 1.05, height: thickness, fixed: false },
+      };
+      Composite.add(world, seg);
+      segments.push(seg);
+      if (i > 0) {
+        Composite.add(world, Constraint.create({
+          bodyA: segments[i - 1], pointA: { x: segLen / 2, y: 0 },
+          bodyB: seg, pointB: { x: -segLen / 2, y: 0 },
+          // Matter's auto-computed rest length ignores body rotation (it
+          // doesn't rotate pointA/B by the bodies' angle at creation time,
+          // even though it correctly does during simulation) — for
+          // pre-rotated segments like these, that silently bakes in the
+          // wrong length. Setting it explicitly avoids that entirely.
+          length: 0,
+          stiffness, damping: 0.15,
+        }));
+      }
+    }
+
+    // anchor: if a dynamic board/triangle sits at the rope's origin, tie the
+    // rope to it (so it swings along with that host); otherwise pin to that
+    // fixed point in space, same as a rope tied to a wall or ceiling.
+    const host = this._findPivotHost({ id: spec.id, x: spec.x, y: spec.y }, specById);
+    const hostBody = host ? this.byId.get(host.id) : null;
+    let anchorConfig;
+    if (hostBody && !hostBody.isStatic) {
+      const cos = Math.cos(-host.rotation * RAD), sin = Math.sin(-host.rotation * RAD);
+      const dx = spec.x - host.x, dy = spec.y - host.y;
+      const localX = dx * cos - dy * sin, localY = dx * sin + dy * cos;
+      anchorConfig = { bodyA: hostBody, pointA: { x: localX, y: localY }, bodyB: segments[0], pointB: { x: -segLen / 2, y: 0 }, length: 0, stiffness, damping: 0.15 };
+    } else {
+      anchorConfig = { pointA: { x: spec.x, y: spec.y }, bodyB: segments[0], pointB: { x: -segLen / 2, y: 0 }, length: 0, stiffness, damping: 0.15 };
+    }
+    Composite.add(world, Constraint.create(anchorConfig));
   }
 
   _findPivotHost(bearing, specById) {
@@ -151,6 +233,9 @@ export class PhysicsSim {
       case "magnet":
         body = Bodies.circle(spec.x, spec.y, spec.radius, { ...common, isStatic: true, isSensor: false });
         break;
+      case "lightSource":
+        body = Bodies.circle(spec.x, spec.y, spec.radius || 15, { ...common, isStatic: true, isSensor: true });
+        break;
       case "board":
         body = Bodies.rectangle(spec.x, spec.y, spec.width, spec.height, common);
         break;
@@ -166,6 +251,7 @@ export class PhysicsSim {
       }
       case "cannon":
       case "fan":
+      case "lens":
         body = Bodies.rectangle(spec.x, spec.y, spec.width, spec.height, { ...common, isStatic: true });
         break;
       default:
@@ -588,7 +674,7 @@ export class PhysicsSim {
 }
 
 function areaOf(spec) {
-  if (spec.type === "ball" || spec.type === "bomb" || spec.type === "ballBearing" || spec.type === "peg" || spec.type === "magnet") {
+  if (spec.type === "ball" || spec.type === "bomb" || spec.type === "ballBearing" || spec.type === "peg" || spec.type === "magnet" || spec.type === "lightSource") {
     return Math.PI * spec.radius * spec.radius;
   }
   if (spec.type === "triangle") {

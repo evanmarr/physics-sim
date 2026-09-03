@@ -88,28 +88,54 @@ export const OBJECT_DEFS = {
   bomb: {
     label: "Bomb",
     icon: "💣",
-    category: "shop",
-    price: 40,
+    category: "core",
     defaultSpec: () => ({ type: "bomb", x: 0, y: 0, rotation: 0, radius: 18, material: "metal", fixed: false, power: 26, radiusOfEffect: 260 }),
     fields: ["power", "radiusOfEffect", "fixed"],
   },
   button: {
     label: "Button",
     icon: "⏺",
-    category: "shop",
-    price: 25,
+    category: "core",
     defaultSpec: () => ({ type: "button", x: 0, y: 0, rotation: 0, width: 40, height: 14, material: "wood", fixed: true, targetId: null }),
     fields: ["targetId"],
   },
   magnet: {
     label: "Magnet",
     icon: "🧲",
-    category: "shop",
-    price: 45,
+    category: "core",
     // Continuous radial force on metal objects within range: positive power
     // attracts, negative repels.
     defaultSpec: () => ({ type: "magnet", x: 0, y: 0, rotation: 0, radius: 20, material: "metal", power: 20, range: 350 }),
     fields: ["power", "range"],
+  },
+  rope: {
+    label: "Rope",
+    icon: "🪢",
+    category: "core",
+    // Anchored at its placed point (to the nearest static object there, or
+    // to a fixed point in space if nothing's there) and hangs/swings from
+    // it as a chain of small segments — elasticity maps to how stiff the
+    // links between segments are.
+    defaultSpec: () => ({ type: "rope", x: 0, y: 0, rotation: 90, length: 240, thickness: 10, elasticity: 0.15, material: "wood" }),
+    fields: ["length", "thickness", "elasticity", "material"],
+  },
+  lens: {
+    label: "Lens",
+    icon: "🔍",
+    category: "core",
+    // A glass lens for Light Mode: bends light rays passing through it.
+    // curvature > 0 is convex (converging), < 0 is concave (diverging).
+    defaultSpec: () => ({ type: "lens", x: 0, y: 0, rotation: 0, width: 80, height: 140, curvature: 0.6, material: "glass" }),
+    fields: ["width", "height", "curvature"],
+  },
+  lightSource: {
+    label: "Light Source",
+    icon: "🔦",
+    category: "core",
+    // Emits parallel light rays in Light Mode, in the direction it's
+    // rotated. Only visible/active while Light Mode is on.
+    defaultSpec: () => ({ type: "lightSource", x: 0, y: 0, rotation: 0, beamWidth: 120, rayCount: 9, material: "metal", radius: 15 }),
+    fields: ["beamWidth", "rayCount"],
   },
 };
 

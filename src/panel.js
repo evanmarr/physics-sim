@@ -84,6 +84,26 @@ export function renderPanel(container, spec, state, handlers) {
   if (fields.includes("targetId")) {
     container.appendChild(targetField(spec, state, (v) => set({ targetId: v })));
   }
+  if (fields.includes("length")) {
+    container.appendChild(sliderField("Length", spec.length, 60, 800, 10, (v) => set({ length: v })));
+  }
+  if (fields.includes("thickness")) {
+    container.appendChild(sliderField("Thickness", spec.thickness, 3, 30, 1, (v) => set({ thickness: v })));
+  }
+  if (fields.includes("elasticity")) {
+    container.appendChild(sliderField("Elasticity", spec.elasticity, 0, 1, 0.05, (v) => set({ elasticity: v })));
+    container.appendChild(helpText("Low = a stiff, taut rope. High = a stretchy bungee cord."));
+  }
+  if (fields.includes("curvature")) {
+    container.appendChild(sliderField("Curvature", spec.curvature, -1, 1, 0.05, (v) => set({ curvature: v })));
+    container.appendChild(helpText(spec.curvature >= 0 ? "Convex — bends light rays inward to a focus (converging)." : "Concave — spreads light rays outward (diverging)."));
+  }
+  if (fields.includes("beamWidth")) {
+    container.appendChild(sliderField("Beam Width", spec.beamWidth, 20, 400, 10, (v) => set({ beamWidth: v })));
+  }
+  if (fields.includes("rayCount")) {
+    container.appendChild(sliderField("Ray Count", spec.rayCount, 1, 25, 1, (v) => set({ rayCount: v })));
+  }
 
   const mathLines = physicsMath(spec);
   if (mathLines && mathLines.length && handlers.mathPanelOpen === false) {

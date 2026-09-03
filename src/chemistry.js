@@ -9,7 +9,7 @@ const MAX_SLOTS = 12;
 export class ChemistryMode {
   constructor(root, economy) {
     this.root = root;
-    this.economy = economy; // { getCoins(), spend(n), award(amount, label), state }
+    this.economy = economy; // { state } — challenge completion just marks state.completedChallenges
     this.selectedSymbol = "H";
     // slots: array of { symbol, tempK } | null
     this.slots = Array.from({ length: MIN_SLOTS }, () => null);
@@ -334,7 +334,7 @@ function buildChallengeModal(economy) {
       info.innerHTML = `
         <div class="name">${c.name}${completed ? " ✓" : ""}</div>
         <div class="concept-tag">${c.concept}</div>
-        <div class="desc">${c.description} Reward: ${c.reward} coins.</div>
+        <div class="desc">${c.description}</div>
       `;
       row.appendChild(info);
       const btn = document.createElement("button");
@@ -347,7 +347,7 @@ function buildChallengeModal(economy) {
         btn.addEventListener("click", () => {
           const ok = lastResult && c.check(lastResult);
           if (ok) {
-            economy.award(c.reward, c.id);
+            economy.state.completedChallenges.add("chem_" + c.id);
             render(lastResult);
           } else {
             btn.textContent = "Not yet — try again";

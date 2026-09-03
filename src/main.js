@@ -1,7 +1,6 @@
 import { Renderer } from "./render.js";
 import { renderPalette } from "./palette.js";
 import { renderPanel, renderPhysicsMathPanel } from "./panel.js";
-import { renderShop, tryPurchase } from "./economy.js";
 import { CHALLENGES, findChallenge, ChallengeTracker } from "./challenges.js";
 import { OBJECT_DEFS, createSpec, cloneSpec, makeId } from "./objectTypes.js";
 import { PhysicsSim } from "./physics.js";
@@ -9,18 +8,19 @@ import { loadState, saveState, clearSave } from "./storage.js";
 import { snap, WORLD } from "./world.js";
 import { ChemistryMode } from "./chemistry.js";
 import { AnatomyMode } from "./anatomy.js";
-import { renderHome } from "./home.js";
+import { AstronomyMode } from "./astronomy.js";
+import { traceLightRays } from "./lightOptics.js";
+import { openQuiz } from "./quiz.js";
 
 const state = {
   objects: [],
   selectedId: null,
   playing: false,
   gravity: 1,
-  coins: 20,
-  unlocked: new Set(),
   completedChallenges: new Set(),
   activeChallengeId: null,
   mathPanelOpen: true,
+  lightMode: false,
 };
 
 let sim = null;
@@ -28,6 +28,7 @@ let tracker = null;
 let clipboard = null; // in-app copy/paste buffer — a spec, not the OS clipboard
 let chemistryMode = null;
 let anatomyMode = null;
+let astronomyMode = null;
 
 function starterScene() {
   return [
@@ -56,12 +57,9 @@ function boot() {
   renderPaletteUI();
   renderPanelUI();
   renderAll();
-  updateCoinUI();
 
   wireTopbar(renderer);
-  wireShop();
   wireChallenges();
-  wireCanvasDrop(renderer);
   wireKeyboard(renderer);
   wireModeTabs();
 
@@ -71,6 +69,8 @@ function boot() {
 function renderAll() {
   const items = state.objects.map(specToRenderItem);
   window._renderer.render(items, { editable: !state.playing, selectedId: state.selectedId });
+  updateTrajectoryPreview();
+  updateLightRays(items);
 }
 
 function specToRenderItem(s) {
@@ -126,6 +126,95 @@ function deleteObject(id) {
   scheduleSave();
 }
 
+// ---- Cannon predicted-trajectory preview ----
+function updateTrajectoryPreview() {
+  if (state.playing) return;
+  const spec = state.objects.find((o) => o.id === state.selectedId);
+  if (!spec || spec.type !== "cannon") { window._renderer.renderTrajectory(null); return; }
+  const rad = (spec.launchRotation ?? 0) * Math.PI / 180;
+  const speed = spec.power ?? 22;
+  const muzzleDist = spec.width / 2 + 20;
+  let x = spec.x + Math.cos(rad) * muzzleDist;
+  let y = spec.y + Math.sin(rad) * muzzleDist;
+  let vx = Math.cos(rad) * speed, vy = Math.sin(rad) * speed;
+  const g = state.gravity * 0.001; // matches PhysicsSim's DENSITY_SCALE-consistent gravity units
+  const points = [{ x, y }];
+  for (let t = 0; t < 220; t++) {
+    vy += g;
+    x += vx; y += vy;
+    if (t % 4 === 0) points.push({ x, y });
+    if (y > WORLD.maxY || x < WORLD.minX || x > WORLD.maxX) break;
+  }
+  window._renderer.renderTrajectory(points);
+}
+
+// ---- Light Mode ----
+function updateLightRays(items) {
+  if (!state.lightMode) { window._renderer.renderLightRays([]); return; }
+  const rays = traceLightRays(items, WORLD);
+  window._renderer.renderLightRays(rays);
+}
+
+// ---- Cosmetic water/wind particles (edit mode preview + during Play) ----
+let particleClock = 0;
+let particleRafId = null;
+function startParticleLoop() {
+  stopParticleLoop();
+  const loop = () => {
+    particleClock += 1;
+    const items = state.playing ? null : state.objects; // during Play, particles are driven by onFrame instead
+    if (items) window._renderer.renderParticles(buildParticles(items, particleClock));
+    particleRafId = requestAnimationFrame(loop);
+  };
+  particleRafId = requestAnimationFrame(loop);
+}
+function stopParticleLoop() {
+  if (particleRafId) cancelAnimationFrame(particleRafId);
+  particleRafId = null;
+}
+
+function buildParticles(items, clock) {
+  const particles = [];
+  for (const it of items) {
+    if (it.material === "water") {
+      const w = it.width ?? it.radius * 2 ?? 100, h = it.height ?? it.radius * 2 ?? 100;
+      const count = Math.max(3, Math.round((w * h) / 9000));
+      for (let i = 0; i < count; i++) {
+        const seed = hashSeed(it.id, i);
+        const cx = it.x - w / 2 + ((seed * 97) % w);
+        const cycle = ((clock * 0.6 + seed * 37) % h);
+        particles.push({ id: `${it.id}_b${i}`, kind: "bubble", x: cx, y: it.y + h / 2 - cycle, r: 2 + (seed % 3), opacity: 0.35 });
+      }
+    }
+    if (it.type === "fan") {
+      const w = it.width, h = it.height, range = it.range ?? 400;
+      const rad = (it.rotation || 0) * Math.PI / 180;
+      const dir = { x: Math.cos(rad), y: Math.sin(rad) };
+      const perp = { x: -dir.y, y: dir.x };
+      const count = 6;
+      for (let i = 0; i < count; i++) {
+        const seed = hashSeed(it.id, i);
+        const lane = (seed % 100) / 100 * h - h / 2;
+        const dist = w / 2 + ((clock * 6 + seed * 53) % range);
+        const streakLen = 22;
+        const bx = it.x + dir.x * dist + perp.x * lane;
+        const by = it.y + dir.y * dist + perp.y * lane;
+        particles.push({
+          id: `${it.id}_w${i}`, kind: "streak",
+          x: bx, y: by, x2: bx - dir.x * streakLen, y2: by - dir.y * streakLen,
+          opacity: 0.35 * (1 - dist / (w / 2 + range)),
+        });
+      }
+    }
+  }
+  return particles;
+}
+function hashSeed(id, i) {
+  let h = i * 2654435761;
+  for (let k = 0; k < id.length; k++) h = (h * 31 + id.charCodeAt(k)) | 0;
+  return Math.abs(h) % 997;
+}
+
 function wireTopbar(renderer) {
   const playBtn = document.getElementById("play-btn");
   playBtn.addEventListener("click", () => togglePlay(renderer));
@@ -136,6 +225,7 @@ function wireTopbar(renderer) {
     state.gravity = parseFloat(gravitySlider.value);
     gravityVal.textContent = state.gravity.toFixed(1);
     if (sim) sim.setGravity(state.gravity);
+    updateTrajectoryPreview();
   });
 
   document.getElementById("clear-btn").addEventListener("click", () => {
@@ -149,7 +239,16 @@ function wireTopbar(renderer) {
     scheduleSave();
   });
 
+  document.getElementById("light-mode-btn").addEventListener("click", () => {
+    state.lightMode = !state.lightMode;
+    document.getElementById("light-mode-btn").classList.toggle("active", state.lightMode);
+    renderAll();
+  });
+
+  document.getElementById("quiz-btn").addEventListener("click", () => openQuiz(state.mode));
+
   wireTheme();
+  startParticleLoop();
 }
 
 function wireTheme() {
@@ -180,12 +279,15 @@ function togglePlay(renderer) {
   if (!state.playing) {
     state.selectedId = null;
     renderPanelUI();
+    window._renderer.renderTrajectory(null);
     const clones = state.objects.map(cloneSpec);
     tracker = state.activeChallengeId ? new ChallengeTracker(findChallenge(state.activeChallengeId)) : null;
     sim = new PhysicsSim(clones, state.gravity, {
       onFrame: (items) => {
         renderer.render(items, { editable: false });
         checkChallengeFrame(items);
+        if (state.lightMode) updateLightRays(items);
+        window._renderer.renderParticles(buildParticles(items, particleClock));
       },
       onEvent: (event) => handleSimEvent(event),
     });
@@ -219,16 +321,9 @@ function checkChallengeFrame(items) {
 function awardChallenge(challenge) {
   if (!state.completedChallenges.has(challenge.id)) {
     state.completedChallenges.add(challenge.id);
-    state.coins += challenge.reward;
-    updateCoinUI();
     scheduleSave();
   }
-  showToast(`Challenge complete: ${challenge.name} (+${challenge.reward})`);
-}
-
-function updateCoinUI() {
-  document.getElementById("coin-count").textContent = state.coins;
-  renderPaletteUI();
+  showToast(`Challenge complete: ${challenge.name}`);
 }
 
 function showToast(msg) {
@@ -237,26 +332,6 @@ function showToast(msg) {
   toast.classList.remove("hidden");
   clearTimeout(showToast._t);
   showToast._t = setTimeout(() => toast.classList.add("hidden"), 3500);
-}
-
-function wireShop() {
-  const modal = document.getElementById("shop-modal");
-  const refresh = () => {
-    renderShop(document.getElementById("shop-items"), state, {
-      onPurchase: (type) => {
-        if (tryPurchase(state, type)) {
-          updateCoinUI();
-          scheduleSave();
-          refresh();
-        }
-      },
-    });
-  };
-  document.getElementById("shop-btn").addEventListener("click", () => {
-    refresh();
-    modal.classList.remove("hidden");
-  });
-  document.getElementById("shop-close").addEventListener("click", () => modal.classList.add("hidden"));
 }
 
 function wireChallenges() {
@@ -277,7 +352,7 @@ function wireChallenges() {
       concept.textContent = c.concept;
       const desc = document.createElement("div");
       desc.className = "desc";
-      desc.textContent = `${c.description} Reward: ${c.reward} coins.`;
+      desc.textContent = c.description;
       info.appendChild(name);
       info.appendChild(concept);
       info.appendChild(desc);
@@ -304,38 +379,26 @@ function wireChallenges() {
 }
 
 function wireModeTabs() {
-  const homeLink = document.getElementById("home-link");
   const physicsBtn = document.getElementById("mode-physics-btn");
   const chemistryBtn = document.getElementById("mode-chemistry-btn");
   const anatomyBtn = document.getElementById("mode-anatomy-btn");
-  const modeButtons = { physics: physicsBtn, chemistry: chemistryBtn, anatomy: anatomyBtn };
+  const astronomyBtn = document.getElementById("mode-astronomy-btn");
+  const modeButtons = { physics: physicsBtn, chemistry: chemistryBtn, anatomy: anatomyBtn, astronomy: astronomyBtn };
 
-  const homeRoot = document.getElementById("home-root");
   const workspace = document.getElementById("workspace");
   const chemRoot = document.getElementById("chemistry-root");
   const anatomyRoot = document.getElementById("anatomy-root");
-  const roots = { home: homeRoot, physics: workspace, chemistry: chemRoot, anatomy: anatomyRoot };
+  const astronomyRoot = document.getElementById("astronomy-root");
+  const roots = { physics: workspace, chemistry: chemRoot, anatomy: anatomyRoot, astronomy: astronomyRoot };
 
   const physicsOnlyControls = [
     document.getElementById("run-controls"),
     document.getElementById("gravity-controls"),
-    document.getElementById("shop-btn"),
-    document.getElementById("challenges-btn"),
-    document.getElementById("file-controls"),
+    document.getElementById("light-mode-toggle-wrap"),
+    document.getElementById("clear-btn"),
   ];
-
-  const chemEconomy = {
-    state,
-    award(amount, challengeId) {
-      const key = "chem_" + challengeId;
-      if (state.completedChallenges.has(key)) return;
-      state.completedChallenges.add(key);
-      state.coins += amount;
-      updateCoinUI();
-      scheduleSave();
-      showToast(`Challenge complete: +${amount} coins`);
-    },
-  };
+  const challengeBtn = document.getElementById("challenges-btn");
+  const quizBtn = document.getElementById("quiz-btn");
 
   function setMode(mode) {
     if (state.mode === mode) return;
@@ -345,9 +408,13 @@ function wireModeTabs() {
     for (const [m, btn] of Object.entries(modeButtons)) btn.classList.toggle("active", mode === m);
     for (const [m, el] of Object.entries(roots)) el.classList.toggle("hidden", mode !== m);
     physicsOnlyControls.forEach((el) => el && (el.style.display = mode === "physics" ? "" : "none"));
+    challengeBtn.style.display = mode === "astronomy" ? "" : (mode === "physics" ? "" : "none");
+    quizBtn.style.display = mode === "chemistry" || mode === "anatomy" ? "" : "none";
+
+    if (mode === "physics") startParticleLoop(); else stopParticleLoop();
 
     if (mode === "chemistry") {
-      if (!chemistryMode) chemistryMode = new ChemistryMode(chemRoot, chemEconomy);
+      if (!chemistryMode) chemistryMode = new ChemistryMode(chemRoot, { state });
       chemistryMode.mount();
     } else {
       chemistryMode?.unmount();
@@ -360,18 +427,21 @@ function wireModeTabs() {
       anatomyMode?.unmount();
     }
 
-    if (mode === "home") {
-      renderHome(homeRoot, (m) => setMode(m));
+    if (mode === "astronomy") {
+      if (!astronomyMode) astronomyMode = new AstronomyMode(astronomyRoot, { state, showToast });
+      astronomyMode.mount();
+    } else {
+      astronomyMode?.unmount();
     }
   }
 
-  homeLink.addEventListener("click", () => setMode("home"));
   physicsBtn.addEventListener("click", () => setMode("physics"));
   chemistryBtn.addEventListener("click", () => setMode("chemistry"));
   anatomyBtn.addEventListener("click", () => setMode("anatomy"));
+  astronomyBtn.addEventListener("click", () => setMode("astronomy"));
 
-  state.mode = null; // force the first setMode call to actually run
-  setMode("home");
+  state.mode = null;
+  setMode("physics");
 }
 
 function wireKeyboard(renderer) {
@@ -428,7 +498,6 @@ function pasteClipboard() {
 function beginPaletteDrag(type, pointerEvent) {
   if (state.playing) return;
   const def = OBJECT_DEFS[type];
-  if (def.category === "shop" && !state.unlocked.has(type)) return;
 
   const ghost = document.createElement("div");
   ghost.style.cssText = `
@@ -472,10 +541,6 @@ function beginPaletteDrag(type, pointerEvent) {
 
   window.addEventListener("pointermove", move);
   window.addEventListener("pointerup", up);
-}
-
-function wireCanvasDrop(renderer) {
-  // reserved for future: keyboard-based nudge, context menu, etc.
 }
 
 boot();
