@@ -138,6 +138,90 @@ export class AtomViewer {
     this.controls.update();
   }
 
+  // A simplified ball-and-stick view of a reacted molecule — shows every
+  // atom involved together, not full VSEPR-accurate bond angles (the
+  // outer atoms are spread evenly around the central one via a Fibonacci
+  // sphere rather than each molecule's real geometry).
+  // atoms: [{ symbol, colorHex }], one entry per atom in the molecule.
+  showMolecule(atoms) {
+    while (this.group.children.length) this.group.remove(this.group.children[0]);
+    this.electronDots = [];
+    if (!atoms.length) return;
+
+    const counts = {};
+    atoms.forEach((a) => { counts[a.symbol] = (counts[a.symbol] || 0) + 1; });
+    const distinctSymbols = Object.keys(counts);
+    const bondLength = 2.6;
+    const atomRadius = 0.55;
+
+    const makeAtomMesh = (colorHex) => {
+      const geo = new THREE.SphereGeometry(atomRadius, 20, 20);
+      const mat = new THREE.MeshStandardMaterial({ color: new THREE.Color(colorHex || "#4f8cff"), roughness: 0.4, metalness: 0.1 });
+      return new THREE.Mesh(geo, mat);
+    };
+    const makeBond = (p1, p2) => {
+      const dir = new THREE.Vector3().subVectors(p2, p1);
+      const len = dir.length();
+      const geo = new THREE.CylinderGeometry(0.09, 0.09, len, 8);
+      const mat = new THREE.MeshStandardMaterial({ color: 0xcccccc, roughness: 0.6 });
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.position.copy(p1).add(dir.clone().multiplyScalar(0.5));
+      mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.clone().normalize());
+      return mesh;
+    };
+
+    if (distinctSymbols.length === 1) {
+      // A pure diatomic/molecule of one element — line them up and bond
+      // consecutive atoms.
+      atoms.forEach((atom, i) => {
+        const x = (i - (atoms.length - 1) / 2) * bondLength;
+        const pos = new THREE.Vector3(x, 0, 0);
+        const mesh = makeAtomMesh(atom.colorHex);
+        mesh.position.copy(pos);
+        this.group.add(mesh);
+        if (i > 0) {
+          const prevX = (i - 1 - (atoms.length - 1) / 2) * bondLength;
+          this.group.add(makeBond(new THREE.Vector3(prevX, 0, 0), pos));
+        }
+      });
+    } else {
+      // Central atom = the element with the fewest atoms (matches real
+      // chemistry surprisingly often for simple molecules: O in H2O, C in
+      // CO2/CH4, N in NH3...); everything else arranged around it.
+      const centerSymbol = distinctSymbols.slice().sort((a, b) => counts[a] - counts[b])[0];
+      const centerIdx = atoms.findIndex((a) => a.symbol === centerSymbol);
+      const center = atoms[centerIdx];
+      const outer = atoms.filter((_, i) => i !== centerIdx);
+
+      const centerMesh = makeAtomMesh(center.colorHex);
+      this.group.add(centerMesh);
+
+      const n = outer.length;
+      outer.forEach((atom, i) => {
+        // Fibonacci sphere distribution for a reasonably even spread.
+        const yFrac = n > 1 ? 1 - (2 * i) / (n - 1) : 0;
+        const radiusAtY = Math.sqrt(Math.max(0, 1 - yFrac * yFrac));
+        const goldenAngle = Math.PI * (3 - Math.sqrt(5));
+        const theta = goldenAngle * i;
+        const pos = new THREE.Vector3(
+          Math.cos(theta) * radiusAtY * bondLength,
+          yFrac * bondLength,
+          Math.sin(theta) * radiusAtY * bondLength
+        );
+        const mesh = makeAtomMesh(atom.colorHex);
+        mesh.position.copy(pos);
+        this.group.add(mesh);
+        this.group.add(makeBond(new THREE.Vector3(0, 0, 0), pos));
+      });
+    }
+
+    const span = bondLength * 2.2;
+    this.camera.position.set(0, span * 0.5, span * 1.4);
+    this.controls.target.set(0, 0, 0);
+    this.controls.minDistance = 3;
+    this.controls.update();
+  }
+
   dispose() {
     this.stop();
     window.removeEventListener("resize", this._resize);

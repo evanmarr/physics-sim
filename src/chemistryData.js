@@ -233,35 +233,35 @@ const DIATOMIC = new Set(["H", "N", "O", "F", "Cl", "Br", "I"]);
 // rest of the periodic table with a simplified but broadly-applicable
 // prediction instead of a hand-verified one.
 const REACTION_TABLE = {
-  "H-O": { formula: "H₂O", name: "Water", type: "covalent", energy: "exothermic", ratio: { H: 2, O: 1 }, note: "Two hydrogens share electrons with one oxygen. The reaction that powers hydrogen fuel cells (in reverse) and rocket engines (forward, explosively)." },
-  "H-Cl": { formula: "HCl", name: "Hydrogen chloride", type: "covalent", energy: "exothermic", ratio: { H: 1, Cl: 1 }, note: "Dissolves in water to form hydrochloric acid — the acid in your stomach." },
-  "Cl-Na": { formula: "NaCl", name: "Table salt", type: "ionic", energy: "exothermic", ratio: { Na: 1, Cl: 1 }, note: "Sodium gives up its outer electron, chlorine takes it — a violent reaction between a soft explosive metal and a toxic gas that somehow makes the salt on your fries." },
-  "C-O": { formula: "CO₂", name: "Carbon dioxide", type: "covalent", energy: "exothermic", ratio: { C: 1, O: 2 }, note: "What you exhale, and what plants breathe in. Also what burning carbon-based fuel produces." },
-  "H-N": { formula: "NH₃", name: "Ammonia", type: "covalent", energy: "exothermic", ratio: { N: 1, H: 3 }, note: "Made industrially by the millions of tons via the Haber process to feed the world's crops as fertilizer." },
-  "C-H": { formula: "CH₄", name: "Methane", type: "covalent", energy: "exothermic", ratio: { C: 1, H: 4 }, note: "The simplest hydrocarbon — natural gas is mostly this. A potent greenhouse gas." },
-  "Fe-O": { formula: "Fe₂O₃", name: "Rust", type: "ionic", energy: "exothermic", ratio: { Fe: 2, O: 3 }, note: "Iron slowly gives up electrons to oxygen over time — the same basic chemistry as a much faster combustion, just gentler." },
-  "Mg-O": { formula: "MgO", name: "Magnesium oxide", type: "ionic", energy: "exothermic", ratio: { Mg: 1, O: 1 }, note: "Magnesium burns in air with a blinding white light — this is the ash left behind." },
-  "Al-O": { formula: "Al₂O₃", name: "Aluminum oxide", type: "ionic", energy: "exothermic", ratio: { Al: 2, O: 3 }, note: "Forms an invisible, tough coating on aluminum almost instantly in air, which is why aluminum doesn't rust away like iron." },
-  "Ca-O": { formula: "CaO", name: "Quicklime", type: "ionic", energy: "exothermic", ratio: { Ca: 1, O: 1 }, note: "Used in cement and mortar for thousands of years." },
-  "Cl-K": { formula: "KCl", name: "Potassium chloride", type: "ionic", energy: "exothermic", ratio: { K: 1, Cl: 1 }, note: "A common salt substitute and fertilizer ingredient." },
-  "Ag-Cl": { formula: "AgCl", name: "Silver chloride", type: "ionic", energy: "exothermic", ratio: { Ag: 1, Cl: 1 }, note: "Almost insoluble in water — instantly precipitates as a white solid, a classic chemistry-class demonstration." },
-  "Cu-O": { formula: "CuO", name: "Copper oxide", type: "ionic", energy: "exothermic", ratio: { Cu: 1, O: 1 }, note: "The black coating that forms on copper when it's heated in air." },
-  "O-Zn": { formula: "ZnO", name: "Zinc oxide", type: "ionic", energy: "exothermic", ratio: { Zn: 1, O: 1 }, note: "The white paste in sunscreen and diaper cream." },
-  "O-S": { formula: "SO₂", name: "Sulfur dioxide", type: "covalent", energy: "exothermic", ratio: { S: 1, O: 2 }, note: "The sharp smell of a just-struck match. A major contributor to acid rain when it comes from burning coal." },
-  "H-S": { formula: "H₂S", name: "Hydrogen sulfide", type: "covalent", energy: "exothermic", ratio: { H: 2, S: 1 }, note: "The rotten-egg smell — toxic in enough quantity, but your nose is extraordinarily sensitive to trace amounts." },
-  "Br-Na": { formula: "NaBr", name: "Sodium bromide", type: "ionic", energy: "exothermic", ratio: { Na: 1, Br: 1 }, note: "Once used as a sedative; today mostly a photography and industrial chemical." },
-  "I-K": { formula: "KI", name: "Potassium iodide", type: "ionic", energy: "exothermic", ratio: { K: 1, I: 1 }, note: "Added to table salt to prevent iodine-deficiency disorders — this is why salt is 'iodized.'" },
-  "N-O": { formula: "NO₂", name: "Nitrogen dioxide", type: "covalent", energy: "endothermic", ratio: { N: 1, O: 2 }, note: "The reddish-brown haze over polluted cities — forms from nitrogen and oxygen at the high temperatures inside engines." },
-  "H-Na": { formula: "NaH", name: "Sodium hydride", type: "ionic", energy: "exothermic", ratio: { Na: 1, H: 1 }, note: "Unusually, hydrogen is the negative ion here — sodium is even more eager to lose an electron than hydrogen is." },
-  "Ca-F": { formula: "CaF₂", name: "Fluorite", type: "ionic", energy: "exothermic", ratio: { Ca: 1, F: 2 }, note: "Found naturally as a mineral, and the main industrial source of fluorine." },
-  "F-H": { formula: "HF", name: "Hydrofluoric acid", type: "covalent", energy: "exothermic", ratio: { H: 1, F: 1 }, note: "One of the few things that dissolves glass — handled with extreme care." },
+  "H-O": { formula: "H₂O", name: "Water", type: "covalent", energy: "exothermic", ratio: { H: 2, O: 1 }, structure: "H—O—H", note: "Two hydrogens share electrons with one oxygen. The reaction that powers hydrogen fuel cells (in reverse) and rocket engines (forward, explosively)." },
+  "H-Cl": { formula: "HCl", name: "Hydrogen chloride", type: "covalent", energy: "exothermic", ratio: { H: 1, Cl: 1 }, structure: "H—Cl", note: "Dissolves in water to form hydrochloric acid — the acid in your stomach." },
+  "Cl-Na": { formula: "NaCl", name: "Table salt", type: "ionic", energy: "exothermic", ratio: { Na: 1, Cl: 1 }, structure: "Na⁺ Cl⁻", note: "Sodium gives up its outer electron, chlorine takes it — a violent reaction between a soft explosive metal and a toxic gas that somehow makes the salt on your fries." },
+  "C-O": { formula: "CO₂", name: "Carbon dioxide", type: "covalent", energy: "exothermic", ratio: { C: 1, O: 2 }, structure: "O═C═O", note: "What you exhale, and what plants breathe in. Also what burning carbon-based fuel produces." },
+  "H-N": { formula: "NH₃", name: "Ammonia", type: "covalent", energy: "exothermic", ratio: { N: 1, H: 3 }, structure: "H—N(—H)—H", note: "Made industrially by the millions of tons via the Haber process to feed the world's crops as fertilizer." },
+  "C-H": { formula: "CH₄", name: "Methane", type: "covalent", energy: "exothermic", ratio: { C: 1, H: 4 }, structure: "H—C(—H)(—H)—H", note: "The simplest hydrocarbon — natural gas is mostly this. A potent greenhouse gas." },
+  "Fe-O": { formula: "Fe₂O₃", name: "Rust", type: "ionic", energy: "exothermic", ratio: { Fe: 2, O: 3 }, structure: "Fe—O—Fe (bridged oxide lattice)", note: "Iron slowly gives up electrons to oxygen over time — the same basic chemistry as a much faster combustion, just gentler." },
+  "Mg-O": { formula: "MgO", name: "Magnesium oxide", type: "ionic", energy: "exothermic", ratio: { Mg: 1, O: 1 }, structure: "Mg²⁺ O²⁻", note: "Magnesium burns in air with a blinding white light — this is the ash left behind." },
+  "Al-O": { formula: "Al₂O₃", name: "Aluminum oxide", type: "ionic", energy: "exothermic", ratio: { Al: 2, O: 3 }, structure: "Al—O—Al (bridged oxide lattice)", note: "Forms an invisible, tough coating on aluminum almost instantly in air, which is why aluminum doesn't rust away like iron." },
+  "Ca-O": { formula: "CaO", name: "Quicklime", type: "ionic", energy: "exothermic", ratio: { Ca: 1, O: 1 }, structure: "Ca²⁺ O²⁻", note: "Used in cement and mortar for thousands of years." },
+  "Cl-K": { formula: "KCl", name: "Potassium chloride", type: "ionic", energy: "exothermic", ratio: { K: 1, Cl: 1 }, structure: "K⁺ Cl⁻", note: "A common salt substitute and fertilizer ingredient." },
+  "Ag-Cl": { formula: "AgCl", name: "Silver chloride", type: "ionic", energy: "exothermic", ratio: { Ag: 1, Cl: 1 }, structure: "Ag⁺ Cl⁻", note: "Almost insoluble in water — instantly precipitates as a white solid, a classic chemistry-class demonstration." },
+  "Cu-O": { formula: "CuO", name: "Copper oxide", type: "ionic", energy: "exothermic", ratio: { Cu: 1, O: 1 }, structure: "Cu²⁺ O²⁻", note: "The black coating that forms on copper when it's heated in air." },
+  "O-Zn": { formula: "ZnO", name: "Zinc oxide", type: "ionic", energy: "exothermic", ratio: { Zn: 1, O: 1 }, structure: "Zn²⁺ O²⁻", note: "The white paste in sunscreen and diaper cream." },
+  "O-S": { formula: "SO₂", name: "Sulfur dioxide", type: "covalent", energy: "exothermic", ratio: { S: 1, O: 2 }, structure: "O═S═O", note: "The sharp smell of a just-struck match. A major contributor to acid rain when it comes from burning coal." },
+  "H-S": { formula: "H₂S", name: "Hydrogen sulfide", type: "covalent", energy: "exothermic", ratio: { H: 2, S: 1 }, structure: "H—S—H", note: "The rotten-egg smell — toxic in enough quantity, but your nose is extraordinarily sensitive to trace amounts." },
+  "Br-Na": { formula: "NaBr", name: "Sodium bromide", type: "ionic", energy: "exothermic", ratio: { Na: 1, Br: 1 }, structure: "Na⁺ Br⁻", note: "Once used as a sedative; today mostly a photography and industrial chemical." },
+  "I-K": { formula: "KI", name: "Potassium iodide", type: "ionic", energy: "exothermic", ratio: { K: 1, I: 1 }, structure: "K⁺ I⁻", note: "Added to table salt to prevent iodine-deficiency disorders — this is why salt is 'iodized.'" },
+  "N-O": { formula: "NO₂", name: "Nitrogen dioxide", type: "covalent", energy: "endothermic", ratio: { N: 1, O: 2 }, structure: "O═N—O", note: "The reddish-brown haze over polluted cities — forms from nitrogen and oxygen at the high temperatures inside engines." },
+  "H-Na": { formula: "NaH", name: "Sodium hydride", type: "ionic", energy: "exothermic", ratio: { Na: 1, H: 1 }, structure: "Na⁺ H⁻", note: "Unusually, hydrogen is the negative ion here — sodium is even more eager to lose an electron than hydrogen is." },
+  "Ca-F": { formula: "CaF₂", name: "Fluorite", type: "ionic", energy: "exothermic", ratio: { Ca: 1, F: 2 }, structure: "F⁻ Ca²⁺ F⁻", note: "Found naturally as a mineral, and the main industrial source of fluorine." },
+  "F-H": { formula: "HF", name: "Hydrofluoric acid", type: "covalent", energy: "exothermic", ratio: { H: 1, F: 1 }, structure: "H—F", note: "One of the few things that dissolves glass — handled with extreme care." },
 };
 
 // A handful of three-element curated compounds, checked when the bench has
 // exactly three distinct elements filled in.
 const REACTION_TABLE_3 = {
-  "H-Na-O": { formula: "NaOH", name: "Sodium hydroxide (lye)", type: "ionic", energy: "exothermic", ratio: { Na: 1, O: 1, H: 1 }, note: "The same product sodium makes when dropped in water, built here directly from its three elements. Extremely caustic — it's the active ingredient in drain cleaner." },
-  "C-H-O": { formula: "C₆H₁₂O₆ (simplified)", name: "A sugar (glucose-family carbohydrate)", type: "covalent", energy: "n/a", ratio: { C: 1, H: 2, O: 1 }, note: "Carbon, hydrogen, and oxygen in this kind of ratio are the building blocks of carbohydrates — the sugars and starches that store energy in food and fuel your cells." },
+  "H-Na-O": { formula: "NaOH", name: "Sodium hydroxide (lye)", type: "ionic", energy: "exothermic", ratio: { Na: 1, O: 1, H: 1 }, structure: "Na⁺ [O—H]⁻", note: "The same product sodium makes when dropped in water, built here directly from its three elements. Extremely caustic — it's the active ingredient in drain cleaner." },
+  "C-H-O": { formula: "C₆H₁₂O₆ (simplified)", name: "A sugar (glucose-family carbohydrate)", type: "covalent", energy: "n/a", ratio: { C: 1, H: 2, O: 1 }, structure: "—C(—H)(—OH)—, repeating", note: "Carbon, hydrogen, and oxygen in this kind of ratio are the building blocks of carbohydrates — the sugars and starches that store energy in food and fuel your cells." },
 };
 
 function reactionKey(...symbols) {

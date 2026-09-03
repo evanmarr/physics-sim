@@ -207,6 +207,24 @@ export class ChemistryMode {
     for (const e of filled) if (e.symbol !== WATER_SYMBOL) counts[e.symbol] = (counts[e.symbol] || 0) + 1;
     this.lastResult = { entries: filled, counts, distinct: Object.keys(counts), hasWater: filled.some((e) => e.symbol === WATER_SYMBOL), result };
     this.root.dispatchEvent(new CustomEvent("chem:reaction", { detail: this.lastResult }));
+
+    // Show every reacted atom together in the 3D viewer instead of just the
+    // last single element selected — water expands to its real O + 2H.
+    // Colored by the conventional CPK palette (not category color) so
+    // different elements in the same molecule are easy to tell apart.
+    const moleculeAtoms = [];
+    for (const e of filled) {
+      if (e.symbol === WATER_SYMBOL) {
+        moleculeAtoms.push({ symbol: "O", colorHex: cpkColor("O") });
+        moleculeAtoms.push({ symbol: "H", colorHex: cpkColor("H") });
+        moleculeAtoms.push({ symbol: "H", colorHex: cpkColor("H") });
+      } else {
+        moleculeAtoms.push({ symbol: e.symbol, colorHex: cpkColor(e.symbol) });
+      }
+    }
+    this.atomViewer.showMolecule(moleculeAtoms);
+    this.elementInfo.innerHTML = "";
+    this.elementInfo.appendChild(moleculeInfoCard(result, moleculeAtoms));
   }
 
   _openChallenges() {
@@ -229,6 +247,36 @@ function gridRowFor(el) {
   if (el.category === "lanthanide") return 9;
   if (el.category === "actinide") return 10;
   return el.period;
+}
+
+// Standard CPK atom-coloring convention for the molecule viewer, so
+// different elements in one molecule are distinguishable at a glance —
+// falls back to the element's category color for anything not listed.
+const CPK_COLORS = {
+  H: "#f2f2f2", C: "#404040", N: "#3050f8", O: "#ff3030", F: "#90e050",
+  Cl: "#1fc01f", Br: "#a62929", I: "#940094", S: "#ffc832", P: "#ff8000",
+  Na: "#ab5cf2", K: "#8f40d4", Ca: "#3dff00", Mg: "#8aff00", Fe: "#e06633",
+  Cu: "#c88033", Zn: "#7d80b0", Ag: "#c0c0c0", Au: "#ffd123", He: "#d9ffff",
+};
+function cpkColor(symbol) {
+  return CPK_COLORS[symbol] || CATEGORY_COLORS[elementBySymbol(symbol)?.category] || "#4f8cff";
+}
+
+function moleculeInfoCard(result, atoms) {
+  const card = div("chem-info-card");
+  const counts = {};
+  atoms.forEach((a) => { counts[a.symbol] = (counts[a.symbol] || 0) + 1; });
+  const composition = Object.entries(counts).map(([sym, n]) => (n === 1 ? sym : `${sym}${n}`)).join(" + ");
+  card.innerHTML = `
+    <div class="chem-info-title">${result.name || "Result"}</div>
+    <div class="chem-info-row"><span>Atoms shown</span><b>${composition}</b></div>
+    ${result.formula ? `<div class="chem-info-row"><span>Formula</span><b>${result.formula}</b></div>` : ""}
+  `;
+  const note = document.createElement("div");
+  note.className = "chem-molecule-note";
+  note.textContent = "Simplified ball-and-stick view — atoms are spread evenly around the central one, not each molecule's real bond angles.";
+  card.appendChild(note);
+  return card;
 }
 
 function elementInfoCard(el) {
@@ -308,6 +356,7 @@ function resultCard(result) {
     <div class="chem-result-formula">${result.formula}</div>
     <div class="chem-result-name">${result.name}</div>
     <div class="chem-result-tags"><span>${result.type}</span><span>${result.energy}</span></div>
+    ${result.structure ? `<div class="chem-result-structure-label">Structural formula</div><div class="chem-result-structure">${result.structure}</div>` : ""}
     <div class="chem-result-note">${result.note}</div>
   `;
   return card;
