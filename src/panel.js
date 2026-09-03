@@ -94,6 +94,13 @@ export function renderPanel(container, spec, state, handlers) {
     container.appendChild(sliderField("Elasticity", spec.elasticity, 0, 1, 0.05, (v) => set({ elasticity: v })));
     container.appendChild(helpText("Low = a stiff, taut rope. High = a stretchy bungee cord."));
   }
+  if (fields.includes("attachStartId")) {
+    container.appendChild(attachField("Attach start to", spec, "attachStartId", state, (v) => set({ attachStartId: v })));
+  }
+  if (fields.includes("attachEndId")) {
+    container.appendChild(attachField("Attach end to", spec, "attachEndId", state, (v) => set({ attachEndId: v })));
+    container.appendChild(helpText("Pins that end to the chosen object's center — leave as (none) to have it hang or auto-anchor to whatever it's dropped on."));
+  }
   if (fields.includes("curvature")) {
     container.appendChild(sliderField("Curvature", spec.curvature, -1, 1, 0.05, (v) => set({ curvature: v })));
     container.appendChild(helpText(spec.curvature >= 0 ? "Convex — bends light rays inward to a focus (converging)." : "Concave — spreads light rays outward (diverging)."));
@@ -123,7 +130,10 @@ export function renderPanel(container, spec, state, handlers) {
 
 // The standalone "physics math" panel, shown between the canvas and the
 // property panel — open by default, closable via the × in its title.
-export function renderPhysicsMathPanel(container, spec, onClose) {
+// `onEdit(key, value)` fires when the user drags one of the editable
+// variables (density/friction/restitution) — it writes an override onto the
+// object's spec, so the equation shown here is exactly what physics.js uses.
+export function renderPhysicsMathPanel(container, spec, onClose, onEdit) {
   container.innerHTML = "";
   const mathLines = spec ? physicsMath(spec) : null;
   if (!mathLines || !mathLines.length) {
@@ -147,7 +157,7 @@ export function renderPhysicsMathPanel(container, spec, onClose) {
   title.appendChild(closeBtn);
   container.appendChild(title);
 
-  mathLines.forEach(({ formula, note }) => {
+  mathLines.forEach(({ formula, note, edit }) => {
     const row = document.createElement("div");
     row.className = "math-row";
     const f = document.createElement("div");
@@ -158,6 +168,32 @@ export function renderPhysicsMathPanel(container, spec, onClose) {
     n.textContent = note;
     row.appendChild(f);
     row.appendChild(n);
+
+    if (edit && onEdit) {
+      const editRow = document.createElement("div");
+      editRow.className = "math-edit-row";
+      const input = document.createElement("input");
+      input.type = "range";
+      input.min = edit.min; input.max = edit.max; input.step = edit.step;
+      input.value = edit.value;
+      const valSpan = document.createElement("span");
+      valSpan.className = "math-edit-value";
+      valSpan.textContent = Math.round(edit.value * 100) / 100;
+      input.addEventListener("input", () => {
+        valSpan.textContent = Math.round(parseFloat(input.value) * 100) / 100;
+        onEdit(edit.key, parseFloat(input.value));
+      });
+      const resetBtn = document.createElement("button");
+      resetBtn.className = "math-edit-reset";
+      resetBtn.textContent = "↺";
+      resetBtn.title = "Reset to material default";
+      resetBtn.addEventListener("click", () => onEdit(edit.key, undefined));
+      editRow.appendChild(input);
+      editRow.appendChild(valSpan);
+      editRow.appendChild(resetBtn);
+      row.appendChild(editRow);
+    }
+
     container.appendChild(row);
   });
 }
@@ -257,6 +293,30 @@ function materialField(current, onChange) {
     row.appendChild(item);
   });
   wrap.appendChild(row);
+  return wrap;
+}
+
+function attachField(label, spec, key, state, onChange) {
+  const wrap = document.createElement("div");
+  wrap.className = "field";
+  const l = document.createElement("label");
+  l.textContent = label;
+  wrap.appendChild(l);
+  const select = document.createElement("select");
+  const none = document.createElement("option");
+  none.value = ""; none.textContent = "(none)";
+  select.appendChild(none);
+  state.objects
+    .filter((o) => o.id !== spec.id)
+    .forEach((o) => {
+      const opt = document.createElement("option");
+      opt.value = o.id;
+      opt.textContent = `${OBJECT_DEFS[o.type].label} (${o.id.split("_")[1]})`;
+      if (spec[key] === o.id) opt.selected = true;
+      select.appendChild(opt);
+    });
+  select.addEventListener("change", () => onChange(select.value || null));
+  wrap.appendChild(select);
   return wrap;
 }
 

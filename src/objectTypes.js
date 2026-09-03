@@ -116,8 +116,8 @@ export const OBJECT_DEFS = {
     // to a fixed point in space if nothing's there) and hangs/swings from
     // it as a chain of small segments — elasticity maps to how stiff the
     // links between segments are.
-    defaultSpec: () => ({ type: "rope", x: 0, y: 0, rotation: 90, length: 240, thickness: 10, elasticity: 0.15, material: "wood" }),
-    fields: ["length", "thickness", "elasticity", "material"],
+    defaultSpec: () => ({ type: "rope", x: 0, y: 0, rotation: 90, length: 240, thickness: 10, elasticity: 0.15, material: "wood", attachStartId: null, attachEndId: null }),
+    fields: ["length", "thickness", "elasticity", "material", "attachStartId", "attachEndId"],
   },
   lens: {
     label: "Lens",

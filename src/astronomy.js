@@ -122,8 +122,18 @@ export class AstronomyMode {
       const mat = new THREE.MeshStandardMaterial({ color: new THREE.Color(planet.color), roughness: 0.7 });
       const mesh = new THREE.Mesh(geo, mat);
       mesh.userData.planet = planet;
+      mesh.userData.size = size;
       this.scene.add(mesh);
       this.planetMeshes[planet.name] = mesh;
+
+      // A small dark marker at the equator makes the sphere's own spin
+      // actually visible — a uniformly-colored sphere rotating in place
+      // looks identical frame to frame otherwise.
+      const markerGeo = new THREE.SphereGeometry(size * 0.16, 8, 8);
+      const markerMat = new THREE.MeshBasicMaterial({ color: 0x1b1e24 });
+      const marker = new THREE.Mesh(markerGeo, markerMat);
+      marker.position.set(size, 0, 0);
+      mesh.add(marker);
 
       const orbitGeo = new THREE.BufferGeometry();
       const points = [];
@@ -144,6 +154,15 @@ export class AstronomyMode {
     const moonMat = new THREE.MeshStandardMaterial({ color: 0xcccccc });
     this.moonMesh = new THREE.Mesh(moonGeo, moonMat);
     this.scene.add(this.moonMesh);
+
+    // A wireframe halo around whichever planet is selected — repositioned
+    // and rescaled to that planet every frame in _updatePositions.
+    const ringGeo = new THREE.SphereGeometry(1, 20, 20);
+    const ringMat = new THREE.MeshBasicMaterial({ color: 0xffffff, wireframe: true, transparent: true, opacity: 0.85, depthTest: false });
+    this.selectionRing = new THREE.Mesh(ringGeo, ringMat);
+    this.selectionRing.visible = false;
+    this.selectionRing.renderOrder = 10;
+    this.scene.add(this.selectionRing);
 
     this.renderer.domElement.addEventListener("click", (e) => this._pickPlanet(e));
 
@@ -169,7 +188,19 @@ export class AstronomyMode {
     if (hits.length) {
       this.selectedPlanet = hits[0].object.userData.planet;
       this._buildInfo();
+      this._updateSelectionRing();
     }
+  }
+
+  _updateSelectionRing() {
+    if (!this.selectionRing) return;
+    if (!this.selectedPlanet) { this.selectionRing.visible = false; return; }
+    const mesh = this.planetMeshes[this.selectedPlanet.name];
+    if (!mesh) { this.selectionRing.visible = false; return; }
+    this.selectionRing.visible = true;
+    this.selectionRing.position.copy(mesh.position);
+    const s = (mesh.userData.size || 1) * 1.6;
+    this.selectionRing.scale.set(s, s, s);
   }
 
   _updatePositions() {
@@ -178,6 +209,18 @@ export class AstronomyMode {
       const pos = planetPosition(planet, jd);
       const mesh = this.planetMeshes[planet.name];
       mesh.position.set(pos.x * AU_SCALE, pos.z * AU_SCALE, pos.y * AU_SCALE);
+      // Axial spin is a pure function of the date too, same as orbital
+      // position — no accumulated per-frame state, so scrubbing the date
+      // instantly (not just animating forward) still shows the right phase.
+      // Reduce mod 2π in JS's double precision *before* handing it to
+      // Three.js, whose rotation matrices are float32 internally — jd*24
+      // in the thousands of years since J2000 divided by a planet's short
+      // rotation period accumulates a raw angle in the tens of millions of
+      // radians, which float32 can no longer represent to sub-radian
+      // accuracy (its ~7 significant digits run out around 1e7) and the
+      // spin would visibly stutter/jump instead of turning smoothly.
+      const spinTurns = (jd * 24) / planet.rotationHours;
+      mesh.rotation.y = (spinTurns - Math.floor(spinTurns)) * Math.PI * 2;
       if (planet.name === "Earth") {
         const moon = moonOffsetFromEarth(jd);
         this.moonMesh.position.set(
@@ -187,6 +230,7 @@ export class AstronomyMode {
         );
       }
     }
+    this._updateSelectionRing();
     if (this.dateLabel) this.dateLabel.textContent = this.date.toUTCString();
     if (this.selectedPlanet) this._refreshInfoNumbers();
   }

@@ -252,6 +252,11 @@ button:disabled { opacity: .4; cursor: default; }
   word-break: break-word;
 }
 .math-note { font-size: 11.5px; line-height: 1.45; color: var(--text-dim); }
+.math-edit-row { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
+.math-edit-row input[type="range"] { flex: 1; }
+.math-edit-value { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; color: var(--text-dim); min-width: 2.4em; text-align: right; }
+.math-edit-reset { background: none; border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px; font-size: 11px; color: var(--text-dim); line-height: 1.4; }
+.math-edit-reset:hover { color: var(--text); border-color: var(--accent-2); }
 
 .modal { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: flex; align-items: center; justify-content: center; z-index: 50; }
 .modal-box { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 20px; width: 360px; max-height: 70vh; overflow-y: auto; }
@@ -405,6 +410,17 @@ button:disabled { opacity: .4; cursor: default; }
 
 .anat-brain-controls { display: flex; gap: 8px; padding: 0 10px 8px; }
 .anat-hemi-labels { display: flex; justify-content: space-between; padding: 0 24px 10px; font-size: 11px; color: var(--text-dim); }
+
+.anat-challenge-banner {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  background: var(--accent); color: #fff; border-radius: 8px;
+  padding: 8px 12px; margin: 8px 10px 0; font-size: 12.5px;
+}
+.anat-challenge-banner button { background: rgba(255,255,255,.2); border: none; color: #fff; padding: 3px 10px; border-radius: 5px; }
+.anat-challenge-banner button:hover { background: rgba(255,255,255,.32); }
+.anat-challenge-progress { opacity: .85; font-size: 11px; }
+.anat-hunt-correct > * { fill: #2ecc71 !important; transition: fill .15s; }
+.anat-hunt-incorrect > * { fill: #e74c3c !important; transition: fill .15s; }
 
 .anat-system-link {
   background: var(--panel-alt); border: 1px solid var(--border); border-radius: 6px;

@@ -17,10 +17,22 @@ function fmt(n, digits = 2) {
   return Number(n.toFixed(digits)).toString();
 }
 
-// Returns an array of { formula, note } lines, or null if there's nothing
-// meaningful to show for this object.
+// Effective ρ/μ/e for a spec: the object's own override if it has one set,
+// else the material's preset. Physics.js uses the exact same lookup, so
+// editing a value here really does change how the object behaves.
+export function effectiveDensity(spec, mat) { return spec.densityOverride ?? mat.density; }
+export function effectiveFriction(spec, mat) { return spec.frictionOverride ?? mat.friction; }
+export function effectiveRestitution(spec, mat) { return spec.restitutionOverride ?? mat.restitution; }
+
+// Returns an array of { formula, note, edit? } lines, or null if there's
+// nothing meaningful to show for this object. A line with `edit` is a
+// live-tunable variable: { key, value, min, max, step } — the UI renders a
+// slider for it and writes spec[key] back, overriding the material preset.
 export function physicsMath(spec) {
   const mat = materialOf(spec.material);
+  const density = effectiveDensity(spec, mat);
+  const friction = effectiveFriction(spec, mat);
+  const restitution = effectiveRestitution(spec, mat);
   const lines = [];
 
   if (mat.isFluid) {
@@ -29,17 +41,19 @@ export function physicsMath(spec) {
       note: `Archimedes' principle: this pushes up on anything submerged in it, regardless of the object's own material.`,
     });
     lines.push({
-      formula: `ρ_water = ${mat.density}`,
+      formula: `ρ_water = ${fmt(density, 2)}`,
       note: `An object floats if its own density is less than this, and sinks if it's greater — try comparing to the balls' densities below.`,
+      edit: { key: "densityOverride", value: density, min: 0.05, max: 5, step: 0.05 },
     });
     return lines;
   }
 
   const area = areaOf(spec);
-  const mass = mat.density * area * 1e-3; // same 0.001 scale physics.js uses
+  const mass = density * area * 1e-3; // same 0.001 scale physics.js uses
   lines.push({
-    formula: `m = ρ · A = ${mat.density} × ${fmt(area, 0)} ≈ ${fmt(mass, 2)}`,
+    formula: `m = ρ · A = ${fmt(density, 2)} × ${fmt(area, 0)} ≈ ${fmt(mass, 2)}`,
     note: `Mass comes from density × area (this sim is 2D, so "volume" is area). Denser or bigger objects need more force to move.`,
+    edit: { key: "densityOverride", value: density, min: 0.05, max: 25, step: 0.05 },
   });
 
   if (!spec.fixed) {
@@ -50,17 +64,19 @@ export function physicsMath(spec) {
   }
 
   lines.push({
-    formula: `μ (friction) = ${mat.friction}`,
-    note: mat.friction < 0.1
+    formula: `μ (friction) = ${fmt(friction, 2)}`,
+    note: friction < 0.1
       ? "Near zero — this barely resists sliding at all, so anything on it will glide."
-      : mat.friction > 0.7
+      : friction > 0.7
         ? "High friction — things resting on this grip rather than slide."
         : "Moderate friction — some resistance to sliding, but not sticky.",
+    edit: { key: "frictionOverride", value: friction, min: 0, max: 1.5, step: 0.02 },
   });
 
   lines.push({
-    formula: `e (restitution) = ${mat.restitution}`,
+    formula: `e (restitution) = ${fmt(restitution, 2)}`,
     note: `On impact, the rebound speed is roughly e × the impact speed. e=0 means no bounce at all; e=1 would be a perfectly elastic bounce that loses no energy.`,
+    edit: { key: "restitutionOverride", value: restitution, min: 0, max: 1, step: 0.02 },
   });
 
   if (mat.shatters) {

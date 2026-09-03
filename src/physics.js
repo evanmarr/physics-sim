@@ -1,4 +1,5 @@
 import { materialOf } from "./materials.js";
+import { effectiveDensity, effectiveFriction, effectiveRestitution } from "./physicsEdu.js";
 import { makeId, cannonCatchRadius } from "./objectTypes.js";
 import { equilateralPoints } from "./render.js";
 
@@ -19,6 +20,11 @@ const CANNON_LAUNCH_SCALE = 1.0;
 const BUTTON_COOLDOWN_MS = 700;
 const SPRING_COOLDOWN_MS = 350;
 const PIVOT_ANGULAR_DAMPING = 0.25;
+const WATER_PARTICLE_RADIUS = 5;
+const WATER_PARTICLE_MAX = 140;
+const WIND_PARTICLE_RADIUS = 3;
+const WIND_PARTICLE_LIFESPAN_MS = 1400;
+const WIND_SPAWN_EVERY_N_TICKS = 4;
 
 export class PhysicsSim {
   constructor(specs, gravity, callbacks) {
@@ -38,6 +44,9 @@ export class PhysicsSim {
     this.magnetMeta = new Map(); // magnetId -> {body, spec}
     this.springMeta = new Map(); // springPadId -> {spec, cooldownUntil}
     this.pivotHostBodies = []; // bodies pivoted on a ball bearing, for settling damping
+    this.waterParticles = []; // real dynamic bodies that settle/collide like granular liquid
+    this.windParticles = []; // real dynamic sensor bodies, pushed by fan force fields
+    this._fanTick = 0;
     this._build();
     this._wireEvents();
   }
@@ -53,16 +62,27 @@ export class PhysicsSim {
     // nothing, which is exactly the "why won't this swing" trap.
     const pivots = []; // { bearingSpec, hostSpec }
     const pivotHostIds = new Set();
+    // A bearing sits physically embedded inside its host (that's how a pivot
+    // point works), so besides the point constraint that lets the host swing
+    // around it, the bearing and host must never solid-collide with each
+    // other — otherwise Matter treats them as permanently overlapping bodies
+    // and fights to push them apart every single step, which looks like
+    // violent jitter/explosion. Give each bearing+host pair a shared
+    // negative collision group (same technique as rope segments).
+    const noCollideGroupById = new Map(); // specId -> group, for bearing + its host
     for (const spec of this.specs) {
       if (spec.type !== "ballBearing") continue;
       const host = this._findPivotHost(spec, specById);
       if (!host) continue;
       pivots.push({ bearingSpec: spec, hostSpec: host });
       pivotHostIds.add(host.id);
+      const group = Body.nextGroup(true);
+      noCollideGroupById.set(spec.id, group);
+      noCollideGroupById.set(host.id, group);
     }
 
     for (const spec of this.specs) {
-      const body = this._createBody(spec, pivotHostIds.has(spec.id));
+      const body = this._createBody(spec, pivotHostIds.has(spec.id), noCollideGroupById.get(spec.id));
       if (!body) continue;
       this.byId.set(spec.id, body);
       Composite.add(world, body);
@@ -118,6 +138,66 @@ export class PhysicsSim {
     for (const spec of this.specs) {
       if (spec.type === "rope") this._buildRope(spec, specById);
     }
+
+    // water: fill the zone with real small dynamic bodies (the standard
+    // "granular liquid" approximation — cheap rigid circles that collide
+    // with each other and anything that falls in, so it actually splashes
+    // and settles instead of just animating bubble sprites).
+    for (const spec of this.specs) {
+      if (spec.type === "board" && materialOf(spec.material).isFluid) {
+        this._buildWaterParticles(spec);
+      }
+    }
+  }
+
+  _buildWaterParticles(spec) {
+    const world = this.engine.world;
+    const w = spec.width, h = spec.height;
+    const r = WATER_PARTICLE_RADIUS;
+    const cols = Math.max(2, Math.floor(w / (r * 2.2)));
+    const total = Math.min(WATER_PARTICLE_MAX, cols * Math.max(2, Math.floor(h / (r * 2.1))));
+    const rows = Math.max(1, Math.ceil(total / cols));
+    let count = 0;
+    for (let ry = 0; ry < rows && count < total; ry++) {
+      for (let cx = 0; cx < cols && count < total; cx++) {
+        const jitterX = (Math.random() - 0.5) * r * 0.6;
+        const jitterY = (Math.random() - 0.5) * r * 0.6;
+        const px = spec.x - w / 2 + r * 1.1 + (cols > 1 ? cx * (w - r * 2.2) / (cols - 1) : 0) + jitterX;
+        const py = spec.y + h / 2 - r * 1.1 - ry * r * 2.1 + jitterY;
+        const body = Bodies.circle(px, py, r, {
+          friction: 0.02,
+          frictionAir: 0.035,
+          restitution: 0,
+          density: 0.9 * DENSITY_SCALE,
+          label: `waterParticle:${spec.id}`,
+        });
+        body.plugin = {
+          gameId: makeId("wp"),
+          material: "waterParticleVisual", // deliberately not "water" — keeps it out of the buoyancy-source filter
+          gameArea: Math.PI * r * r,
+          transient: true,
+          render: { hidden: true },
+        };
+        Composite.add(world, body);
+        this.waterParticles.push(body);
+        count++;
+      }
+    }
+
+    // Invisible walls so the particles stay inside the water zone instead of
+    // drifting past its (otherwise sensor-only) edges; left open at the top
+    // so things can fall in and splash.
+    const wallT = 8;
+    const wallOpts = { isStatic: true, friction: 0.02, restitution: 0 };
+    const walls = [
+      Bodies.rectangle(spec.x - w / 2 - wallT / 2, spec.y, wallT, h, wallOpts),
+      Bodies.rectangle(spec.x + w / 2 + wallT / 2, spec.y, wallT, h, wallOpts),
+      Bodies.rectangle(spec.x, spec.y + h / 2 + wallT / 2, w + wallT * 2, wallT, wallOpts),
+    ];
+    walls.forEach((wall) => {
+      wall.plugin = { render: { hidden: true } };
+      Composite.add(world, wall);
+    });
   }
 
   _buildRope(spec, specById) {
@@ -178,13 +258,17 @@ export class PhysicsSim {
       }
     }
 
-    // anchor: if a dynamic board/triangle sits at the rope's origin, tie the
-    // rope to it (so it swings along with that host); otherwise pin to that
-    // fixed point in space, same as a rope tied to a wall or ceiling.
-    const host = this._findPivotHost({ id: spec.id, x: spec.x, y: spec.y }, specById);
+    // anchor: an explicit "Attach start to" target wins; otherwise, if a
+    // dynamic board/triangle sits at the rope's origin, tie the rope to it
+    // (so it swings along with that host); otherwise pin to that fixed
+    // point in space, same as a rope tied to a wall or ceiling. Pinning to
+    // a *static* body's local point behaves exactly like a fixed-space pin
+    // (it never moves), so the two cases share the same bodyA/pointA form.
+    const explicitStart = spec.attachStartId ? specById.get(spec.attachStartId) : null;
+    const host = explicitStart || this._findPivotHost({ id: spec.id, x: spec.x, y: spec.y }, specById);
     const hostBody = host ? this.byId.get(host.id) : null;
     let anchorConfig;
-    if (hostBody && !hostBody.isStatic) {
+    if (hostBody) {
       const cos = Math.cos(-host.rotation * RAD), sin = Math.sin(-host.rotation * RAD);
       const dx = spec.x - host.x, dy = spec.y - host.y;
       const localX = dx * cos - dy * sin, localY = dx * sin + dy * cos;
@@ -193,6 +277,26 @@ export class PhysicsSim {
       anchorConfig = { pointA: { x: spec.x, y: spec.y }, bodyB: segments[0], pointB: { x: -segLen / 2, y: 0 }, length: 0, stiffness, damping: 0.15 };
     }
     Composite.add(world, Constraint.create(anchorConfig));
+
+    // "Attach end to" — pin the rope's free tip to another object the same
+    // way, so e.g. a rope can be strung between a fixed peg and a swinging
+    // ball bearing instead of just hanging loose at the far end.
+    if (spec.attachEndId) {
+      const endHost = specById.get(spec.attachEndId);
+      const endBody = endHost ? this.byId.get(endHost.id) : null;
+      if (endBody) {
+        const tipX = spec.x + dir.x * length, tipY = spec.y + dir.y * length;
+        const cos = Math.cos(-endHost.rotation * RAD), sin = Math.sin(-endHost.rotation * RAD);
+        const dx = tipX - endHost.x, dy = tipY - endHost.y;
+        const localX = dx * cos - dy * sin, localY = dx * sin + dy * cos;
+        const lastSeg = segments[segments.length - 1];
+        Composite.add(world, Constraint.create({
+          bodyA: endBody, pointA: { x: localX, y: localY },
+          bodyB: lastSeg, pointB: { x: segLen / 2, y: 0 },
+          length: 0, stiffness, damping: 0.15,
+        }));
+      }
+    }
   }
 
   _findPivotHost(bearing, specById) {
@@ -206,18 +310,19 @@ export class PhysicsSim {
     return best;
   }
 
-  _createBody(spec, forceDynamic = false) {
+  _createBody(spec, forceDynamic = false, noCollideGroup = null) {
     const mat = materialOf(spec.material);
     const isFluid = !!mat.isFluid;
     const common = {
       isStatic: isFluid ? true : (forceDynamic ? false : !!spec.fixed),
       isSensor: isFluid,
       angle: (spec.rotation || 0) * RAD,
-      friction: mat.friction,
+      friction: effectiveFriction(spec, mat),
       frictionAir: mat.frictionAir ?? 0.01,
-      restitution: mat.restitution,
-      density: Math.max(mat.density * DENSITY_SCALE, 0.0001),
+      restitution: effectiveRestitution(spec, mat),
+      density: Math.max(effectiveDensity(spec, mat) * DENSITY_SCALE, 0.0001),
       label: `${spec.type}:${spec.id}`,
+      ...(noCollideGroup != null ? { collisionFilter: { group: noCollideGroup } } : {}),
     };
 
     let body = null;
@@ -313,12 +418,19 @@ export class PhysicsSim {
   _applyFans() {
     if (!this.fanMeta.size) return;
     const bodies = Composite.allBodies(this.engine.world);
+    this._fanTick++;
+    const spawnNow = this._fanTick % WIND_SPAWN_EVERY_N_TICKS === 0;
     for (const { body: fan, spec } of this.fanMeta.values()) {
       const angle = fan.angle;
       const dir = { x: Math.cos(angle), y: Math.sin(angle) };
       const cos = Math.cos(-angle), sin = Math.sin(-angle);
+      // Wind particles are real dynamic bodies (isSensor so they don't shove
+      // solid objects on contact, but sensors still receive applied forces —
+      // only isStatic is excluded below), so this same loop naturally pushes
+      // them along the field exactly like any other body: real F=ma, not an
+      // animated position.
       for (const body of bodies) {
-        if (body === fan || body.isStatic || body.isSensor) continue;
+        if (body === fan || body.isStatic) continue;
         const dx = body.position.x - fan.position.x;
         const dy = body.position.y - fan.position.y;
         const lx = dx * cos - dy * sin;
@@ -329,7 +441,34 @@ export class PhysicsSim {
         const mag = spec.power * FAN_FORCE_SCALE * falloff * body.mass;
         Body.applyForce(body, body.position, { x: dir.x * mag, y: dir.y * mag });
       }
+      if (spawnNow) this._spawnWindParticle(fan, spec, dir);
     }
+  }
+
+  _spawnWindParticle(fan, spec, dir) {
+    const world = this.engine.world;
+    const perp = { x: -dir.y, y: dir.x };
+    const lane = (Math.random() - 0.5) * spec.height * 0.8;
+    const startX = fan.position.x + dir.x * (spec.width / 2 + 4) + perp.x * lane;
+    const startY = fan.position.y + dir.y * (spec.width / 2 + 4) + perp.y * lane;
+    const body = Bodies.circle(startX, startY, WIND_PARTICLE_RADIUS, {
+      isSensor: true, // visual airflow only — never shoves real objects on contact
+      friction: 0,
+      frictionAir: 0.02,
+      restitution: 0,
+      density: 0.02 * DENSITY_SCALE,
+      label: `windParticle:${spec.id}`,
+    });
+    Body.setVelocity(body, { x: dir.x * 2, y: dir.y * 2 });
+    body.plugin = {
+      gameId: makeId("wind"),
+      transient: true,
+      spawnedAt: performance.now(),
+      lifespanMs: WIND_PARTICLE_LIFESPAN_MS,
+      render: { hidden: true },
+    };
+    Composite.add(world, body);
+    this.windParticles.push(body);
   }
 
   _applyMagnets() {
@@ -640,6 +779,29 @@ export class PhysicsSim {
     Events.off(this.engine);
     World.clear(this.engine.world, false);
     Engine.clear(this.engine);
+  }
+
+  // Real physics-driven water/wind particles, in the same {id,kind,x,y,...}
+  // shape the renderer's particle layer already expects — positions come
+  // straight from the Matter bodies built in _buildWaterParticles /
+  // _spawnWindParticle, not from a decorative animation formula.
+  collectParticleItems() {
+    const now = performance.now();
+    this.windParticles = this.windParticles.filter((b) => now - b.plugin.spawnedAt <= b.plugin.lifespanMs);
+    const items = [];
+    for (const body of this.waterParticles) {
+      items.push({ id: body.plugin.gameId, kind: "bubble", x: body.position.x, y: body.position.y, r: WATER_PARTICLE_RADIUS, opacity: 0.6 });
+    }
+    for (const body of this.windParticles) {
+      const vx = body.velocity.x, vy = body.velocity.y;
+      items.push({
+        id: body.plugin.gameId, kind: "streak",
+        x: body.position.x, y: body.position.y,
+        x2: body.position.x - vx * 3, y2: body.position.y - vy * 3,
+        opacity: 0.4,
+      });
+    }
+    return items;
   }
 
   collectRenderItems() {

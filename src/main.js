@@ -113,7 +113,11 @@ function renderMathPanelUI() {
   const spec = state.objects.find((o) => o.id === state.selectedId) || null;
   panelEl.classList.toggle("hidden", !state.mathPanelOpen);
   if (state.mathPanelOpen) {
-    renderPhysicsMathPanel(panelEl, spec, () => { state.mathPanelOpen = false; renderMathPanelUI(); renderPanelUI(); });
+    renderPhysicsMathPanel(
+      panelEl, spec,
+      () => { state.mathPanelOpen = false; renderMathPanelUI(); renderPanelUI(); },
+      (key, value) => { if (spec) patchObject(spec.id, { [key]: value }); renderMathPanelUI(); }
+    );
   }
 }
 
@@ -287,7 +291,7 @@ function togglePlay(renderer) {
         renderer.render(items, { editable: false });
         checkChallengeFrame(items);
         if (state.lightMode) updateLightRays(items);
-        window._renderer.renderParticles(buildParticles(items, particleClock));
+        window._renderer.renderParticles(sim.collectParticleItems());
       },
       onEvent: (event) => handleSimEvent(event),
     });
@@ -409,7 +413,7 @@ function wireModeTabs() {
     for (const [m, el] of Object.entries(roots)) el.classList.toggle("hidden", mode !== m);
     physicsOnlyControls.forEach((el) => el && (el.style.display = mode === "physics" ? "" : "none"));
     challengeBtn.style.display = mode === "physics" ? "" : "none";
-    quizBtn.style.display = mode === "chemistry" || mode === "anatomy" ? "" : "none";
+    quizBtn.style.display = mode === "chemistry" || mode === "anatomy" || mode === "physics" ? "" : "none";
 
     if (mode === "physics") startParticleLoop(); else stopParticleLoop();
 
@@ -421,7 +425,7 @@ function wireModeTabs() {
     }
 
     if (mode === "anatomy") {
-      if (!anatomyMode) anatomyMode = new AnatomyMode(anatomyRoot);
+      if (!anatomyMode) anatomyMode = new AnatomyMode(anatomyRoot, { state, showToast });
       anatomyMode.mount();
     } else {
       anatomyMode?.unmount();

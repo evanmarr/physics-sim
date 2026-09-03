@@ -1,13 +1,15 @@
 import { SYSTEMS, ORGANS, BODY_OUTLINE, VIEWBOX, organById, organsForSystem, BRAIN_VIEWBOX, BRAIN_PARTS_LOBES, BRAIN_PARTS_CROSS_SECTION } from "./anatomyData.js";
 
 export class AnatomyMode {
-  constructor(root) {
+  constructor(root, ctx) {
     this.root = root;
+    this.ctx = ctx || {}; // { state, showToast }
     this.activeSystems = new Set(["skin"]);
     this.selectedOrganId = null;
     this.inBrain = false;
     this.brainCrossSection = false;
     this.selectedBrainPartId = null;
+    this.activeChallenge = null; // { targets, index, score }
     this._build();
   }
 
@@ -22,6 +24,9 @@ export class AnatomyMode {
     this.root.appendChild(this.layersPanel);
     this.root.appendChild(this.viewerPanel);
     this.root.appendChild(this.infoPanel);
+
+    this.challengeModal = buildAnatomyChallengeModal(this);
+    this.root.appendChild(this.challengeModal.el);
 
     this._buildLayers();
     this._buildViewer();
@@ -70,6 +75,74 @@ export class AnatomyMode {
       this._renderBody();
     });
     this.layersPanel.appendChild(allBtn);
+
+    const challengeBtn = document.createElement("button");
+    challengeBtn.textContent = "🏆 Anatomy Challenges";
+    challengeBtn.className = "primary";
+    challengeBtn.style.marginTop = "8px";
+    challengeBtn.addEventListener("click", () => this.challengeModal.open());
+    this.layersPanel.appendChild(challengeBtn);
+  }
+
+  // ---- "Find These Organs" challenge: click the named organ directly on
+  // the body, one at a time, instead of picking from multiple choice (that's
+  // what Quiz mode is for) — a spatial-recall task instead of recognition.
+  startOrganHunt() {
+    this.inBrain = false;
+    this.activeSystems = new Set(SYSTEMS.map((s) => s.id));
+    this._buildLayers();
+    this._buildViewer();
+    const pool = shuffleArr(ORGANS).slice(0, 6);
+    this.activeChallenge = { targets: pool, index: 0, score: 0 };
+    this._renderChallengeBanner();
+  }
+
+  _handleHuntClick(organ) {
+    const c = this.activeChallenge;
+    if (!c || c.index >= c.targets.length) return;
+    const target = c.targets[c.index];
+    const correct = organ.id === target.id;
+    if (correct) c.score++;
+    this._flashOrgan(organ.id, correct);
+    c.index++;
+    this._renderChallengeBanner();
+  }
+
+  _flashOrgan(organId, correct) {
+    const el = this.svg?.querySelector(`[data-organ-id="${organId}"]`);
+    if (!el) return;
+    el.classList.add(correct ? "anat-hunt-correct" : "anat-hunt-incorrect");
+    setTimeout(() => el.classList.remove("anat-hunt-correct", "anat-hunt-incorrect"), 500);
+  }
+
+  _renderChallengeBanner() {
+    this._challengeBanner?.remove();
+    if (!this.activeChallenge || !this.viewerPanel) return;
+    const c = this.activeChallenge;
+    const banner = div("anat-challenge-banner");
+    if (c.index >= c.targets.length) {
+      const passed = c.score >= Math.ceil(c.targets.length * 0.7);
+      banner.innerHTML = `<b>Hunt complete!</b> Score: ${c.score} / ${c.targets.length}`;
+      if (passed) {
+        this.ctx.state?.completedChallenges?.add("anat_organ_hunt");
+        this.ctx.showToast?.("Challenge complete: found the organs!");
+      }
+      const doneBtn = document.createElement("button");
+      doneBtn.textContent = "Done";
+      doneBtn.addEventListener("click", () => { this.activeChallenge = null; this._renderChallengeBanner(); });
+      banner.appendChild(doneBtn);
+    } else {
+      const target = c.targets[c.index];
+      const text = document.createElement("span");
+      text.innerHTML = `<b>Find:</b> ${target.name} <span class="anat-challenge-progress">(${c.index + 1}/${c.targets.length} · Score ${c.score})</span>`;
+      banner.appendChild(text);
+      const endBtn = document.createElement("button");
+      endBtn.textContent = "End";
+      endBtn.addEventListener("click", () => { this.activeChallenge = null; this._renderChallengeBanner(); });
+      banner.appendChild(endBtn);
+    }
+    this._challengeBanner = banner;
+    this.viewerPanel.prepend(banner);
   }
 
   _buildViewer() {
@@ -131,6 +204,10 @@ export class AnatomyMode {
     g.addEventListener("mousemove", (e) => this._moveTooltip(e));
     g.addEventListener("mouseleave", () => this._hideTooltip());
     g.addEventListener("click", () => {
+      if (this.activeChallenge) {
+        this._handleHuntClick(organ);
+        return;
+      }
       if (organ.isolatable && organ.id === "brain") {
         this._enterBrain();
         return;
@@ -315,6 +392,53 @@ function organInfoCard(organ, { onIsolate }) {
   card.appendChild(facts);
 
   return card;
+}
+
+function shuffleArr(arr) {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+function buildAnatomyChallengeModal(mode) {
+  const el = div("modal hidden");
+  const box = div("modal-box");
+  box.innerHTML = `<h2>Anatomy Challenges</h2><div class="anat-challenge-list"></div>`;
+  const closeBtn = document.createElement("button");
+  closeBtn.textContent = "Close";
+  closeBtn.addEventListener("click", () => el.classList.add("hidden"));
+  box.appendChild(closeBtn);
+  el.appendChild(box);
+  const list = box.querySelector(".anat-challenge-list");
+
+  function render() {
+    list.innerHTML = "";
+    const row = div("shop-item");
+    row.innerHTML = `
+      <div class="info">
+        <div class="name">Find These Organs</div>
+        <div class="concept-tag">Spatial identification</div>
+        <div class="desc">You'll be shown organ names one at a time — click directly on the body to find each one. All systems are shown for the hunt.</div>
+      </div>
+    `;
+    const btn = document.createElement("button");
+    btn.className = "primary";
+    btn.textContent = "Start Hunt";
+    btn.addEventListener("click", () => {
+      el.classList.add("hidden");
+      mode.startOrganHunt();
+    });
+    row.appendChild(btn);
+    list.appendChild(row);
+  }
+
+  return {
+    el,
+    open() { render(); el.classList.remove("hidden"); },
+  };
 }
 
 function div(className) {
