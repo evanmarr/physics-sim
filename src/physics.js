@@ -23,8 +23,17 @@ const PIVOT_ANGULAR_DAMPING = 0.25;
 const WATER_PARTICLE_RADIUS = 5;
 const WATER_PARTICLE_MAX = 140;
 const WIND_PARTICLE_RADIUS = 3;
-const WIND_PARTICLE_LIFESPAN_MS = 1400;
+const WIND_PARTICLE_LIFESPAN_MS = 3000;
 const WIND_SPAWN_EVERY_N_TICKS = 4;
+// Anything a rope end can auto-pivot onto: flat shapes via point-in-polygon,
+// small round objects via point-in-circle. Includes peg/magnet/ballBearing,
+// which are always static — fine for a rope end (it just becomes a fixed
+// pin), but NOT fine as the thing a *ball bearing itself* pivots, since
+// those types are hardcoded isStatic and can't be forced dynamic — a
+// bearing "pivoting" one of them would silently never swing. That search
+// uses the narrower BEARING_HOST_TYPES instead.
+const PIVOTABLE_HOST_TYPES = new Set(["board", "triangle", "ball", "bomb", "ballBearing", "peg", "magnet"]);
+const BEARING_HOST_TYPES = new Set(["board", "triangle", "ball", "bomb"]);
 
 export class PhysicsSim {
   constructor(specs, gravity, callbacks) {
@@ -45,7 +54,8 @@ export class PhysicsSim {
     this.springMeta = new Map(); // springPadId -> {spec, cooldownUntil}
     this.pivotHostBodies = []; // bodies pivoted on a ball bearing, for settling damping
     this.waterParticles = []; // real dynamic bodies that settle/collide like granular liquid
-    this.windParticles = []; // real dynamic sensor bodies, pushed by fan force fields
+    this.windParticles = []; // real dynamic bodies, pushed by fan force fields, that physically nudge whatever they hit
+    this._windNoCollideGroup = Body.nextGroup(true); // wind particles pass through each other, but not through real objects
     this._fanTick = 0;
     this._build();
     this._wireEvents();
@@ -72,7 +82,7 @@ export class PhysicsSim {
     const noCollideGroupById = new Map(); // specId -> group, for bearing + its host
     for (const spec of this.specs) {
       if (spec.type !== "ballBearing") continue;
-      const host = this._findPivotHost(spec, specById);
+      const host = this._findPivotHost(spec, specById, BEARING_HOST_TYPES);
       if (!host) continue;
       pivots.push({ bearingSpec: spec, hostSpec: host });
       pivotHostIds.add(host.id);
@@ -183,21 +193,13 @@ export class PhysicsSim {
         count++;
       }
     }
-
-    // Invisible walls so the particles stay inside the water zone instead of
-    // drifting past its (otherwise sensor-only) edges; left open at the top
-    // so things can fall in and splash.
-    const wallT = 8;
-    const wallOpts = { isStatic: true, friction: 0.02, restitution: 0 };
-    const walls = [
-      Bodies.rectangle(spec.x - w / 2 - wallT / 2, spec.y, wallT, h, wallOpts),
-      Bodies.rectangle(spec.x + w / 2 + wallT / 2, spec.y, wallT, h, wallOpts),
-      Bodies.rectangle(spec.x, spec.y + h / 2 + wallT / 2, w + wallT * 2, wallT, wallOpts),
-    ];
-    walls.forEach((wall) => {
-      wall.plugin = { render: { hidden: true } };
-      Composite.add(world, wall);
-    });
+    // No invisible containment walls — these are real, ungated particles.
+    // A "water" board still marks a buoyancy field (see _applyBuoyancy) for
+    // anything that swims through that footprint, but the particles
+    // themselves just fall under gravity and collide normally with
+    // whatever's actually there. Pour it into a box built from real boards
+    // and it stays put; pour it into empty air and it falls and spreads,
+    // same as real water would.
   }
 
   _buildRope(spec, specById) {
@@ -278,32 +280,32 @@ export class PhysicsSim {
     }
     Composite.add(world, Constraint.create(anchorConfig));
 
-    // "Attach end to" — pin the rope's free tip to another object the same
-    // way, so e.g. a rope can be strung between a fixed peg and a swinging
-    // ball bearing instead of just hanging loose at the far end.
-    if (spec.attachEndId) {
-      const endHost = specById.get(spec.attachEndId);
-      const endBody = endHost ? this.byId.get(endHost.id) : null;
-      if (endBody) {
-        const tipX = spec.x + dir.x * length, tipY = spec.y + dir.y * length;
-        const cos = Math.cos(-endHost.rotation * RAD), sin = Math.sin(-endHost.rotation * RAD);
-        const dx = tipX - endHost.x, dy = tipY - endHost.y;
-        const localX = dx * cos - dy * sin, localY = dx * sin + dy * cos;
-        const lastSeg = segments[segments.length - 1];
-        Composite.add(world, Constraint.create({
-          bodyA: endBody, pointA: { x: localX, y: localY },
-          bodyB: lastSeg, pointB: { x: segLen / 2, y: 0 },
-          length: 0, stiffness, damping: 0.15,
-        }));
-      }
+    // The far end pivots the same way the start does — an explicit "Attach
+    // end to" target wins, otherwise whatever's sitting right at the rope's
+    // tip auto-attaches, exactly like a ball bearing does. No dropdown is
+    // required for either end; it's just there for precise manual control.
+    const tipX = spec.x + dir.x * length, tipY = spec.y + dir.y * length;
+    const explicitEnd = spec.attachEndId ? specById.get(spec.attachEndId) : null;
+    const endHost = explicitEnd || this._findPivotHost({ id: spec.id, x: tipX, y: tipY }, specById);
+    const endBody = endHost ? this.byId.get(endHost.id) : null;
+    if (endBody) {
+      const cos = Math.cos(-endHost.rotation * RAD), sin = Math.sin(-endHost.rotation * RAD);
+      const dx = tipX - endHost.x, dy = tipY - endHost.y;
+      const localX = dx * cos - dy * sin, localY = dx * sin + dy * cos;
+      const lastSeg = segments[segments.length - 1];
+      Composite.add(world, Constraint.create({
+        bodyA: endBody, pointA: { x: localX, y: localY },
+        bodyB: lastSeg, pointB: { x: segLen / 2, y: 0 },
+        length: 0, stiffness, damping: 0.15,
+      }));
     }
   }
 
-  _findPivotHost(bearing, specById) {
+  _findPivotHost(bearing, specById, allowedTypes = PIVOTABLE_HOST_TYPES) {
     let best = null;
     for (const spec of specById.values()) {
       if (spec.id === bearing.id) continue;
-      if (spec.type !== "board" && spec.type !== "triangle") continue;
+      if (!allowedTypes.has(spec.type)) continue;
       if (materialOf(spec.material).isFluid) continue;
       if (pointInShape(bearing.x, bearing.y, spec)) { best = spec; break; }
     }
@@ -452,14 +454,18 @@ export class PhysicsSim {
     const startX = fan.position.x + dir.x * (spec.width / 2 + 4) + perp.x * lane;
     const startY = fan.position.y + dir.y * (spec.width / 2 + 4) + perp.y * lane;
     const body = Bodies.circle(startX, startY, WIND_PARTICLE_RADIUS, {
-      isSensor: true, // visual airflow only — never shoves real objects on contact
+      // A real (non-sensor) body now — it physically nudges whatever it
+      // hits, not just an invisible force field. Light density so it can't
+      // meaningfully budge anything heavy, and its own no-collide group so
+      // a dense stream of them doesn't clump/jitter against itself.
       friction: 0,
       frictionAir: 0.02,
-      restitution: 0,
-      density: 0.02 * DENSITY_SCALE,
+      restitution: 0.05,
+      density: 0.12 * DENSITY_SCALE,
+      collisionFilter: { group: this._windNoCollideGroup },
       label: `windParticle:${spec.id}`,
     });
-    Body.setVelocity(body, { x: dir.x * 2, y: dir.y * 2 });
+    Body.setVelocity(body, { x: dir.x * 4, y: dir.y * 4 });
     body.plugin = {
       gameId: makeId("wind"),
       transient: true,
@@ -857,6 +863,12 @@ function pointInShape(px, py, spec) {
   if (spec.type === "triangle") {
     const [p0, p1, p2] = equilateralPoints(spec.size);
     return sameSide(lx, ly, p0, p1, p2) && sameSide(lx, ly, p1, p2, p0) && sameSide(lx, ly, p2, p0, p1);
+  }
+  if (spec.type === "ball" || spec.type === "bomb" || spec.type === "ballBearing" || spec.type === "peg" || spec.type === "magnet") {
+    // A little slack past the drawn radius — snapping a rope end onto a
+    // small peg/bearing shouldn't require pixel-perfect placement.
+    const r = (spec.radius || 20) + 6;
+    return lx * lx + ly * ly <= r * r;
   }
   return false;
 }

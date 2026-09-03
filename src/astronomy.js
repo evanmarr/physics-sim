@@ -1,4 +1,4 @@
-import { PLANETS, planetPosition, moonOffsetFromEarth, dateToJulianDate, julianDateToDate, orbitalPeriodDays, findNextSolarEclipse } from "./astronomyData.js";
+import { PLANETS, DWARF_PLANETS, MOONS, planetPosition, moonOffsetFromEarth, moonPhaseAngleRad, dateToJulianDate, julianDateToDate, orbitalPeriodDays, findNextSolarEclipse } from "./astronomyData.js";
 
 const AU_SCALE = 22; // scene units per AU — not to real scale, or Neptune would be a speck 30x farther than Mercury
 const SPEEDS = [
@@ -116,13 +116,16 @@ export class AstronomyMode {
 
     this.planetMeshes = {};
     this.orbitLines = {};
-    for (const planet of PLANETS) {
-      const size = Math.max(0.7, Math.log10(planet.radiusKm) * 0.9 - 2.2);
-      const geo = new THREE.SphereGeometry(size, 18, 18);
+    const jdNow = dateToJulianDate(this.date);
+    const buildPlanetLike = (planet, { dwarf = false } = {}) => {
+      const rawSize = Math.max(0.7, Math.log10(planet.radiusKm) * 0.9 - 2.2);
+      const size = dwarf ? rawSize * 0.6 : rawSize;
+      const geo = new THREE.SphereGeometry(size, dwarf ? 10 : 18, dwarf ? 10 : 18);
       const mat = new THREE.MeshStandardMaterial({ color: new THREE.Color(planet.color), roughness: 0.7 });
       const mesh = new THREE.Mesh(geo, mat);
       mesh.userData.planet = planet;
       mesh.userData.size = size;
+      mesh.userData.dwarf = dwarf;
       this.scene.add(mesh);
       this.planetMeshes[planet.name] = mesh;
 
@@ -138,22 +141,64 @@ export class AstronomyMode {
       const orbitGeo = new THREE.BufferGeometry();
       const points = [];
       const periodDays = orbitalPeriodDays(planet);
-      const jdNow = dateToJulianDate(this.date);
       for (let i = 0; i <= 90; i++) {
         const pos = planetPosition(planet, jdNow - periodDays / 2 + (i / 90) * periodDays);
         points.push(new THREE.Vector3(pos.x * AU_SCALE, pos.z * AU_SCALE, pos.y * AU_SCALE));
       }
       orbitGeo.setFromPoints(points);
-      const orbitMat = new THREE.LineBasicMaterial({ color: new THREE.Color(planet.color), transparent: true, opacity: 0.35 });
+      const orbitMat = new THREE.LineBasicMaterial({ color: new THREE.Color(planet.color), transparent: true, opacity: dwarf ? 0.18 : 0.35 });
       const line = new THREE.LineLoop(orbitGeo, orbitMat);
       this.scene.add(line);
       this.orbitLines[planet.name] = line;
+    };
+    for (const planet of PLANETS) buildPlanetLike(planet);
+    for (const dwarf of DWARF_PLANETS) buildPlanetLike(dwarf, { dwarf: true });
+
+    // Main asteroid belt — a scattered field of points between Mars (~1.52
+    // AU) and Jupiter (~5.2 AU), roughly matching the real belt's 2.1–3.3 AU
+    // span. Purely decorative (no individual orbital elements per rock —
+    // there are hundreds of thousands of real ones), but it does slowly
+    // rotate as a whole at a representative belt orbital rate.
+    const beltCount = 1400;
+    const beltPositions = new Float32Array(beltCount * 3);
+    for (let i = 0; i < beltCount; i++) {
+      const r = (2.1 + Math.random() * 1.2) * AU_SCALE;
+      const angle = Math.random() * Math.PI * 2;
+      const height = (Math.random() - 0.5) * 0.35 * AU_SCALE;
+      beltPositions[i * 3] = Math.cos(angle) * r;
+      beltPositions[i * 3 + 1] = height;
+      beltPositions[i * 3 + 2] = Math.sin(angle) * r;
     }
+    const beltGeo = new THREE.BufferGeometry();
+    beltGeo.setAttribute("position", new THREE.BufferAttribute(beltPositions, 3));
+    const beltMat = new THREE.PointsMaterial({ color: 0x9a8f7d, size: 0.35, sizeAttenuation: true, transparent: true, opacity: 0.75 });
+    this.asteroidBelt = new THREE.Points(beltGeo, beltMat);
+    // ~4.6-year average belt orbital period (a ≈ 2.7 AU) — one slow spin
+    // stands in for the whole field drifting together.
+    this.asteroidBeltPeriodDays = 4.6 * 365.25;
+    this.scene.add(this.asteroidBelt);
 
     const moonGeo = new THREE.SphereGeometry(0.35, 12, 12);
     const moonMat = new THREE.MeshStandardMaterial({ color: 0xcccccc });
     this.moonMesh = new THREE.Mesh(moonGeo, moonMat);
     this.scene.add(this.moonMesh);
+
+    // Other major moons — simple circular orbits around their host planet,
+    // spaced outward so multiple moons of the same planet don't overlap.
+    this.moonMeshes = [];
+    const moonIndexByHost = {};
+    for (const moon of MOONS) {
+      const idx = moonIndexByHost[moon.host] || 0;
+      moonIndexByHost[moon.host] = idx + 1;
+      const size = Math.max(0.18, Math.log10(moon.radiusKm) * 0.35 - 0.55);
+      const geo = new THREE.SphereGeometry(size, 10, 10);
+      const mat = new THREE.MeshStandardMaterial({ color: new THREE.Color(moon.color), roughness: 0.8 });
+      const mesh = new THREE.Mesh(geo, mat);
+      this.scene.add(mesh);
+      const hostMesh = this.planetMeshes[moon.host];
+      const visualDist = (hostMesh?.userData.size || 1) * (1.7 + idx * 0.55);
+      this.moonMeshes.push({ moon, mesh, visualDist });
+    }
 
     // A wireframe halo around whichever planet is selected — repositioned
     // and rescaled to that planet every frame in _updatePositions.
@@ -205,7 +250,7 @@ export class AstronomyMode {
 
   _updatePositions() {
     const jd = dateToJulianDate(this.date);
-    for (const planet of PLANETS) {
+    for (const planet of [...PLANETS, ...DWARF_PLANETS]) {
       const pos = planetPosition(planet, jd);
       const mesh = this.planetMeshes[planet.name];
       mesh.position.set(pos.x * AU_SCALE, pos.z * AU_SCALE, pos.y * AU_SCALE);
@@ -230,6 +275,23 @@ export class AstronomyMode {
         );
       }
     }
+
+    for (const { moon, mesh, visualDist } of this.moonMeshes) {
+      const hostMesh = this.planetMeshes[moon.host];
+      if (!hostMesh) continue;
+      const angle = moonPhaseAngleRad(moon, jd);
+      mesh.position.set(
+        hostMesh.position.x + Math.cos(angle) * visualDist,
+        hostMesh.position.y,
+        hostMesh.position.z + Math.sin(angle) * visualDist
+      );
+    }
+
+    if (this.asteroidBelt) {
+      const turns = jd / this.asteroidBeltPeriodDays;
+      this.asteroidBelt.rotation.y = (turns - Math.floor(turns)) * Math.PI * 2;
+    }
+
     this._updateSelectionRing();
     if (this.dateLabel) this.dateLabel.textContent = this.date.toUTCString();
     if (this.selectedPlanet) this._refreshInfoNumbers();

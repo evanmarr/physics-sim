@@ -301,9 +301,9 @@ button:disabled { opacity: .4; cursor: default; }
   padding: 14px;
 }
 .chem-panel-title { font-weight: 700; margin-bottom: 10px; font-size: 14px; }
-.chem-periodic { flex: 2.1; border-right: 1px solid var(--border); min-width: 480px; }
-.chem-center { flex: 1.1; border-right: 1px solid var(--border); display: flex; flex-direction: column; min-width: 280px; }
-.chem-mix { flex: 0.9; min-width: 260px; }
+.chem-periodic { flex: 2.1; border-right: 1px solid var(--border); min-width: 460px; }
+.chem-center { flex: 1.1; border-right: 1px solid var(--border); display: flex; flex-direction: column; min-width: 240px; }
+.chem-mix { flex: 0.9; min-width: 220px; }
 
 .chem-legend { display: flex; flex-wrap: wrap; gap: 8px 12px; margin-bottom: 12px; }
 .chem-legend-item { display: flex; align-items: center; gap: 5px; font-size: 10.5px; color: var(--text-dim); }
@@ -340,7 +340,7 @@ button:disabled { opacity: .4; cursor: default; }
 .chem-info-row b { color: var(--text); font-weight: 600; }
 .chem-add-btn { margin-top: 12px; width: 100%; }
 
-.chem-slots { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-bottom: 10px; }
+.chem-slots { display: grid; grid-template-columns: repeat(2, minmax(70px, 1fr)); gap: 6px; margin-bottom: 10px; }
 .chem-slot {
   min-height: 62px; border: 2px dashed var(--border); border-radius: 8px;
   display: flex; flex-direction: column; align-items: center; justify-content: center;

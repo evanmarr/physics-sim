@@ -1,4 +1,4 @@
-import { ELEMENTS, CATEGORY_LABELS, elementBySymbol } from "./chemistryData.js";
+import { ELEMENTS, CATEGORY_LABELS, elementBySymbol, phaseAt, ROOM_TEMP_K, REACTION_TABLE } from "./chemistryData.js";
 import { MATERIALS, MATERIAL_LIST, materialOf } from "./materials.js";
 
 function shuffle(arr) {
@@ -16,8 +16,8 @@ function sample(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
 
 function buildChemistryQuestions() {
   const questions = [];
-  for (const el of shuffle(ELEMENTS).slice(0, 12)) {
-    const kind = sample(["symbol", "number", "category"]);
+  for (const el of shuffle(ELEMENTS).slice(0, 10)) {
+    const kind = sample(["symbol", "number", "category", "phase"]);
     if (kind === "symbol") {
       const distractors = pick(ELEMENTS.filter((e) => e.symbol !== el.symbol), 3).map((e) => e.symbol);
       questions.push({
@@ -35,6 +35,15 @@ function buildChemistryQuestions() {
         answer: String(el.number),
         explanation: `${el.name}'s atomic number is ${el.number} — its number of protons.`,
       });
+    } else if (kind === "phase") {
+      const phase = phaseAt(el, ROOM_TEMP_K);
+      const allPhases = ["solid", "liquid", "gas"];
+      questions.push({
+        prompt: `What phase is ${el.name} (${el.symbol}) in at room temperature (298 K)?`,
+        options: shuffle(allPhases),
+        answer: phase,
+        explanation: `${el.name} is a ${phase} at room temperature.`,
+      });
     } else {
       const distractorCats = shuffle(Object.keys(CATEGORY_LABELS).filter((c) => c !== el.category)).slice(0, 3);
       questions.push({
@@ -45,7 +54,26 @@ function buildChemistryQuestions() {
       });
     }
   }
-  return { title: "Periodic Table Quiz", questions };
+
+  // Reaction-recall questions, pulled straight from this app's own curated
+  // reaction table — same facts the Chemistry mode's mixing bench uses.
+  const reactionKeys = shuffle(Object.keys(REACTION_TABLE)).slice(0, 4);
+  for (const key of reactionKeys) {
+    const recipe = REACTION_TABLE[key];
+    const symbols = key.split("-");
+    const distractors = pick(
+      Object.values(REACTION_TABLE).filter((r) => r.formula !== recipe.formula),
+      3
+    ).map((r) => r.formula);
+    questions.push({
+      prompt: `What do ${symbols.map((s) => elementBySymbol(s)?.name || s).join(" and ")} (${symbols.join(" + ")}) combine to form?`,
+      options: shuffle([recipe.formula, ...distractors]),
+      answer: recipe.formula,
+      explanation: `${symbols.join(" + ")} → ${recipe.formula} (${recipe.name}). ${recipe.note}`,
+    });
+  }
+
+  return { title: "Periodic Table Quiz", questions: shuffle(questions) };
 }
 
 // Static concept questions, same {prompt, options, answer, explanation}
@@ -112,6 +140,63 @@ const PHYSICS_CONCEPT_QUESTIONS = [
     options: ["It keeps moving at constant velocity (or stays at rest)", "It always speeds up", "It always slows to a stop", "It falls at 9.8 units/s² regardless"],
     answer: "It keeps moving at constant velocity (or stays at rest)",
     explanation: "Inertia: without a net force, velocity doesn't change — this is why objects need friction, gravity, or a push to change speed or direction.",
+  },
+  {
+    prompt: "Newton's Third Law says every force has an equal and opposite reaction. When a heavy ball and a light ball collide, which one feels the bigger force?",
+    options: ["Both feel exactly the same force", "The heavy ball", "The light ball", "Neither — momentum isn't force"],
+    answer: "Both feel exactly the same force",
+    explanation: "The force is always equal and opposite on both objects — what differs is the acceleration each one gets from it, since the lighter ball has less mass to push around (F = m·a).",
+  },
+  {
+    prompt: "In this sim, a rope is built as a chain of small rigid segments. Why does each segment need an explicit length:0 on its connecting constraint?",
+    options: [
+      "Matter.js doesn't rotate a constraint's auto-computed rest length by the body's angle at creation time",
+      "Rope segments have no mass",
+      "It makes the rope invisible",
+      "It disables gravity on the rope",
+    ],
+    answer: "Matter.js doesn't rotate a constraint's auto-computed rest length by the body's angle at creation time",
+    explanation: "For a pre-rotated segment, the auto-computed rest length silently bakes in the wrong value — setting it explicitly to 0 sidesteps that bug entirely.",
+  },
+  {
+    prompt: "Why do a ball bearing and the board it pivots need to be on a shared no-collide group?",
+    options: [
+      "The bearing sits physically embedded inside the board — without it, solid-body collision fights the pin constraint every step",
+      "So the board changes color",
+      "To make the bearing invisible",
+      "It's purely a performance optimization, not a correctness fix",
+    ],
+    answer: "The bearing sits physically embedded inside the board — without it, solid-body collision fights the pin constraint every step",
+    explanation: "Two overlapping solid bodies get pushed apart by collision resolution every tick — fighting a rigid pin constraint that's trying to hold them together looks like violent jitter.",
+  },
+  {
+    prompt: "What is momentum, in terms of an object's mass (m) and velocity (v)?",
+    options: ["p = m·v", "p = m + v", "p = m/v", "p = v²/m"],
+    answer: "p = m·v",
+    explanation: "Momentum is mass times velocity — a heavy, slow object and a light, fast one can carry the same momentum.",
+  },
+  {
+    prompt: "Two identical balls collide with restitution e = 1 (perfectly elastic). What happens to their total kinetic energy?",
+    options: ["It's conserved — none is lost", "All of it converts to heat", "Half of it is lost", "It doubles"],
+    answer: "It's conserved — none is lost",
+    explanation: "e = 1 means a perfectly elastic collision: kinetic energy in equals kinetic energy out. Any e below 1 loses some energy to heat/sound/deformation.",
+  },
+  {
+    prompt: "A spring pad in this sim sets an object's velocity instantly on contact. What's different about that compared to a fan's force?",
+    options: [
+      "It's a one-time velocity change, not a continuous force applied over time",
+      "It only works on metal objects",
+      "It ignores the object it hits",
+      "It's identical to a fan, just renamed",
+    ],
+    answer: "It's a one-time velocity change, not a continuous force applied over time",
+    explanation: "An idealized spring in this sim always launches at the same fixed speed the instant it's touched, unlike a fan's force which keeps accelerating a body the whole time it's in range.",
+  },
+  {
+    prompt: "If you double an object's mass but keep the same net force applied, what happens to its acceleration?",
+    options: ["It's cut in half", "It doubles", "It stays the same", "It quadruples"],
+    answer: "It's cut in half",
+    explanation: "a = F/m — with F fixed, doubling the mass halves the acceleration.",
   },
 ];
 

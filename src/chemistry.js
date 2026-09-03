@@ -153,6 +153,25 @@ export class ChemistryMode {
     this.atomViewer.showElement(el, CATEGORY_COLORS[el.category]);
     this.elementInfo.innerHTML = "";
     this.elementInfo.appendChild(elementInfoCard(el));
+
+    // Inspecting an element swaps the shared viewer away from whatever
+    // reaction was just shown — leave a one-click way back instead of
+    // silently losing it (that's the "reaction only shows one atom" trap:
+    // the last thing you *looked at* wasn't the reaction at all).
+    if (this.lastMolecule) {
+      const link = document.createElement("button");
+      link.className = "reopen-math-link";
+      link.textContent = `▸ Show last reaction (${this.lastMolecule.result.name || this.lastMolecule.result.formula})`;
+      link.addEventListener("click", () => this._showLastReaction());
+      this.elementInfo.appendChild(link);
+    }
+  }
+
+  _showLastReaction() {
+    if (!this.lastMolecule) return;
+    this.atomViewer.showMolecule(this.lastMolecule.atoms);
+    this.elementInfo.innerHTML = "";
+    this.elementInfo.appendChild(moleculeInfoCard(this.lastMolecule.result, this.lastMolecule.atoms));
   }
 
   _addToMix(symbol) {
@@ -222,6 +241,7 @@ export class ChemistryMode {
         moleculeAtoms.push({ symbol: e.symbol, colorHex: cpkColor(e.symbol) });
       }
     }
+    this.lastMolecule = { atoms: moleculeAtoms, result };
     this.atomViewer.showMolecule(moleculeAtoms);
     this.elementInfo.innerHTML = "";
     this.elementInfo.appendChild(moleculeInfoCard(result, moleculeAtoms));

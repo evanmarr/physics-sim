@@ -232,7 +232,7 @@ const DIATOMIC = new Set(["H", "N", "O", "F", "Cl", "Br", "I"]);
 // falls through to the general bonding-rule engine below, which covers the
 // rest of the periodic table with a simplified but broadly-applicable
 // prediction instead of a hand-verified one.
-const REACTION_TABLE = {
+export const REACTION_TABLE = {
   "H-O": { formula: "H₂O", name: "Water", type: "covalent", energy: "exothermic", ratio: { H: 2, O: 1 }, structure: "H—O—H", note: "Two hydrogens share electrons with one oxygen. The reaction that powers hydrogen fuel cells (in reverse) and rocket engines (forward, explosively)." },
   "H-Cl": { formula: "HCl", name: "Hydrogen chloride", type: "covalent", energy: "exothermic", ratio: { H: 1, Cl: 1 }, structure: "H—Cl", note: "Dissolves in water to form hydrochloric acid — the acid in your stomach." },
   "Cl-Na": { formula: "NaCl", name: "Table salt", type: "ionic", energy: "exothermic", ratio: { Na: 1, Cl: 1 }, structure: "Na⁺ Cl⁻", note: "Sodium gives up its outer electron, chlorine takes it — a violent reaction between a soft explosive metal and a toxic gas that somehow makes the salt on your fries." },
@@ -255,6 +255,29 @@ const REACTION_TABLE = {
   "H-Na": { formula: "NaH", name: "Sodium hydride", type: "ionic", energy: "exothermic", ratio: { Na: 1, H: 1 }, structure: "Na⁺ H⁻", note: "Unusually, hydrogen is the negative ion here — sodium is even more eager to lose an electron than hydrogen is." },
   "Ca-F": { formula: "CaF₂", name: "Fluorite", type: "ionic", energy: "exothermic", ratio: { Ca: 1, F: 2 }, structure: "F⁻ Ca²⁺ F⁻", note: "Found naturally as a mineral, and the main industrial source of fluorine." },
   "F-H": { formula: "HF", name: "Hydrofluoric acid", type: "covalent", energy: "exothermic", ratio: { H: 1, F: 1 }, structure: "H—F", note: "One of the few things that dissolves glass — handled with extreme care." },
+  "Br-H": { formula: "HBr", name: "Hydrogen bromide", type: "covalent", energy: "exothermic", ratio: { H: 1, Br: 1 }, structure: "H—Br", note: "Dissolves in water to form hydrobromic acid, one of the strongest common acids." },
+  "H-I": { formula: "HI", name: "Hydrogen iodide", type: "covalent", energy: "endothermic", ratio: { H: 1, I: 1 }, structure: "H—I", note: "The weakest bond of the hydrogen halides — iodine is large enough that the shared electrons sit further from its nucleus." },
+  "H-P": { formula: "PH₃", name: "Phosphine", type: "covalent", energy: "endothermic", ratio: { H: 3, P: 1 }, structure: "H—P(—H)—H", note: "Toxic and spontaneously flammable in air — the ghostly 'will-o'-the-wisp' lights over swamps are sometimes attributed to it." },
+  "O-P": { formula: "P₂O₅", name: "Phosphorus pentoxide", type: "covalent", energy: "exothermic", ratio: { P: 2, O: 5 }, structure: "O═P(—O—)₃ cage (simplified)", note: "So hungry for water it's used as a drying agent — it'll pull moisture straight out of the air." },
+  "Ba-O": { formula: "BaO", name: "Barium oxide", type: "ionic", energy: "exothermic", ratio: { Ba: 1, O: 1 }, structure: "Ba²⁺ O²⁻", note: "Used in the glass of old CRT screens to block X-rays." },
+  "K-O": { formula: "K₂O", name: "Potassium oxide", type: "ionic", energy: "exothermic", ratio: { K: 2, O: 1 }, structure: "K⁺ O²⁻ K⁺", note: "Reacts violently with water — like most alkali-metal oxides, it doesn't like to stay put once formed." },
+  "Li-O": { formula: "Li₂O", name: "Lithium oxide", type: "ionic", energy: "exothermic", ratio: { Li: 2, O: 1 }, structure: "Li⁺ O²⁻ Li⁺", note: "Used in ceramic glazes and as a flux — and, mixed into glass, in some heat-resistant cookware." },
+  "H-Li": { formula: "LiH", name: "Lithium hydride", type: "ionic", energy: "exothermic", ratio: { Li: 1, H: 1 }, structure: "Li⁺ H⁻", note: "Light enough to matter for aerospace — used as a compact hydrogen source and radiation shield." },
+  "F-Na": { formula: "NaF", name: "Sodium fluoride", type: "ionic", energy: "exothermic", ratio: { Na: 1, F: 1 }, structure: "Na⁺ F⁻", note: "The fluoride in fluoridated drinking water and many toothpastes." },
+  "Br-K": { formula: "KBr", name: "Potassium bromide", type: "ionic", energy: "exothermic", ratio: { K: 1, Br: 1 }, structure: "K⁺ Br⁻", note: "Once a common sedative, and still used to make optical windows for infrared instruments." },
+  "Cl-Mg": { formula: "MgCl₂", name: "Magnesium chloride", type: "ionic", energy: "exothermic", ratio: { Mg: 1, Cl: 2 }, structure: "Cl⁻ Mg²⁺ Cl⁻", note: "Spread on roads to melt ice, and used to make tofu curdle from soy milk." },
+  "Ca-Cl": { formula: "CaCl₂", name: "Calcium chloride", type: "ionic", energy: "exothermic", ratio: { Ca: 1, Cl: 2 }, structure: "Cl⁻ Ca²⁺ Cl⁻", note: "Dissolving it in water releases so much heat it's used in instant hand warmers and heavy-duty ice melt." },
+  "Mg-N": { formula: "Mg₃N₂", name: "Magnesium nitride", type: "ionic", energy: "exothermic", ratio: { Mg: 3, N: 2 }, structure: "(Mg²⁺)₃ (N³⁻)₂", note: "One reason burning magnesium can't be put out with a nitrogen extinguisher — it'll happily react with nitrogen gas too, not just oxygen." },
+  "Cu-S": { formula: "CuS", name: "Copper sulfide", type: "ionic", energy: "exothermic", ratio: { Cu: 1, S: 1 }, structure: "Cu²⁺ S²⁻", note: "The dark tarnish that forms on copper and silverware exposed to sulfur compounds in the air." },
+  "Fe-S": { formula: "FeS", name: "Iron sulfide", type: "ionic", energy: "exothermic", ratio: { Fe: 1, S: 1 }, structure: "Fe²⁺ S²⁻", note: "A classic classroom demo — mix iron filings and sulfur powder, heat it, and the reaction sustains itself once started." },
+  "O-Ti": { formula: "TiO₂", name: "Titanium dioxide", type: "ionic", energy: "exothermic", ratio: { Ti: 1, O: 2 }, structure: "Ti⁴⁺ (O²⁻)₂", note: "The brilliant white pigment in most white paint, sunscreen, and the coating on some pills." },
+  "Cr-O": { formula: "Cr₂O₃", name: "Chromium(III) oxide", type: "ionic", energy: "exothermic", ratio: { Cr: 2, O: 3 }, structure: "(Cr³⁺)₂ (O²⁻)₃", note: "A deep green pigment used in paint, ceramics, and camouflage coatings." },
+  "Mn-O": { formula: "MnO₂", name: "Manganese dioxide", type: "ionic", energy: "exothermic", ratio: { Mn: 1, O: 2 }, structure: "Mn⁴⁺ (O²⁻)₂", note: "The black paste inside ordinary alkaline batteries." },
+  "Ag-Br": { formula: "AgBr", name: "Silver bromide", type: "ionic", energy: "exothermic", ratio: { Ag: 1, Br: 1 }, structure: "Ag⁺ Br⁻", note: "Light-sensitive enough that it was the light-capturing chemical in traditional photographic film." },
+  "Ag-I": { formula: "AgI", name: "Silver iodide", type: "ionic", energy: "exothermic", ratio: { Ag: 1, I: 1 }, structure: "Ag⁺ I⁻", note: "Sprayed into clouds during cloud seeding — its crystal structure resembles ice, so water vapor condenses onto it readily." },
+  "Cl-Zn": { formula: "ZnCl₂", name: "Zinc chloride", type: "ionic", energy: "exothermic", ratio: { Zn: 1, Cl: 2 }, structure: "Cl⁻ Zn²⁺ Cl⁻", note: "Used as a soldering flux — it cleans the metal surface so solder can bond to it." },
+  "O-Pb": { formula: "PbO", name: "Lead(II) oxide", type: "ionic", energy: "exothermic", ratio: { Pb: 1, O: 1 }, structure: "Pb²⁺ O²⁻", note: "Once used to make crystal glass sparkle and old-style batteries work — now heavily restricted for its toxicity." },
+  "O-Sn": { formula: "SnO₂", name: "Tin dioxide", type: "ionic", energy: "exothermic", ratio: { Sn: 1, O: 2 }, structure: "Sn⁴⁺ (O²⁻)₂", note: "Used as a mild abrasive in polishing compounds, and in coatings that make glass electrically conductive." },
 };
 
 // A handful of three-element curated compounds, checked when the bench has
@@ -262,6 +285,9 @@ const REACTION_TABLE = {
 const REACTION_TABLE_3 = {
   "H-Na-O": { formula: "NaOH", name: "Sodium hydroxide (lye)", type: "ionic", energy: "exothermic", ratio: { Na: 1, O: 1, H: 1 }, structure: "Na⁺ [O—H]⁻", note: "The same product sodium makes when dropped in water, built here directly from its three elements. Extremely caustic — it's the active ingredient in drain cleaner." },
   "C-H-O": { formula: "C₆H₁₂O₆ (simplified)", name: "A sugar (glucose-family carbohydrate)", type: "covalent", energy: "n/a", ratio: { C: 1, H: 2, O: 1 }, structure: "—C(—H)(—OH)—, repeating", note: "Carbon, hydrogen, and oxygen in this kind of ratio are the building blocks of carbohydrates — the sugars and starches that store energy in food and fuel your cells." },
+  "C-Ca-O": { formula: "CaCO₃", name: "Calcium carbonate (limestone)", type: "ionic", energy: "exothermic", ratio: { Ca: 1, C: 1, O: 3 }, structure: "Ca²⁺ [O—C(═O)—O]²⁻", note: "Limestone, marble, chalk, and the shells of countless sea creatures are all this same compound." },
+  "H-N-O": { formula: "HNO₃", name: "Nitric acid", type: "covalent", energy: "exothermic", ratio: { H: 1, N: 1, O: 3 }, structure: "H—O—N(═O)═O", note: "One of the strongest common industrial acids — a key ingredient in fertilizer and explosives manufacturing." },
+  "H-O-S": { formula: "H₂SO₄", name: "Sulfuric acid", type: "covalent", energy: "exothermic", ratio: { H: 2, S: 1, O: 4 }, structure: "H—O—S(═O)(═O)—O—H", note: "The single most manufactured industrial chemical on Earth by mass — used in everything from car batteries to fertilizer production." },
 };
 
 function reactionKey(...symbols) {
