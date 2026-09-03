@@ -1,17 +1,21 @@
-# Contraption — 2D Physics & Chemistry Sandbox
+# Contraption — Physics, Chemistry & Anatomy Sandbox
 
-A browser-based science sandbox with two modes, switchable from the top bar:
+A browser-based science sandbox with a home screen and three modes, all
+switchable from the top bar and sharing one save file and one coin economy:
 
 - **Physics** — drag objects onto a grid, tune their material and physical
   properties, then press Play to watch a real rigid-body simulation play out.
 - **Chemistry** — browse the full periodic table, inspect a rotatable 3D
-  model of any element's atom, and mix elements on a bench to see what they'd
-  react to form.
+  model of any element's atom, and mix elements on a bench (with per-element
+  temperature) to see what reactions their exact ratios actually form.
+- **Anatomy** — a layered, clickable human body across seven systems, with a
+  dedicated brain view you can cut in half to see inside.
 
 Built with [Matter.js](https://brm.io/matter-js/) for the physics (gravity,
 collisions, friction, restitution, constraints), [D3.js](https://d3js.org/)
 for the grid, rendering, drag-and-drop, pan/zoom, and property panel, and
-[Three.js](https://threejs.org/) for the 3D atom viewer.
+[Three.js](https://threejs.org/) for the 3D atom viewer. Light theme by
+default, with a dark toggle in the top-right corner.
 
 ## Running locally
 
@@ -30,10 +34,12 @@ Then open http://localhost:5173.
 
 - **Drag** an object from the left palette onto the grid to place it.
 - **Click** an object to select it and edit its properties in the right panel
-  (position, rotation, size, material, fixed/dynamic) — including an optional
-  **"Show the physics"** section with the actual formulas and numbers driving
-  the simulation (mass = density × area, friction, restitution, buoyancy,
-  launch vectors, force falloff...).
+  (position, rotation, size, material, fixed/dynamic). A separate **Physics**
+  panel between the canvas and the property panel shows the actual formulas
+  and numbers driving the simulation for whatever's selected (mass = density
+  × area, friction, restitution, buoyancy, launch vectors, force falloff...)
+  — open by default, closable with its ×, reopenable from a link in the
+  property panel.
 - **Drag the rotate handle** (the dot above a selected board/triangle/cannon)
   to rotate it, or type a value directly.
 - **⌘C / ⌘V** copies and pastes the selected object.
@@ -96,13 +102,42 @@ workspace) autosaves to `localStorage`, and is shared with Chemistry mode.
   large majority of elements, though (as in any simplified shell model) a
   couple dozen known transition-metal/lanthanide exceptions aren't
   special-cased.
-- **Mixing bench** — add two elements (or one element + water, via the
-  dedicated button) and hit React. A curated set of ~25 well-known, named
-  reactions is checked first; anything else falls through to a general
-  bonding-rule engine (metal + nonmetal → predicted ionic compound, nonmetal
-  + nonmetal → covalent, metal + metal → alloy, noble gas → inert) so every
-  pairing gets a real, chemically-reasoned answer, not just the famous ones.
+- **Mixing bench** — 4 slots by default, expandable up to 12 ("+ Add Slot"),
+  each holding one atom of an element (or water, via its own button) with its
+  own temperature slider that sets whether it's shown as solid/liquid/gas.
+  Combinations are exact: water only forms from a 2:1 hydrogen-to-oxygen
+  ratio, not any two atoms of each — bring the wrong ratio and the result
+  tells you the right one instead of just failing silently. A curated set of
+  ~25 well-known, named reactions (with real stoichiometry) is checked first;
+  anything else falls through to a general bonding-rule engine (metal +
+  nonmetal → predicted ionic compound, nonmetal + nonmetal → covalent, metal
+  + metal → alloy, noble gas → inert) so every pairing gets a real,
+  chemically-reasoned answer, not just the famous ones.
 - **Chemistry Challenges** — from the mixing bench panel, each tagged with
   its own concept (covalent vs. ionic bonding, reactivity trends, metallic
   bonding, inertness of noble gases) and paid out from the same coin economy
   as Physics mode.
+
+## Anatomy mode
+
+- **Body systems** — toggle Integumentary (skin), Skeletal, Muscular,
+  Cardiovascular, Respiratory, Digestive, and Nervous layers on and off
+  independently, layered over a faint reference silhouette.
+- **Hover** any organ for its name; **click** it to populate the right-hand
+  panel with its system (click the system name to isolate just that system's
+  organs), function, and three fun facts.
+- **Click the brain** to isolate it into its own detail view: click through
+  its lobes (frontal, parietal, temporal, occipital), the cerebellum, and
+  brainstem for their function and which hemisphere they belong to, or hit
+  **"Cut in half"** to switch to a cross-section showing internal structures
+  (corpus callosum, thalamus, hypothalamus, brainstem, cerebellum).
+- This is a simplified, diagram-style body — like a basic anatomy poster, not
+  a medical illustration — chosen so the whole thing could be hand-built and
+  stay genuinely interactive rather than being a static image.
+
+## Home screen
+
+The landing screen (click the "Contraption" logo from any mode to return)
+introduces the app, links to the maker, and has one card per mode to jump
+straight in. Every mode is also reachable directly from the top-bar tabs at
+any time.

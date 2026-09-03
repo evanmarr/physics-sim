@@ -86,8 +86,12 @@ export function renderPanel(container, spec, state, handlers) {
   }
 
   const mathLines = physicsMath(spec);
-  if (mathLines && mathLines.length) {
-    container.appendChild(mathSection(mathLines));
+  if (mathLines && mathLines.length && handlers.mathPanelOpen === false) {
+    const link = document.createElement("button");
+    link.className = "reopen-math-link";
+    link.textContent = "▸ Show the physics panel";
+    link.addEventListener("click", () => handlers.onOpenMath());
+    container.appendChild(link);
   }
 
   const del = document.createElement("button");
@@ -97,14 +101,33 @@ export function renderPanel(container, spec, state, handlers) {
   container.appendChild(del);
 }
 
-function mathSection(lines) {
-  const details = document.createElement("details");
-  details.className = "math-section";
-  const summary = document.createElement("summary");
-  summary.textContent = "Show the physics";
-  details.appendChild(summary);
+// The standalone "physics math" panel, shown between the canvas and the
+// property panel — open by default, closable via the × in its title.
+export function renderPhysicsMathPanel(container, spec, onClose) {
+  container.innerHTML = "";
+  const mathLines = spec ? physicsMath(spec) : null;
+  if (!mathLines || !mathLines.length) {
+    const empty = document.createElement("div");
+    empty.className = "math-panel-empty";
+    empty.textContent = spec ? "No physics notes for this object." : "Select an object to see the physics behind it.";
+    container.appendChild(empty);
+    return;
+  }
 
-  lines.forEach(({ formula, note }) => {
+  const title = document.createElement("div");
+  title.className = "math-panel-title";
+  const label = document.createElement("span");
+  label.textContent = "Physics";
+  const closeBtn = document.createElement("button");
+  closeBtn.className = "math-panel-close";
+  closeBtn.textContent = "×";
+  closeBtn.title = "Close";
+  closeBtn.addEventListener("click", onClose);
+  title.appendChild(label);
+  title.appendChild(closeBtn);
+  container.appendChild(title);
+
+  mathLines.forEach(({ formula, note }) => {
     const row = document.createElement("div");
     row.className = "math-row";
     const f = document.createElement("div");
@@ -115,10 +138,8 @@ function mathSection(lines) {
     n.textContent = note;
     row.appendChild(f);
     row.appendChild(n);
-    details.appendChild(row);
+    container.appendChild(row);
   });
-
-  return details;
 }
 
 function helpText(text) {

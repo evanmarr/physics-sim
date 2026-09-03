@@ -1,16 +1,18 @@
-import { ELEMENTS, CATEGORY_COLORS, CATEGORY_LABELS, predictReaction, predictWaterReaction, elementBySymbol } from "./chemistryData.js";
+import { ELEMENTS, CATEGORY_COLORS, CATEGORY_LABELS, elementBySymbol, evaluateMix, meltingBoiling, phaseAt, ROOM_TEMP_K } from "./chemistryData.js";
 import { AtomViewer } from "./atomViewer.js";
 import { CHEMISTRY_CHALLENGES } from "./chemistryChallenges.js";
 
 const WATER_SYMBOL = "H2O"; // a synthetic pseudo-element the mixing bench can use
+const MIN_SLOTS = 4;
+const MAX_SLOTS = 12;
 
 export class ChemistryMode {
   constructor(root, economy) {
     this.root = root;
     this.economy = economy; // { getCoins(), spend(n), award(amount, label), state }
     this.selectedSymbol = "H";
-    this.mixA = null;
-    this.mixB = null;
+    // slots: array of { symbol, tempK } | null
+    this.slots = Array.from({ length: MIN_SLOTS }, () => null);
     this._build();
   }
 
@@ -98,8 +100,23 @@ export class ChemistryMode {
     title.textContent = "Mixing Bench";
     this.mixPanel.appendChild(title);
 
+    const hint = div("chem-hint");
+    hint.textContent = "Combinations are exact: water is H₂O only with a 2:1 ratio of hydrogen to oxygen, not any two elements. Each slot has its own temperature, which sets whether that element is solid, liquid, or gas.";
+    this.mixPanel.appendChild(hint);
+
     this.slotsEl = div("chem-slots");
     this.mixPanel.appendChild(this.slotsEl);
+
+    const slotBtnRow = div("chem-slot-btn-row");
+    this.addSlotBtn = document.createElement("button");
+    this.addSlotBtn.textContent = "+ Add Slot";
+    this.addSlotBtn.addEventListener("click", () => this._addSlotSpace());
+    this.removeSlotBtn = document.createElement("button");
+    this.removeSlotBtn.textContent = "− Remove Slot";
+    this.removeSlotBtn.addEventListener("click", () => this._removeSlotSpace());
+    slotBtnRow.appendChild(this.addSlotBtn);
+    slotBtnRow.appendChild(this.removeSlotBtn);
+    this.mixPanel.appendChild(slotBtnRow);
 
     const waterBtn = document.createElement("button");
     waterBtn.className = "chem-water-btn";
@@ -139,39 +156,56 @@ export class ChemistryMode {
   }
 
   _addToMix(symbol) {
-    if (this.mixA == null) this.mixA = symbol;
-    else if (this.mixB == null) this.mixB = symbol;
-    else { this.mixA = symbol; this.mixB = null; } // start a fresh pair
+    const emptyIndex = this.slots.findIndex((s) => s == null);
+    if (emptyIndex === -1) {
+      this.resultEl.innerHTML = "";
+      this.resultEl.appendChild(resultNote(`All ${this.slots.length} slots are full — clear one, or add more slots (up to ${MAX_SLOTS}).`));
+      return;
+    }
+    this.slots[emptyIndex] = { symbol, tempK: ROOM_TEMP_K };
     this.resultEl.innerHTML = "";
+    this._renderSlots();
+  }
+
+  _addSlotSpace() {
+    if (this.slots.length >= MAX_SLOTS) return;
+    this.slots.push(null);
+    this._renderSlots();
+  }
+
+  _removeSlotSpace() {
+    if (this.slots.length <= MIN_SLOTS) return;
+    // remove the last empty slot if there is one, else just the last slot
+    const lastEmpty = [...this.slots].reverse().findIndex((s) => s == null);
+    if (lastEmpty !== -1) this.slots.splice(this.slots.length - 1 - lastEmpty, 1);
+    else this.slots.pop();
     this._renderSlots();
   }
 
   _renderSlots() {
     this.slotsEl.innerHTML = "";
-    this.slotsEl.appendChild(mixSlot(this.mixA, () => { this.mixA = null; this._renderSlots(); }));
-    const plus = document.createElement("div");
-    plus.className = "chem-plus";
-    plus.textContent = "+";
-    this.slotsEl.appendChild(plus);
-    this.slotsEl.appendChild(mixSlot(this.mixB, () => { this.mixB = null; this._renderSlots(); }));
+    this.slots.forEach((entry, i) => {
+      this.slotsEl.appendChild(mixSlot(entry, {
+        onClear: () => { this.slots[i] = null; this.resultEl.innerHTML = ""; this._renderSlots(); },
+        onTemp: (tempK) => { entry.tempK = tempK; this._renderSlots(); },
+      }));
+    });
+    this.addSlotBtn.disabled = this.slots.length >= MAX_SLOTS;
+    this.removeSlotBtn.disabled = this.slots.length <= MIN_SLOTS;
   }
 
   _react() {
     this.resultEl.innerHTML = "";
-    if (!this.mixA || !this.mixB) {
-      this.resultEl.appendChild(resultNote("Add two elements to the bench first — click a tile, then \"Add to mixing bench\" (or double-click a tile) twice."));
+    const filled = this.slots.filter(Boolean);
+    if (filled.length < 1) {
+      this.resultEl.appendChild(resultNote("Add elements to the bench first — click a tile, then \"Add to mixing bench\" (or double-click a tile)."));
       return;
     }
-    let result;
-    if (this.mixA === WATER_SYMBOL || this.mixB === WATER_SYMBOL) {
-      const elSym = this.mixA === WATER_SYMBOL ? this.mixB : this.mixA;
-      result = predictWaterReaction(elementBySymbol(elSym));
-      if (!result) result = { formula: null, name: "No visible reaction", type: "none", energy: "n/a", note: `${elementBySymbol(elSym).name} doesn't react with water under normal conditions.` };
-    } else {
-      result = predictReaction(elementBySymbol(this.mixA), elementBySymbol(this.mixB));
-    }
+    const result = evaluateMix(filled);
     this.resultEl.appendChild(resultCard(result));
-    this.lastResult = { a: this.mixA, b: this.mixB, result };
+    const counts = {};
+    for (const e of filled) if (e.symbol !== WATER_SYMBOL) counts[e.symbol] = (counts[e.symbol] || 0) + 1;
+    this.lastResult = { entries: filled, counts, distinct: Object.keys(counts), hasWater: filled.some((e) => e.symbol === WATER_SYMBOL), result };
     this.root.dispatchEvent(new CustomEvent("chem:reaction", { detail: this.lastResult }));
   }
 
@@ -199,6 +233,8 @@ function gridRowFor(el) {
 
 function elementInfoCard(el) {
   const card = div("chem-info-card");
+  const [mp, bp] = meltingBoiling(el);
+  const phase = phaseAt(el, ROOM_TEMP_K);
   card.innerHTML = `
     <div class="chem-info-title">${el.name} <span class="chem-info-sym">${el.symbol}</span></div>
     <div class="chem-info-row"><span>Atomic number</span><b>${el.number}</b></div>
@@ -206,22 +242,44 @@ function elementInfoCard(el) {
     <div class="chem-info-row"><span>Atomic mass</span><b>${el.mass}</b></div>
     <div class="chem-info-row"><span>Electron shells</span><b>${el.shells.join(", ")}</b></div>
     <div class="chem-info-row"><span>Common oxidation states</span><b>${el.oxidationStates.map((s) => (s > 0 ? "+" + s : s)).join(", ")}</b></div>
+    <div class="chem-info-row"><span>Melting / boiling point</span><b>${mp} K / ${bp} K</b></div>
+    <div class="chem-info-row"><span>Phase at room temp (298 K)</span><b>${phase}</b></div>
   `;
   return card;
 }
 
-function mixSlot(symbol, onClear) {
-  const slot = div("chem-slot" + (symbol ? " filled" : ""));
-  if (!symbol) {
+function mixSlot(entry, { onClear, onTemp }) {
+  const slot = div("chem-slot" + (entry ? " filled" : ""));
+  if (!entry) {
     slot.textContent = "empty";
     return slot;
   }
-  if (symbol === WATER_SYMBOL) {
+  if (entry.symbol === WATER_SYMBOL) {
     slot.innerHTML = `<span class="chem-slot-sym">H₂O</span><span class="chem-slot-name">Water</span>`;
   } else {
-    const el = elementBySymbol(symbol);
+    const el = elementBySymbol(entry.symbol);
+    const phase = phaseAt(el, entry.tempK);
     slot.style.borderColor = CATEGORY_COLORS[el.category];
-    slot.innerHTML = `<span class="chem-slot-sym">${el.symbol}</span><span class="chem-slot-name">${el.name}</span>`;
+    slot.innerHTML = `<span class="chem-slot-sym">${el.symbol}</span><span class="chem-slot-name">${el.name} · ${phase}</span>`;
+
+    const tempRow = div("chem-slot-temp");
+    const tempLabel = document.createElement("span");
+    tempLabel.textContent = `${entry.tempK} K`;
+    const tempInput = document.createElement("input");
+    tempInput.type = "range";
+    tempInput.min = "0";
+    tempInput.max = "3000";
+    tempInput.step = "10";
+    tempInput.value = String(entry.tempK);
+    tempInput.addEventListener("click", (e) => e.stopPropagation());
+    tempInput.addEventListener("input", (e) => {
+      e.stopPropagation();
+      tempLabel.textContent = `${tempInput.value} K`;
+      onTemp(parseInt(tempInput.value, 10));
+    });
+    tempRow.appendChild(tempInput);
+    tempRow.appendChild(tempLabel);
+    slot.appendChild(tempRow);
   }
   const x = document.createElement("button");
   x.className = "chem-slot-clear";
@@ -238,12 +296,15 @@ function resultNote(text) {
 }
 
 function resultCard(result) {
-  const card = div("chem-result-card chem-result-" + result.type);
+  const statusClass = result.matched === false ? " chem-result-wrong-ratio" : "";
+  const card = div("chem-result-card chem-result-" + result.type + statusClass);
+  const badge = result.matched === false ? `<div class="chem-result-badge">Wrong ratio</div>` : "";
   if (!result.formula) {
-    card.innerHTML = `<div class="chem-result-name">${result.name}</div><div class="chem-result-note">${result.note}</div>`;
+    card.innerHTML = `${badge}<div class="chem-result-name">${result.name}</div><div class="chem-result-note">${result.note}</div>`;
     return card;
   }
   card.innerHTML = `
+    ${badge}
     <div class="chem-result-formula">${result.formula}</div>
     <div class="chem-result-name">${result.name}</div>
     <div class="chem-result-tags"><span>${result.type}</span><span>${result.energy}</span></div>

@@ -233,32 +233,67 @@ const DIATOMIC = new Set(["H", "N", "O", "F", "Cl", "Br", "I"]);
 // rest of the periodic table with a simplified but broadly-applicable
 // prediction instead of a hand-verified one.
 const REACTION_TABLE = {
-  "H-O": { formula: "H₂O", name: "Water", type: "covalent", energy: "exothermic", note: "Two hydrogens share electrons with one oxygen. The reaction that powers hydrogen fuel cells (in reverse) and rocket engines (forward, explosively)." },
-  "H-Cl": { formula: "HCl", name: "Hydrogen chloride", type: "covalent", energy: "exothermic", note: "Dissolves in water to form hydrochloric acid — the acid in your stomach." },
-  "Cl-Na": { formula: "NaCl", name: "Table salt", type: "ionic", energy: "exothermic", note: "Sodium gives up its outer electron, chlorine takes it — a violent reaction between a soft explosive metal and a toxic gas that somehow makes the salt on your fries." },
-  "C-O": { formula: "CO₂", name: "Carbon dioxide", type: "covalent", energy: "exothermic", note: "What you exhale, and what plants breathe in. Also what burning carbon-based fuel produces." },
-  "H-N": { formula: "NH₃", name: "Ammonia", type: "covalent", energy: "exothermic", note: "Made industrially by the millions of tons via the Haber process to feed the world's crops as fertilizer." },
-  "C-H": { formula: "CH₄", name: "Methane", type: "covalent", energy: "exothermic", note: "The simplest hydrocarbon — natural gas is mostly this. A potent greenhouse gas." },
-  "Fe-O": { formula: "Fe₂O₃", name: "Rust", type: "ionic", energy: "exothermic", note: "Iron slowly gives up electrons to oxygen over time — the same basic chemistry as a much faster combustion, just gentler." },
-  "Mg-O": { formula: "MgO", name: "Magnesium oxide", type: "ionic", energy: "exothermic", note: "Magnesium burns in air with a blinding white light — this is the ash left behind." },
-  "Al-O": { formula: "Al₂O₃", name: "Aluminum oxide", type: "ionic", energy: "exothermic", note: "Forms an invisible, tough coating on aluminum almost instantly in air, which is why aluminum doesn't rust away like iron." },
-  "Ca-O": { formula: "CaO", name: "Quicklime", type: "ionic", energy: "exothermic", note: "Used in cement and mortar for thousands of years." },
-  "Cl-K": { formula: "KCl", name: "Potassium chloride", type: "ionic", energy: "exothermic", note: "A common salt substitute and fertilizer ingredient." },
-  "Ag-Cl": { formula: "AgCl", name: "Silver chloride", type: "ionic", energy: "exothermic", note: "Almost insoluble in water — instantly precipitates as a white solid, a classic chemistry-class demonstration." },
-  "Cu-O": { formula: "CuO", name: "Copper oxide", type: "ionic", energy: "exothermic", note: "The black coating that forms on copper when it's heated in air." },
-  "O-Zn": { formula: "ZnO", name: "Zinc oxide", type: "ionic", energy: "exothermic", note: "The white paste in sunscreen and diaper cream." },
-  "O-S": { formula: "SO₂", name: "Sulfur dioxide", type: "covalent", energy: "exothermic", note: "The sharp smell of a just-struck match. A major contributor to acid rain when it comes from burning coal." },
-  "H-S": { formula: "H₂S", name: "Hydrogen sulfide", type: "covalent", energy: "exothermic", note: "The rotten-egg smell — toxic in enough quantity, but your nose is extraordinarily sensitive to trace amounts." },
-  "Br-Na": { formula: "NaBr", name: "Sodium bromide", type: "ionic", energy: "exothermic", note: "Once used as a sedative; today mostly a photography and industrial chemical." },
-  "I-K": { formula: "KI", name: "Potassium iodide", type: "ionic", energy: "exothermic", note: "Added to table salt to prevent iodine-deficiency disorders — this is why salt is 'iodized.'" },
-  "N-O": { formula: "NO₂", name: "Nitrogen dioxide", type: "covalent", energy: "endothermic", note: "The reddish-brown haze over polluted cities — forms from nitrogen and oxygen at the high temperatures inside engines." },
-  "H-Na": { formula: "NaH", name: "Sodium hydride", type: "ionic", energy: "exothermic", note: "Unusually, hydrogen is the negative ion here — sodium is even more eager to lose an electron than hydrogen is." },
-  "Ca-F": { formula: "CaF₂", name: "Fluorite", type: "ionic", energy: "exothermic", note: "Found naturally as a mineral, and the main industrial source of fluorine." },
-  "F-H": { formula: "HF", name: "Hydrofluoric acid", type: "covalent", energy: "exothermic", note: "One of the few things that dissolves glass — handled with extreme care." },
+  "H-O": { formula: "H₂O", name: "Water", type: "covalent", energy: "exothermic", ratio: { H: 2, O: 1 }, note: "Two hydrogens share electrons with one oxygen. The reaction that powers hydrogen fuel cells (in reverse) and rocket engines (forward, explosively)." },
+  "H-Cl": { formula: "HCl", name: "Hydrogen chloride", type: "covalent", energy: "exothermic", ratio: { H: 1, Cl: 1 }, note: "Dissolves in water to form hydrochloric acid — the acid in your stomach." },
+  "Cl-Na": { formula: "NaCl", name: "Table salt", type: "ionic", energy: "exothermic", ratio: { Na: 1, Cl: 1 }, note: "Sodium gives up its outer electron, chlorine takes it — a violent reaction between a soft explosive metal and a toxic gas that somehow makes the salt on your fries." },
+  "C-O": { formula: "CO₂", name: "Carbon dioxide", type: "covalent", energy: "exothermic", ratio: { C: 1, O: 2 }, note: "What you exhale, and what plants breathe in. Also what burning carbon-based fuel produces." },
+  "H-N": { formula: "NH₃", name: "Ammonia", type: "covalent", energy: "exothermic", ratio: { N: 1, H: 3 }, note: "Made industrially by the millions of tons via the Haber process to feed the world's crops as fertilizer." },
+  "C-H": { formula: "CH₄", name: "Methane", type: "covalent", energy: "exothermic", ratio: { C: 1, H: 4 }, note: "The simplest hydrocarbon — natural gas is mostly this. A potent greenhouse gas." },
+  "Fe-O": { formula: "Fe₂O₃", name: "Rust", type: "ionic", energy: "exothermic", ratio: { Fe: 2, O: 3 }, note: "Iron slowly gives up electrons to oxygen over time — the same basic chemistry as a much faster combustion, just gentler." },
+  "Mg-O": { formula: "MgO", name: "Magnesium oxide", type: "ionic", energy: "exothermic", ratio: { Mg: 1, O: 1 }, note: "Magnesium burns in air with a blinding white light — this is the ash left behind." },
+  "Al-O": { formula: "Al₂O₃", name: "Aluminum oxide", type: "ionic", energy: "exothermic", ratio: { Al: 2, O: 3 }, note: "Forms an invisible, tough coating on aluminum almost instantly in air, which is why aluminum doesn't rust away like iron." },
+  "Ca-O": { formula: "CaO", name: "Quicklime", type: "ionic", energy: "exothermic", ratio: { Ca: 1, O: 1 }, note: "Used in cement and mortar for thousands of years." },
+  "Cl-K": { formula: "KCl", name: "Potassium chloride", type: "ionic", energy: "exothermic", ratio: { K: 1, Cl: 1 }, note: "A common salt substitute and fertilizer ingredient." },
+  "Ag-Cl": { formula: "AgCl", name: "Silver chloride", type: "ionic", energy: "exothermic", ratio: { Ag: 1, Cl: 1 }, note: "Almost insoluble in water — instantly precipitates as a white solid, a classic chemistry-class demonstration." },
+  "Cu-O": { formula: "CuO", name: "Copper oxide", type: "ionic", energy: "exothermic", ratio: { Cu: 1, O: 1 }, note: "The black coating that forms on copper when it's heated in air." },
+  "O-Zn": { formula: "ZnO", name: "Zinc oxide", type: "ionic", energy: "exothermic", ratio: { Zn: 1, O: 1 }, note: "The white paste in sunscreen and diaper cream." },
+  "O-S": { formula: "SO₂", name: "Sulfur dioxide", type: "covalent", energy: "exothermic", ratio: { S: 1, O: 2 }, note: "The sharp smell of a just-struck match. A major contributor to acid rain when it comes from burning coal." },
+  "H-S": { formula: "H₂S", name: "Hydrogen sulfide", type: "covalent", energy: "exothermic", ratio: { H: 2, S: 1 }, note: "The rotten-egg smell — toxic in enough quantity, but your nose is extraordinarily sensitive to trace amounts." },
+  "Br-Na": { formula: "NaBr", name: "Sodium bromide", type: "ionic", energy: "exothermic", ratio: { Na: 1, Br: 1 }, note: "Once used as a sedative; today mostly a photography and industrial chemical." },
+  "I-K": { formula: "KI", name: "Potassium iodide", type: "ionic", energy: "exothermic", ratio: { K: 1, I: 1 }, note: "Added to table salt to prevent iodine-deficiency disorders — this is why salt is 'iodized.'" },
+  "N-O": { formula: "NO₂", name: "Nitrogen dioxide", type: "covalent", energy: "endothermic", ratio: { N: 1, O: 2 }, note: "The reddish-brown haze over polluted cities — forms from nitrogen and oxygen at the high temperatures inside engines." },
+  "H-Na": { formula: "NaH", name: "Sodium hydride", type: "ionic", energy: "exothermic", ratio: { Na: 1, H: 1 }, note: "Unusually, hydrogen is the negative ion here — sodium is even more eager to lose an electron than hydrogen is." },
+  "Ca-F": { formula: "CaF₂", name: "Fluorite", type: "ionic", energy: "exothermic", ratio: { Ca: 1, F: 2 }, note: "Found naturally as a mineral, and the main industrial source of fluorine." },
+  "F-H": { formula: "HF", name: "Hydrofluoric acid", type: "covalent", energy: "exothermic", ratio: { H: 1, F: 1 }, note: "One of the few things that dissolves glass — handled with extreme care." },
 };
 
-function reactionKey(a, b) {
-  return [a, b].sort().join("-");
+// A handful of three-element curated compounds, checked when the bench has
+// exactly three distinct elements filled in.
+const REACTION_TABLE_3 = {
+  "H-Na-O": { formula: "NaOH", name: "Sodium hydroxide (lye)", type: "ionic", energy: "exothermic", ratio: { Na: 1, O: 1, H: 1 }, note: "The same product sodium makes when dropped in water, built here directly from its three elements. Extremely caustic — it's the active ingredient in drain cleaner." },
+  "C-H-O": { formula: "C₆H₁₂O₆ (simplified)", name: "A sugar (glucose-family carbohydrate)", type: "covalent", energy: "n/a", ratio: { C: 1, H: 2, O: 1 }, note: "Carbon, hydrogen, and oxygen in this kind of ratio are the building blocks of carbohydrates — the sugars and starches that store energy in food and fuel your cells." },
+};
+
+function reactionKey(...symbols) {
+  return [...symbols].sort().join("-");
+}
+
+function gcdOf(...nums) {
+  const gcd2 = (a, b) => (b === 0 ? a : gcd2(b, a % b));
+  return nums.reduce((a, b) => gcd2(a, b));
+}
+
+// Reduce a {symbol: count} map to its simplest whole-number ratio.
+function reduceRatio(counts) {
+  const g = gcdOf(...Object.values(counts));
+  const out = {};
+  for (const [sym, n] of Object.entries(counts)) out[sym] = n / g;
+  return out;
+}
+
+// Both sides are reduced before comparing — a stored/predicted ratio isn't
+// guaranteed to already be in lowest terms (a single-element ratio like
+// {H: 2} for diatomic H₂ has its own GCD of 2, so left as-is it would never
+// equal the always-reduced-to-GCD-1 count the player brought).
+function ratiosEqual(a, b) {
+  const ra = reduceRatio(a), rb = reduceRatio(b);
+  const ak = Object.keys(ra).sort(), bk = Object.keys(rb).sort();
+  if (ak.length !== bk.length || ak.some((k, i) => k !== bk[i])) return false;
+  return ak.every((k) => ra[k] === rb[k]);
+}
+
+function formatRatio(counts) {
+  return Object.entries(counts).map(([sym, n]) => (n === 1 ? sym : `${n} ${sym}`)).join(" : ");
 }
 
 // Standard "-ide" naming roots (Oxygen -> Oxide, Sulfur -> Sulfide, etc.) —
@@ -296,14 +331,16 @@ export function predictWaterReaction(el) {
 // The general fallback: no curated entry, so predict from first principles
 // using electronegativity-style category rules. This is what gives "lots of
 // combinations" coverage — simplified, but a genuine chemical-bonding
-// prediction, not a placeholder.
+// prediction, not a placeholder. Every branch carries a `ratio` so the
+// mixing bench can check the player brought the right proportions, not just
+// the right elements.
 export function predictReaction(elA, elB) {
   if (elA.symbol === elB.symbol) {
     if (DIATOMIC.has(elA.symbol)) {
-      return { formula: `${elA.symbol}₂`, name: `Diatomic ${elA.name.toLowerCase()}`, type: "covalent", energy: "n/a",
+      return { formula: `${elA.symbol}₂`, name: `Diatomic ${elA.name.toLowerCase()}`, type: "covalent", energy: "n/a", ratio: { [elA.symbol]: 2 },
         note: `${elA.name} doesn't bond to other elements here — but it does bond to itself, forming the stable two-atom molecule that's actually how you'd find pure ${elA.name.toLowerCase()} in nature.` };
     }
-    return { formula: null, name: "No reaction", type: "none", energy: "n/a",
+    return { formula: null, name: "No reaction", type: "none", energy: "n/a", ratio: null,
       note: `Two atoms of the same element sitting together don't react with each other — nothing here favors either one gaining or losing an electron.` };
   }
 
@@ -312,22 +349,23 @@ export function predictReaction(elA, elB) {
 
   if (isNoble(elA) || isNoble(elB)) {
     const noble = isNoble(elA) ? elA : elB;
-    return { formula: null, name: "No reaction", type: "none", energy: "n/a",
+    return { formula: null, name: "No reaction", type: "none", energy: "n/a", ratio: null,
       note: `${noble.name}'s outer electron shell is already full, so it has essentially no tendency to gain, lose, or share electrons. Noble gases are famous for being chemically almost inert.` };
   }
 
   const aMetal = isMetal(elA), bMetal = isMetal(elB);
 
   if (aMetal && bMetal) {
-    return { formula: null, name: "Alloy (mixture, not a compound)", type: "metallic", energy: "n/a",
+    return { formula: null, name: "Alloy (mixture, not a compound)", type: "metallic", energy: "n/a", ratio: null,
       note: `Two metals don't trade electrons with each other the way a metal and a nonmetal do — their atoms just pack together, sharing a "sea" of loose electrons. That's an alloy, a physical mixture at the atomic scale, not a new chemical compound.` };
   }
 
   if (!aMetal && !bMetal) {
-    // covalent: two nonmetal-ish elements share electrons
+    // covalent: two nonmetal-ish elements share electrons. With no curated
+    // formula for this specific pair, assume the simplest case (1:1).
     const [x, y] = [elA, elB].sort((p, q) => p.number - q.number);
-    return { formula: `${x.symbol}—${y.symbol}`, name: `${x.name}–${y.name} compound (covalent)`, type: "covalent", energy: "exothermic",
-      note: `Neither ${x.name} nor ${y.name} is eager to fully give up an electron, so instead they share a pair between them — a covalent bond. The exact ratio of atoms depends on how many electrons each needs to fill its outer shell.` };
+    return { formula: `${x.symbol}—${y.symbol}`, name: `${x.name}–${y.name} compound (covalent)`, type: "covalent", energy: "exothermic", ratio: { [x.symbol]: 1, [y.symbol]: 1 },
+      note: `Neither ${x.name} nor ${y.name} is eager to fully give up an electron, so instead they share a pair between them — a covalent bond. This app doesn't have a verified formula for this specific pair, so it's assuming the simplest 1:1 case.` };
   }
 
   // metal + nonmetal: ionic, predict a plausible formula via charge balance
@@ -335,12 +373,115 @@ export function predictReaction(elA, elB) {
   const nonmetal = aMetal ? elB : elA;
   const mCharge = metal.oxidationStates.find((c) => c > 0) ?? Math.abs(metal.oxidationStates[0]) ?? 1;
   const nCharge = nonmetal.oxidationStates.find((c) => c < 0) ?? -1;
-  const gcd = (a, b) => (b === 0 ? a : gcd(b, a % b));
-  const g = gcd(mCharge, Math.abs(nCharge)) || 1;
+  const g = gcdOf(mCharge, Math.abs(nCharge)) || 1;
   const mCount = Math.abs(nCharge) / g;
   const nCount = mCharge / g;
   const sub = (n) => (n === 1 ? "" : String(n).split("").map((d) => "₀₁₂₃₄₅₆₇₈₉"[+d]).join(""));
   const formula = `${metal.symbol}${sub(mCount)}${nonmetal.symbol}${sub(nCount)}`;
-  return { formula, name: `${metal.name} ${ionicRoot(nonmetal)} (ionic)`, type: "ionic", energy: "exothermic",
+  return { formula, name: `${metal.name} ${ionicRoot(nonmetal)} (ionic)`, type: "ionic", energy: "exothermic", ratio: { [metal.symbol]: mCount, [nonmetal.symbol]: nCount },
     note: `${metal.name} loses electron(s) to become a positive ion (+${mCharge}); ${nonmetal.name} picks them up to become a negative ion (${nCharge}). They stick together in a ratio that balances the total charge to zero — a predicted formula, not a verified one, for a pair this specific this app doesn't have on file.` };
+}
+
+// ---- Melting/boiling points (Kelvin) and phase-at-temperature ----
+// Curated for the commonly-explored elements; anything else falls back to a
+// category-typical estimate. These are approximate, standard-pressure
+// values — enough to teach "solid/liquid/gas at this temperature," not a
+// reference table.
+const MELT_BOIL = {
+  H: [14, 20], He: [1, 4], Li: [454, 1615], Be: [1560, 2742], B: [2349, 4200], C: [3823, 4098],
+  N: [63, 77], O: [54, 90], F: [53, 85], Ne: [24, 27], Na: [371, 1156], Mg: [923, 1363],
+  Al: [933, 2792], Si: [1687, 3538], P: [317, 550], S: [388, 718], Cl: [172, 239], Ar: [84, 87],
+  K: [337, 1032], Ca: [1115, 1757], Sc: [1814, 3109], Ti: [1941, 3560], V: [2183, 3680],
+  Cr: [2180, 2944], Mn: [1519, 2334], Fe: [1811, 3134], Co: [1768, 3200], Ni: [1728, 3186],
+  Cu: [1358, 2835], Zn: [693, 1180], Ga: [303, 2673], Ge: [1211, 3106], As: [1090, 887],
+  Se: [494, 958], Br: [266, 332], Kr: [116, 120], Rb: [312, 961], Sr: [1050, 1655],
+  Y: [1799, 3609], Zr: [2128, 4650], Nb: [2750, 5017], Mo: [2896, 4912], Ru: [2607, 4423],
+  Rh: [2237, 3968], Pd: [1828, 3236], Ag: [1235, 2435], Cd: [594, 1040], In: [430, 2345],
+  Sn: [505, 2875], Sb: [904, 1860], Te: [723, 1261], I: [387, 457], Xe: [161, 165],
+  Cs: [302, 944], Ba: [1000, 2170], W: [3695, 5828], Pt: [2041, 4098], Au: [1337, 3129],
+  Hg: [234, 630], Tl: [577, 1746], Pb: [600, 2022], Bi: [545, 1837], Rn: [202, 211],
+};
+const CATEGORY_MELT_BOIL_DEFAULT = {
+  "alkali": [350, 1000], "alkaline-earth": [1000, 1700], "transition": [1800, 3200],
+  "post-transition": [600, 2200], "metalloid": [1200, 2800], "nonmetal": [200, 300],
+  "halogen": [200, 300], "noble-gas": [100, 120], "lanthanide": [1300, 3000], "actinide": [1400, 3500],
+};
+
+export function meltingBoiling(el) {
+  return MELT_BOIL[el.symbol] ?? CATEGORY_MELT_BOIL_DEFAULT[el.category] ?? [500, 1500];
+}
+
+export function phaseAt(el, tempK) {
+  const [mp, bp] = meltingBoiling(el);
+  if (tempK < mp) return "solid";
+  if (tempK < bp) return "liquid";
+  return "gas";
+}
+
+export const ROOM_TEMP_K = 298;
+
+// ---- The mixing bench entry point ----
+// entries: array of { symbol, tempK } for every filled slot. symbol may be
+// "H2O" for the special water pseudo-slot. Returns a result object with an
+// added `matched` field: true (a real answer), false (right elements, wrong
+// ratio — teaches the player what ratio to try), or undefined (n/a, e.g.
+// alloys/inert results where ratio doesn't apply).
+export function evaluateMix(entries) {
+  const waterCount = entries.filter((e) => e.symbol === "H2O").length;
+  const real = entries.filter((e) => e.symbol !== "H2O");
+  const counts = {};
+  for (const e of real) counts[e.symbol] = (counts[e.symbol] || 0) + 1;
+  const distinct = Object.keys(counts);
+
+  if (distinct.length === 0) {
+    if (waterCount > 0) return { formula: "H₂O", name: "Just water", type: "none", energy: "n/a", ratio: null, matched: undefined,
+      note: "Water on its own, with nothing to react with it." };
+    return { formula: null, name: "Empty", type: "none", energy: "n/a", ratio: null, matched: undefined, note: "The bench is empty." };
+  }
+
+  // metal + water special case (any count of water counts as "enough")
+  if (distinct.length === 1 && waterCount > 0) {
+    const el = elementBySymbol(distinct[0]);
+    const result = predictWaterReaction(el);
+    if (result) return { ...result, matched: true };
+    return { formula: null, name: "No visible reaction", type: "none", energy: "n/a", ratio: null, matched: undefined,
+      note: `${el.name} doesn't have a notable reaction with water at these temperatures.` };
+  }
+
+  if (distinct.length === 1) {
+    // A single-element ratio can't be checked by reducing to lowest terms
+    // (1 H and 4 H both reduce to "H : 1") — the actual atom count against
+    // the required count is what matters here instead.
+    const el = elementBySymbol(distinct[0]);
+    const result = predictReaction(el, el);
+    if (!result.ratio) return { ...result, matched: undefined };
+    const needed = result.ratio[el.symbol];
+    const have = counts[el.symbol];
+    const matched = have >= needed && have % needed === 0;
+    return { ...result, matched, note: matched ? result.note : `${result.note} You have ${have} ${el.symbol} — try a multiple of ${needed}.` };
+  }
+
+  if (distinct.length === 2) {
+    const [elA, elB] = distinct.map(elementBySymbol);
+    const result = predictReaction(elA, elB);
+    if (!result.ratio) return { ...result, matched: undefined }; // alloy / inert / no-reaction: ratio doesn't matter
+    const reduced = reduceRatio(counts);
+    const matched = ratiosEqual(reduced, result.ratio);
+    return matched
+      ? { ...result, matched: true }
+      : { ...result, matched: false, note: `You have the right elements for ${result.name.split(" (")[0]}, but the wrong ratio. You brought ${formatRatio(counts)} — it needs ${formatRatio(result.ratio)}.` };
+  }
+
+  // 3+ distinct elements: only the small curated table covers this
+  const key = reactionKey(...distinct);
+  if (REACTION_TABLE_3[key]) {
+    const recipe = REACTION_TABLE_3[key];
+    const reduced = reduceRatio(counts);
+    const matched = ratiosEqual(reduced, recipe.ratio);
+    return matched
+      ? { ...recipe, matched: true }
+      : { ...recipe, matched: false, note: `You have the right elements for ${recipe.name}, but the wrong ratio. You brought ${formatRatio(counts)} — it needs ${formatRatio(recipe.ratio)}.` };
+  }
+  return { formula: null, name: "No known reaction for this combination", type: "none", energy: "n/a", ratio: null, matched: undefined,
+    note: `This app's curated reactions only go up to a few three-element compounds — this particular combination of ${distinct.length} elements isn't one this app can predict.` };
 }

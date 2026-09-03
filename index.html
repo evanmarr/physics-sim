@@ -3,16 +3,17 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Contraption — 2D Physics Sandbox</title>
+<title>Contraption — Physics, Chemistry &amp; Anatomy Sandbox</title>
 <link rel="stylesheet" href="style.css" />
 </head>
 <body>
 
 <header id="topbar">
-  <div class="brand">Contraption</div>
+  <button id="home-link" class="brand" title="Home">Contraption</button>
   <div id="mode-tabs">
-    <button id="mode-physics-btn" class="mode-tab active">⚙ Physics</button>
+    <button id="mode-physics-btn" class="mode-tab">⚙ Physics</button>
     <button id="mode-chemistry-btn" class="mode-tab">⚗ Chemistry</button>
+    <button id="mode-anatomy-btn" class="mode-tab">🫀 Anatomy</button>
   </div>
   <div id="run-controls">
     <button id="play-btn" title="Space">▶ Play</button>
@@ -30,9 +31,12 @@
   <div id="file-controls">
     <button id="clear-btn">Clear</button>
   </div>
+  <button id="theme-toggle" title="Toggle light/dark theme">🌙</button>
 </header>
 
-<div id="workspace">
+<div id="home-root"></div>
+
+<div id="workspace" class="hidden">
   <aside id="palette"></aside>
 
   <main id="canvas-wrap">
@@ -40,12 +44,16 @@
     <div id="mode-banner" class="hidden">SIMULATING — space to stop</div>
   </main>
 
+  <aside id="physics-math-panel"></aside>
+
   <aside id="prop-panel">
     <div class="panel-empty">Select an object to edit its properties.</div>
   </aside>
 </div>
 
 <div id="chemistry-root" class="hidden"></div>
+
+<div id="anatomy-root" class="hidden"></div>
 
 <div id="shop-modal" class="modal hidden">
   <div class="modal-box">

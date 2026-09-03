@@ -1,26 +1,27 @@
 import { elementBySymbol, isMetal, isNoble } from "./chemistryData.js";
 
-function pairIs(lastResult, x, y) {
+function distinctIs(lastResult, ...symbols) {
   if (!lastResult) return false;
-  return [lastResult.a, lastResult.b].sort().join("-") === [x, y].sort().join("-");
+  const want = [...symbols].sort().join("-");
+  return lastResult.distinct.slice().sort().join("-") === want;
 }
 
 export const CHEMISTRY_CHALLENGES = [
   {
     id: "make_water",
     name: "Make Water",
-    concept: "Covalent bonding",
-    description: "Mix the two elements that make up the molecule covering 70% of Earth's surface.",
+    concept: "Covalent bonding & stoichiometry",
+    description: "Mix hydrogen and oxygen in the exact 2:1 ratio real water needs — not just any amount of each.",
     reward: 30,
-    check: (lastResult) => pairIs(lastResult, "H", "O"),
+    check: (lastResult) => distinctIs(lastResult, "H", "O") && lastResult.result.matched === true,
   },
   {
     id: "make_salt",
     name: "Make Table Salt",
-    concept: "Ionic bonding",
-    description: "Combine a soft, explosive alkali metal with a toxic yellow-green gas to make something you'd happily put on fries.",
+    concept: "Ionic bonding & stoichiometry",
+    description: "Combine a soft, explosive alkali metal with a toxic yellow-green gas, one-to-one, to make something you'd happily put on fries.",
     reward: 30,
-    check: (lastResult) => pairIs(lastResult, "Na", "Cl"),
+    check: (lastResult) => distinctIs(lastResult, "Na", "Cl") && lastResult.result.matched === true,
   },
   {
     id: "alkali_water",
@@ -29,11 +30,9 @@ export const CHEMISTRY_CHALLENGES = [
     description: "Add Water to the bench, then react it with any alkali metal (Li, Na, K, Rb, Cs, or Fr).",
     reward: 35,
     check: (lastResult) => {
-      if (!lastResult) return false;
-      const other = lastResult.a === "H2O" ? lastResult.b : (lastResult.b === "H2O" ? lastResult.a : null);
-      if (!other) return false;
-      const el = elementBySymbol(other);
-      return !!el && el.category === "alkali";
+      if (!lastResult || !lastResult.hasWater || lastResult.distinct.length !== 1) return false;
+      const el = elementBySymbol(lastResult.distinct[0]);
+      return !!el && el.category === "alkali" && lastResult.result.matched === true;
     },
   },
   {
@@ -43,8 +42,8 @@ export const CHEMISTRY_CHALLENGES = [
     description: "React any noble gas (helium, neon, argon...) with anything else and confirm you get \"No reaction.\"",
     reward: 25,
     check: (lastResult) => {
-      if (!lastResult || lastResult.a === "H2O" || lastResult.b === "H2O") return false;
-      const a = elementBySymbol(lastResult.a), b = elementBySymbol(lastResult.b);
+      if (!lastResult || lastResult.hasWater || lastResult.distinct.length !== 2) return false;
+      const [a, b] = lastResult.distinct.map(elementBySymbol);
       return (isNoble(a) || isNoble(b)) && lastResult.result.type === "none";
     },
   },
@@ -55,17 +54,17 @@ export const CHEMISTRY_CHALLENGES = [
     description: "Combine any two metals and see why they form an alloy — a mixture — rather than a new ionic compound.",
     reward: 25,
     check: (lastResult) => {
-      if (!lastResult || lastResult.a === "H2O" || lastResult.b === "H2O") return false;
-      const a = elementBySymbol(lastResult.a), b = elementBySymbol(lastResult.b);
+      if (!lastResult || lastResult.hasWater || lastResult.distinct.length !== 2) return false;
+      const [a, b] = lastResult.distinct.map(elementBySymbol);
       return isMetal(a) && isMetal(b) && lastResult.result.type === "metallic";
     },
   },
   {
     id: "make_co2",
     name: "Make a Greenhouse Gas",
-    concept: "Combustion products",
-    description: "Combine carbon and oxygen to form the gas most responsible for climate change.",
+    concept: "Combustion products & stoichiometry",
+    description: "Combine carbon and oxygen, one carbon to two oxygen, to form the gas most responsible for climate change.",
     reward: 30,
-    check: (lastResult) => pairIs(lastResult, "C", "O"),
+    check: (lastResult) => distinctIs(lastResult, "C", "O") && lastResult.result.matched === true,
   },
 ];

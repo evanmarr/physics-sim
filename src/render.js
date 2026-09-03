@@ -89,12 +89,12 @@ export class Renderer {
     const g = this.objectLayer.append("g").attr("class", "burst-fx").attr("transform", `translate(${x},${y})`);
 
     g.append("circle")
-      .attr("r", radius * 0.5).attr("fill", "#eaf7fb").attr("opacity", 0.6)
+      .attr("r", radius * 0.5).attr("fill", "#5fc3e0").attr("opacity", 0.55)
       .transition().duration(220).ease(d3.easeCubicOut)
       .attr("r", radius * 0.9).attr("opacity", 0).remove();
 
     g.append("circle")
-      .attr("r", radius * 0.3).attr("fill", "none").attr("stroke", "#bfe6f2").attr("stroke-width", 3).attr("opacity", 0.9)
+      .attr("r", radius * 0.3).attr("fill", "none").attr("stroke", "#2f9fc9").attr("stroke-width", 3).attr("opacity", 0.9)
       .transition().duration(450).ease(d3.easeCubicOut)
       .attr("r", radius * 1.8).attr("stroke-width", 0.5).attr("opacity", 0).remove();
 
@@ -104,7 +104,7 @@ export class Renderer {
       const dist = radius * (0.9 + Math.random() * 0.9);
       g.append("line")
         .attr("x1", 0).attr("y1", 0).attr("x2", 0).attr("y2", 0)
-        .attr("stroke", "#eaf7fb").attr("stroke-width", 2).attr("stroke-linecap", "round").attr("opacity", 0.95)
+        .attr("stroke", "#2f9fc9").attr("stroke-width", 2).attr("stroke-linecap", "round").attr("opacity", 0.95)
         .transition().duration(280 + Math.random() * 180).ease(d3.easeCubicOut)
         .attr("x2", Math.cos(angle) * dist).attr("y2", Math.sin(angle) * dist)
         .attr("opacity", 0);

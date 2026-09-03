@@ -1,6 +1,6 @@
 import { Renderer } from "./render.js";
 import { renderPalette } from "./palette.js";
-import { renderPanel } from "./panel.js";
+import { renderPanel, renderPhysicsMathPanel } from "./panel.js";
 import { renderShop, tryPurchase } from "./economy.js";
 import { CHALLENGES, findChallenge, ChallengeTracker } from "./challenges.js";
 import { OBJECT_DEFS, createSpec, cloneSpec, makeId } from "./objectTypes.js";
@@ -8,6 +8,8 @@ import { PhysicsSim } from "./physics.js";
 import { loadState, saveState, clearSave } from "./storage.js";
 import { snap, WORLD } from "./world.js";
 import { ChemistryMode } from "./chemistry.js";
+import { AnatomyMode } from "./anatomy.js";
+import { renderHome } from "./home.js";
 
 const state = {
   objects: [],
@@ -18,12 +20,14 @@ const state = {
   unlocked: new Set(),
   completedChallenges: new Set(),
   activeChallengeId: null,
+  mathPanelOpen: true,
 };
 
 let sim = null;
 let tracker = null;
 let clipboard = null; // in-app copy/paste buffer — a spec, not the OS clipboard
 let chemistryMode = null;
+let anatomyMode = null;
 
 function starterScene() {
   return [
@@ -98,7 +102,19 @@ function renderPanelUI() {
   renderPanel(document.getElementById("prop-panel"), spec, state, {
     onChange: (id, patch) => { patchObject(id, patch); },
     onDelete: (id) => { deleteObject(id); },
+    mathPanelOpen: state.mathPanelOpen,
+    onOpenMath: () => { state.mathPanelOpen = true; renderMathPanelUI(); renderPanelUI(); },
   });
+  renderMathPanelUI();
+}
+
+function renderMathPanelUI() {
+  const panelEl = document.getElementById("physics-math-panel");
+  const spec = state.objects.find((o) => o.id === state.selectedId) || null;
+  panelEl.classList.toggle("hidden", !state.mathPanelOpen);
+  if (state.mathPanelOpen) {
+    renderPhysicsMathPanel(panelEl, spec, () => { state.mathPanelOpen = false; renderMathPanelUI(); renderPanelUI(); });
+  }
 }
 
 function deleteObject(id) {
@@ -132,6 +148,29 @@ function wireTopbar(renderer) {
     renderPanelUI();
     scheduleSave();
   });
+
+  wireTheme();
+}
+
+function wireTheme() {
+  const btn = document.getElementById("theme-toggle");
+  const saved = localStorage.getItem("contraption-theme") || "light";
+  applyTheme(saved);
+  btn.addEventListener("click", () => {
+    const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+    applyTheme(next);
+    localStorage.setItem("contraption-theme", next);
+  });
+}
+
+function applyTheme(theme) {
+  if (theme === "dark") {
+    document.documentElement.dataset.theme = "dark";
+    document.getElementById("theme-toggle").textContent = "☀";
+  } else {
+    delete document.documentElement.dataset.theme;
+    document.getElementById("theme-toggle").textContent = "🌙";
+  }
 }
 
 function togglePlay(renderer) {
@@ -265,10 +304,18 @@ function wireChallenges() {
 }
 
 function wireModeTabs() {
+  const homeLink = document.getElementById("home-link");
   const physicsBtn = document.getElementById("mode-physics-btn");
   const chemistryBtn = document.getElementById("mode-chemistry-btn");
+  const anatomyBtn = document.getElementById("mode-anatomy-btn");
+  const modeButtons = { physics: physicsBtn, chemistry: chemistryBtn, anatomy: anatomyBtn };
+
+  const homeRoot = document.getElementById("home-root");
   const workspace = document.getElementById("workspace");
   const chemRoot = document.getElementById("chemistry-root");
+  const anatomyRoot = document.getElementById("anatomy-root");
+  const roots = { home: homeRoot, physics: workspace, chemistry: chemRoot, anatomy: anatomyRoot };
+
   const physicsOnlyControls = [
     document.getElementById("run-controls"),
     document.getElementById("gravity-controls"),
@@ -294,10 +341,9 @@ function wireModeTabs() {
     if (state.mode === mode) return;
     if (state.mode === "physics" && state.playing) togglePlay(window._renderer);
     state.mode = mode;
-    physicsBtn.classList.toggle("active", mode === "physics");
-    chemistryBtn.classList.toggle("active", mode === "chemistry");
-    workspace.classList.toggle("hidden", mode !== "physics");
-    chemRoot.classList.toggle("hidden", mode !== "chemistry");
+
+    for (const [m, btn] of Object.entries(modeButtons)) btn.classList.toggle("active", mode === m);
+    for (const [m, el] of Object.entries(roots)) el.classList.toggle("hidden", mode !== m);
     physicsOnlyControls.forEach((el) => el && (el.style.display = mode === "physics" ? "" : "none"));
 
     if (mode === "chemistry") {
@@ -306,11 +352,26 @@ function wireModeTabs() {
     } else {
       chemistryMode?.unmount();
     }
+
+    if (mode === "anatomy") {
+      if (!anatomyMode) anatomyMode = new AnatomyMode(anatomyRoot);
+      anatomyMode.mount();
+    } else {
+      anatomyMode?.unmount();
+    }
+
+    if (mode === "home") {
+      renderHome(homeRoot, (m) => setMode(m));
+    }
   }
 
+  homeLink.addEventListener("click", () => setMode("home"));
   physicsBtn.addEventListener("click", () => setMode("physics"));
   chemistryBtn.addEventListener("click", () => setMode("chemistry"));
-  state.mode = "physics";
+  anatomyBtn.addEventListener("click", () => setMode("anatomy"));
+
+  state.mode = null; // force the first setMode call to actually run
+  setMode("home");
 }
 
 function wireKeyboard(renderer) {
