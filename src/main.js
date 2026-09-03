@@ -7,7 +7,6 @@ import { PhysicsSim } from "./physics.js";
 import { loadState, saveState, clearSave } from "./storage.js";
 import { snap, WORLD } from "./world.js";
 import { ChemistryMode } from "./chemistry.js";
-import { AnatomyMode } from "./anatomy.js";
 import { AstronomyMode } from "./astronomy.js";
 import { traceLightRays } from "./lightOptics.js";
 import { openQuiz } from "./quiz.js";
@@ -27,7 +26,6 @@ let sim = null;
 let tracker = null;
 let clipboard = null; // in-app copy/paste buffer — a spec, not the OS clipboard
 let chemistryMode = null;
-let anatomyMode = null;
 let astronomyMode = null;
 
 function starterScene() {
@@ -385,15 +383,13 @@ function wireChallenges() {
 function wireModeTabs() {
   const physicsBtn = document.getElementById("mode-physics-btn");
   const chemistryBtn = document.getElementById("mode-chemistry-btn");
-  const anatomyBtn = document.getElementById("mode-anatomy-btn");
   const astronomyBtn = document.getElementById("mode-astronomy-btn");
-  const modeButtons = { physics: physicsBtn, chemistry: chemistryBtn, anatomy: anatomyBtn, astronomy: astronomyBtn };
+  const modeButtons = { physics: physicsBtn, chemistry: chemistryBtn, astronomy: astronomyBtn };
 
   const workspace = document.getElementById("workspace");
   const chemRoot = document.getElementById("chemistry-root");
-  const anatomyRoot = document.getElementById("anatomy-root");
   const astronomyRoot = document.getElementById("astronomy-root");
-  const roots = { physics: workspace, chemistry: chemRoot, anatomy: anatomyRoot, astronomy: astronomyRoot };
+  const roots = { physics: workspace, chemistry: chemRoot, astronomy: astronomyRoot };
 
   const physicsOnlyControls = [
     document.getElementById("run-controls"),
@@ -413,7 +409,7 @@ function wireModeTabs() {
     for (const [m, el] of Object.entries(roots)) el.classList.toggle("hidden", mode !== m);
     physicsOnlyControls.forEach((el) => el && (el.style.display = mode === "physics" ? "" : "none"));
     challengeBtn.style.display = mode === "physics" ? "" : "none";
-    quizBtn.style.display = mode === "chemistry" || mode === "anatomy" || mode === "physics" ? "" : "none";
+    quizBtn.style.display = mode === "chemistry" || mode === "physics" ? "" : "none";
 
     if (mode === "physics") startParticleLoop(); else stopParticleLoop();
 
@@ -422,13 +418,6 @@ function wireModeTabs() {
       chemistryMode.mount();
     } else {
       chemistryMode?.unmount();
-    }
-
-    if (mode === "anatomy") {
-      if (!anatomyMode) anatomyMode = new AnatomyMode(anatomyRoot, { state, showToast });
-      anatomyMode.mount();
-    } else {
-      anatomyMode?.unmount();
     }
 
     if (mode === "astronomy") {
@@ -441,7 +430,6 @@ function wireModeTabs() {
 
   physicsBtn.addEventListener("click", () => setMode("physics"));
   chemistryBtn.addEventListener("click", () => setMode("chemistry"));
-  anatomyBtn.addEventListener("click", () => setMode("anatomy"));
   astronomyBtn.addEventListener("click", () => setMode("astronomy"));
 
   state.mode = null;

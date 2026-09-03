@@ -1,4 +1,4 @@
-# Contraption — Physics, Chemistry & Anatomy Sandbox
+# Contraption — Physics, Chemistry & Astronomy Sandbox
 
 A browser-based science sandbox with a home screen and three modes, all
 switchable from the top bar and sharing one save file and one coin economy:
@@ -8,9 +8,6 @@ switchable from the top bar and sharing one save file and one coin economy:
 - **Chemistry** — browse the full periodic table, inspect a rotatable 3D
   model of any element's atom, and mix elements on a bench (with per-element
   temperature) to see what reactions their exact ratios actually form.
-- **Anatomy** — a layered, clickable human body across seven systems, with a
-  dedicated brain view you can cut in half to see inside.
-
 Built with [Matter.js](https://brm.io/matter-js/) for the physics (gravity,
 collisions, friction, restitution, constraints), [D3.js](https://d3js.org/)
 for the grid, rendering, drag-and-drop, pan/zoom, and property panel, and
@@ -117,23 +114,6 @@ workspace) autosaves to `localStorage`, and is shared with Chemistry mode.
   its own concept (covalent vs. ionic bonding, reactivity trends, metallic
   bonding, inertness of noble gases) and paid out from the same coin economy
   as Physics mode.
-
-## Anatomy mode
-
-- **Body systems** — toggle Integumentary (skin), Skeletal, Muscular,
-  Cardiovascular, Respiratory, Digestive, and Nervous layers on and off
-  independently, layered over a faint reference silhouette.
-- **Hover** any organ for its name; **click** it to populate the right-hand
-  panel with its system (click the system name to isolate just that system's
-  organs), function, and three fun facts.
-- **Click the brain** to isolate it into its own detail view: click through
-  its lobes (frontal, parietal, temporal, occipital), the cerebellum, and
-  brainstem for their function and which hemisphere they belong to, or hit
-  **"Cut in half"** to switch to a cross-section showing internal structures
-  (corpus callosum, thalamus, hypothalamus, brainstem, cerebellum).
-- This is a simplified, diagram-style body — like a basic anatomy poster, not
-  a medical illustration — chosen so the whole thing could be hand-built and
-  stay genuinely interactive rather than being a static image.
 
 ## Home screen
 

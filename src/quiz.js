@@ -1,5 +1,4 @@
 import { ELEMENTS, CATEGORY_LABELS, elementBySymbol } from "./chemistryData.js";
-import { ORGANS, SYSTEMS, BRAIN_PARTS_LOBES, BRAIN_PARTS_CROSS_SECTION } from "./anatomyData.js";
 import { MATERIALS, MATERIAL_LIST, materialOf } from "./materials.js";
 
 function shuffle(arr) {
@@ -147,86 +146,12 @@ function buildPhysicsQuestions() {
   return { title: "Physics Quiz", questions: pick(questions, 12) };
 }
 
-// Bounding box of a shape, so small organs (trachea, spinal cord) get
-// zoomed in and large ones (intestines) get a wider view — a fixed viewBox
-// for every organ made the small ones nearly invisible.
-function boundsOf(s) {
-  if (s.tag === "g") {
-    const boxes = s.shapes.map(boundsOf);
-    return {
-      minX: Math.min(...boxes.map((b) => b.minX)), minY: Math.min(...boxes.map((b) => b.minY)),
-      maxX: Math.max(...boxes.map((b) => b.maxX)), maxY: Math.max(...boxes.map((b) => b.maxY)),
-    };
-  }
-  if (s.tag === "circle") return { minX: s.cx - s.r, minY: s.cy - s.r, maxX: s.cx + s.r, maxY: s.cy + s.r };
-  if (s.tag === "ellipse") return { minX: s.cx - s.rx, minY: s.cy - s.ry, maxX: s.cx + s.rx, maxY: s.cy + s.ry };
-  if (s.tag === "rect") return { minX: s.x, minY: s.y, maxX: s.x + s.width, maxY: s.y + s.height };
-  if (s.tag === "path") {
-    // our paths only use M/C/L/Z with plain numeric coordinates (no arc
-    // flags), so every number in the string is part of an x,y pair.
-    const nums = (s.d.match(/-?\d+(\.\d+)?/g) || []).map(Number);
-    const xs = nums.filter((_, i) => i % 2 === 0), ys = nums.filter((_, i) => i % 2 === 1);
-    return { minX: Math.min(...xs), minY: Math.min(...ys), maxX: Math.max(...xs), maxY: Math.max(...ys) };
-  }
-  return { minX: 0, minY: 0, maxX: 300, maxY: 680 };
-}
-
-function svgSnippet(shape, size = 140) {
-  const b = boundsOf(shape);
-  const w = b.maxX - b.minX, h = b.maxY - b.minY;
-  const pad = Math.max(w, h) * 0.35 + 8;
-  const vbX = b.minX - pad, vbY = b.minY - pad, vbW = w + pad * 2, vbH = h + pad * 2;
-  const shapeMarkup = shapeToSvg(shape);
-  return `<svg viewBox="${vbX} ${vbY} ${vbW} ${vbH}" width="${size}" height="${size}" class="quiz-organ-svg">${shapeMarkup}</svg>`;
-}
-
-function shapeToSvg(s) {
-  const fill = "#e2483f";
-  if (s.tag === "g") return s.shapes.map((sh) => shapeToSvg({ ...sh })).join("");
-  if (s.tag === "circle") return `<circle cx="${s.cx}" cy="${s.cy}" r="${s.r}" fill="${fill}"/>`;
-  if (s.tag === "ellipse") return `<ellipse cx="${s.cx}" cy="${s.cy}" rx="${s.rx}" ry="${s.ry}" fill="${fill}"/>`;
-  if (s.tag === "rect") return `<rect x="${s.x}" y="${s.y}" width="${s.width}" height="${s.height}" rx="${s.rx || 0}" fill="${fill}"/>`;
-  if (s.tag === "path") return `<path d="${s.d}" fill="${s.strokeOnly ? "none" : fill}" stroke="${s.strokeOnly ? fill : "none"}" stroke-width="${s.strokeWidth || 4}"/>`;
-  return "";
-}
-
-function buildAnatomyQuestions() {
-  const questions = [];
-
-  const bodyOrgans = ORGANS.filter((o) => o.system === "muscular" || o.system === "skeletal" || o.system === "cardiovascular" || o.system === "respiratory" || o.system === "digestive");
-  for (const organ of pick(bodyOrgans, 8)) {
-    const distractors = pick(ORGANS.filter((o) => o.id !== organ.id && o.name !== organ.name), 3).map((o) => o.name);
-    questions.push({
-      prompt: "What body part is highlighted here?",
-      visual: svgSnippet(organ.shape),
-      options: shuffle([organ.name, ...distractors]),
-      answer: organ.name,
-      explanation: `${organ.name} — part of the ${SYSTEMS.find((s) => s.id === organ.system)?.label} system. ${organ.function}`,
-    });
-  }
-
-  const brainParts = [...BRAIN_PARTS_LOBES];
-  for (const part of pick(brainParts, 6)) {
-    const distractors = pick(brainParts.filter((p) => p.id !== part.id), 3).map((p) => p.name);
-    questions.push({
-      prompt: "Which part of the brain is this?",
-      visual: svgSnippet(part.shape, 160),
-      options: shuffle([part.name, ...distractors]),
-      answer: part.name,
-      explanation: `${part.name}: ${part.function}`,
-    });
-  }
-
-  return { title: "Anatomy Quiz", questions: shuffle(questions) };
-}
-
 // ---- Runner ----
 
 let state = null;
 
 function bankFor(mode) {
   if (mode === "chemistry") return buildChemistryQuestions();
-  if (mode === "anatomy") return buildAnatomyQuestions();
   if (mode === "physics") return buildPhysicsQuestions();
   return null;
 }
