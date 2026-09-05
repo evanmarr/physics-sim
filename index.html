@@ -4,6 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Continuum — Physics, Chemistry, Astronomy &amp; More</title>
+<link rel="icon" type="image/svg+xml" href="favicon.svg" />
 <link rel="stylesheet" href="style.css" />
 </head>
 <body>
@@ -26,6 +27,7 @@
     <button id="mode-history-btn" class="mode-tab">History</button>
     <button id="mode-cybersecurity-btn" class="mode-tab">Cybersecurity</button>
     <button id="mode-particles-btn" class="mode-tab">Particle Physics</button>
+    <button id="mode-mathematics-btn" class="mode-tab">Mathematics</button>
   </div>
   <div id="run-controls">
     <button id="play-btn" title="Space">▶ Play</button>
@@ -41,7 +43,13 @@
   <div id="file-controls">
     <button id="quiz-btn">Quiz</button>
     <button id="challenges-btn">Challenges</button>
+    <button id="my-worlds-btn">My Worlds</button>
     <button id="clear-btn">Clear</button>
+  </div>
+  <div id="account-controls">
+    <span id="account-email" class="hidden"></span>
+    <button id="account-btn">Sign In</button>
+    <button id="signout-btn" class="hidden">Sign Out</button>
   </div>
   <button id="theme-toggle" title="Toggle light/dark theme">🌙</button>
 </header>
@@ -85,6 +93,8 @@
   <iframe id="particles-frame" src="particle-physics/disjoint-graph.html" title="Particle Physics"></iframe>
 </div>
 
+<div id="mathematics-root" class="hidden"></div>
+
 <div id="challenges-modal" class="modal hidden"
   <div class="modal-box">
     <h2>Challenges</h2>
@@ -95,6 +105,18 @@
 
 <div id="quiz-modal" class="modal hidden">
   <div class="modal-box" id="quiz-modal-box"></div>
+</div>
+
+<div id="auth-modal" class="modal hidden">
+  <div class="modal-box" id="auth-modal-box"></div>
+</div>
+
+<div id="saves-modal" class="modal hidden">
+  <div class="modal-box" id="saves-modal-box"></div>
+</div>
+
+<div id="popup-modal" class="modal hidden">
+  <div class="modal-box" id="popup-modal-box"></div>
 </div>
 
 <div id="challenge-toast" class="toast hidden"></div>

@@ -10,8 +10,11 @@ import { ChemistryMode } from "./chemistry.js";
 import { AstronomyMode } from "./astronomy.js";
 import { HistoryMode } from "./history.js";
 import { CybersecurityMode } from "./cybersecurity.js";
+import { MathematicsMode } from "./mathematics.js";
 import { traceLightRays } from "./lightOptics.js";
 import { openQuiz } from "./quiz.js";
+import { initAuthUI, openSavesPanel } from "./auth.js";
+import { confirmPopup } from "./popup.js";
 
 const state = {
   objects: [],
@@ -32,6 +35,7 @@ let chemistryMode = null;
 let astronomyMode = null;
 let historyMode = null;
 let cybersecurityMode = null;
+let mathematicsMode = null;
 
 // Old saves stored a rope as x/y + rotation + length; the current model is
 // two independent endpoints (x,y) and (x2,y2). Backfill x2/y2 from the old
@@ -343,9 +347,9 @@ function wireTopbar(renderer) {
     updateTrajectoryPreview();
   });
 
-  document.getElementById("clear-btn").addEventListener("click", () => {
+  document.getElementById("clear-btn").addEventListener("click", async () => {
     if (state.playing) togglePlay(renderer);
-    if (!confirm("Clear the whole workspace? This can't be undone.")) return;
+    if (!(await confirmPopup("Clear the whole workspace? This can't be undone.", { title: "Clear workspace", confirmLabel: "Clear", danger: true }))) return;
     state.objects = starterScene();
     state.selectedIds = new Set();
     state.selectedId = null;
@@ -362,6 +366,32 @@ function wireTopbar(renderer) {
   });
 
   document.getElementById("quiz-btn").addEventListener("click", () => openQuiz(state.mode));
+
+  document.getElementById("my-worlds-btn").addEventListener("click", () => {
+    openSavesPanel({
+      kind: "worlds",
+      title: "My Physics Worlds",
+      itemNoun: "world",
+      serialize: () => ({ objects: state.objects, gravity: state.gravity }),
+      apply: (data) => {
+        if (state.playing) togglePlay(renderer);
+        state.objects = dropRemovedTypes(data.objects || []);
+        migrateRopeSpecs(state.objects);
+        state.gravity = data.gravity ?? 1;
+        document.getElementById("gravity-slider").value = state.gravity;
+        document.getElementById("gravity-val").textContent = state.gravity.toFixed(1);
+        sim?.setGravity(state.gravity);
+        state.selectedIds = new Set();
+        state.selectedId = null;
+        state.activeChallengeId = null;
+        renderAll();
+        renderPanelUI();
+        scheduleSave();
+      },
+    });
+  });
+
+  initAuthUI();
 
   wireTheme();
   startParticleLoop();
@@ -488,8 +518,8 @@ function wireChallenges() {
       const btn = document.createElement("button");
       btn.className = "primary";
       btn.textContent = "Load";
-      btn.addEventListener("click", () => {
-        if (!confirm(`Load "${c.name}"? This replaces your current workspace.`)) return;
+      btn.addEventListener("click", async () => {
+        if (!(await confirmPopup(`Load "${c.name}"? This replaces your current workspace.`, { title: "Load challenge", confirmLabel: "Load" }))) return;
         state.objects = c.build();
         state.activeChallengeId = c.id;
         state.selectedIds = new Set();
@@ -519,6 +549,7 @@ const HOME_SECTIONS = [
   { mode: "history", title: "History", blurb: "Browse a timeline of landmark moments across physics, chemistry, and more.", kind: "history", hues: [35, 45] },
   { mode: "cybersecurity", title: "Cybersecurity", blurb: "Search and filter well-documented malware, hackers, hacker groups, and breaches.", kind: "cybersecurity", hues: [0, 340] },
   { mode: "particles", title: "Particle Physics", blurb: "A gallery of real D3 force simulations — drag anything you see.", kind: "particles", hues: [190, 270] },
+  { mode: "mathematics", title: "Mathematics", blurb: "A real graphing calculator — plot any expression, pan and zoom the graph.", kind: "mathematics", hues: [230, 350] },
 ];
 
 function buildHomePage(root, onNavigate) {
@@ -531,10 +562,10 @@ function buildHomePage(root, onNavigate) {
           <ellipse cx="12" cy="12" rx="10" ry="4.2" fill="none" style="stroke: var(--cool-3)" stroke-width="1.3" transform="rotate(120 12 12)" />
           <circle cx="12" cy="12" r="2.1" style="fill: var(--text)" />
         </svg>
-        <div class="home-kicker">six sandboxes · one app</div>
+        <div class="home-kicker">seven sandboxes · one app</div>
         <h1>Continuum</h1>
-        <p class="home-tagline">Real simulations, not animations — physics, chemistry, astronomy, and the
-          history and security behind them all. Pick a section to start.</p>
+        <p class="home-tagline">Real simulations, not animations — physics, chemistry, astronomy,
+          mathematics, and the history and security behind them all. Pick a section to start.</p>
       </div>
       <div class="home-cards"></div>
     </div>
@@ -629,6 +660,22 @@ function buildHomeThumbnail(el, section) {
     svg.append("rect").attr("x", cx - 18).attr("y", topY + 10).attr("width", 36).attr("height", 28)
       .attr("rx", 5).attr("fill", colorA);
     svg.append("circle").attr("cx", cx).attr("cy", topY + 22).attr("r", 3.5).attr("fill", "rgba(0,0,0,0.35)");
+  } else if (section.kind === "mathematics") {
+    // A real sine curve plotted against real axes — genuinely what opening
+    // the calculator with its default y = sin(x) looks like, not a
+    // decorative squiggle.
+    const originX = w / 2, originY = h / 2 + 6;
+    svg.append("line").attr("x1", 10).attr("x2", w - 10).attr("y1", originY).attr("y2", originY).attr("stroke", "rgba(148,163,184,0.4)");
+    svg.append("line").attr("x1", originX).attr("x2", originX).attr("y1", 8).attr("y2", h - 8).attr("stroke", "rgba(148,163,184,0.4)");
+    const pxPerUnit = 16;
+    const pts = [];
+    for (let px = 10; px <= w - 10; px += 3) {
+      const x = (px - originX) / pxPerUnit;
+      const y = Math.sin(x);
+      pts.push([px, originY - y * 22]);
+    }
+    svg.append("path").attr("d", d3.line()(pts)).attr("fill", "none").attr("stroke", colorA).attr("stroke-width", 2.5);
+    svg.append("circle").attr("cx", originX + Math.PI / 2 * pxPerUnit).attr("cy", originY - 22).attr("r", 3.5).attr("fill", colorB);
   } else {
     // Particle Physics: a small frozen force-directed graph, exactly the
     // shape every one of its 8 real demos takes.
@@ -660,7 +707,8 @@ function wireModeTabs() {
   const historyBtn = document.getElementById("mode-history-btn");
   const cybersecurityBtn = document.getElementById("mode-cybersecurity-btn");
   const particlesBtn = document.getElementById("mode-particles-btn");
-  const modeButtons = { home: homeBtn, physics: physicsBtn, chemistry: chemistryBtn, astronomy: astronomyBtn, history: historyBtn, cybersecurity: cybersecurityBtn, particles: particlesBtn };
+  const mathematicsBtn = document.getElementById("mode-mathematics-btn");
+  const modeButtons = { home: homeBtn, physics: physicsBtn, chemistry: chemistryBtn, astronomy: astronomyBtn, history: historyBtn, cybersecurity: cybersecurityBtn, particles: particlesBtn, mathematics: mathematicsBtn };
 
   const homeRoot = document.getElementById("home-root");
   buildHomePage(homeRoot, (mode) => setMode(mode));
@@ -671,13 +719,15 @@ function wireModeTabs() {
   const historyRoot = document.getElementById("history-root");
   const cybersecurityRoot = document.getElementById("cybersecurity-root");
   const particlesRoot = document.getElementById("particles-root");
-  const roots = { home: homeRoot, physics: workspace, chemistry: chemRoot, astronomy: astronomyRoot, history: historyRoot, cybersecurity: cybersecurityRoot, particles: particlesRoot };
+  const mathematicsRoot = document.getElementById("mathematics-root");
+  const roots = { home: homeRoot, physics: workspace, chemistry: chemRoot, astronomy: astronomyRoot, history: historyRoot, cybersecurity: cybersecurityRoot, particles: particlesRoot, mathematics: mathematicsRoot };
 
   const physicsOnlyControls = [
     document.getElementById("run-controls"),
     document.getElementById("gravity-controls"),
     document.getElementById("light-mode-toggle-wrap"),
     document.getElementById("clear-btn"),
+    document.getElementById("my-worlds-btn"),
   ];
   const challengeBtn = document.getElementById("challenges-btn");
   const quizBtn = document.getElementById("quiz-btn");
@@ -698,7 +748,7 @@ function wireModeTabs() {
     // Home is just a launcher, and Particle Physics is a gallery of
     // embedded external demos — neither is a knowledge domain with quiz
     // content the way the other modes are.
-    quizBtn.style.display = mode === "particles" || mode === "home" ? "none" : "";
+    quizBtn.style.display = mode === "particles" || mode === "home" || mode === "mathematics" ? "none" : "";
 
     if (mode === "physics") startParticleLoop(); else stopParticleLoop();
 
@@ -729,6 +779,13 @@ function wireModeTabs() {
     } else {
       cybersecurityMode?.unmount();
     }
+
+    if (mode === "mathematics") {
+      if (!mathematicsMode) mathematicsMode = new MathematicsMode(mathematicsRoot);
+      mathematicsMode.mount();
+    } else {
+      mathematicsMode?.unmount();
+    }
   }
 
   homeBtn.addEventListener("click", () => setMode("home"));
@@ -738,6 +795,7 @@ function wireModeTabs() {
   historyBtn.addEventListener("click", () => setMode("history"));
   cybersecurityBtn.addEventListener("click", () => setMode("cybersecurity"));
   particlesBtn.addEventListener("click", () => setMode("particles"));
+  mathematicsBtn.addEventListener("click", () => setMode("mathematics"));
 
   // Each individual demo's own top bar was removed (it duplicated this
   // app's nav one level up) — this subnav is the only way left to switch

@@ -1,0 +1,50 @@
+[
+  {
+    "scientist": {
+      "name": "Emmy Noether",
+      "paragraph": "Emmy Noether (1882-1935) was a German mathematician whose 1915 theorem connects two ideas that seem unrelated at first: symmetry and conservation. She proved that every continuous symmetry of a physical system's action corresponds to a conserved quantity — a result so foundational that Einstein called her a 'creative mathematical genius' in a letter to the New York Times.",
+      "paragraph2": "Noether did this work while unpaid and officially unable to hold a professorship at Gottingen because she was a woman; David Hilbert reportedly pushed back on the faculty's objections by asking, 'I do not see that the sex of the candidate is against her admission. After all, the university senate is not a bathhouse.'"
+    },
+    "equation": {
+      "name": "Noether's Theorem (informal statement)",
+      "formula": "Symmetry in time -> conservation of energy. Symmetry in space -> conservation of momentum. Rotational symmetry -> conservation of angular momentum.",
+      "paragraph": "This isn't one equation so much as a recipe for finding conservation laws: look for what stays the same when you shift a system in some way, and Noether's theorem hands you a quantity that's conserved. Energy conservation, for instance, falls directly out of the fact that the laws of physics don't change from one moment to the next."
+    },
+    "fact": {
+      "title": "A day on Venus is longer than its year",
+      "paragraph": "Venus rotates so slowly — once every 243 Earth days — that it takes longer to spin once on its axis than it does to complete a full orbit around the Sun (225 Earth days). To make it stranger, Venus rotates backwards relative to most planets, so on Venus the Sun rises in the west."
+    }
+  },
+  {
+    "scientist": {
+      "name": "Ibn al-Haytham",
+      "paragraph": "Ibn al-Haytham (c. 965-1040), known in Latin as Alhazen, wrote the Book of Optics, one of the most influential science texts of the medieval period. He rejected the older idea (held by Euclid and Ptolemy) that the eye sends out rays to 'see' objects, and instead argued correctly that vision works because light travels from objects into the eye.",
+      "paragraph2": "He backed this up with actual experiments — including work with a pinhole camera (camera obscura) — making him one of the earliest scientists to build his theories on controlled, repeatable testing rather than pure argument, centuries before that became standard practice in Europe."
+    },
+    "equation": {
+      "name": "The Pinhole (Camera Obscura) Relationship",
+      "formula": "image height / object height = image distance / object distance",
+      "paragraph": "A pinhole camera projects an upside-down image because light travels in straight lines: a ray from the top of an object crosses through the tiny hole and lands near the bottom of the image surface, and vice versa. The size of the projected image scales directly with how far the image surface sits from the pinhole."
+    },
+    "fact": {
+      "title": "Bananas are naturally (very mildly) radioactive",
+      "paragraph": "Bananas are rich in potassium, and a small fraction of all potassium atoms are the radioactive isotope potassium-40. It's such a small amount that scientists use the 'banana equivalent dose' as an informal, friendly way to put tiny radiation exposures in perspective — you'd need to eat an enormous number of bananas in one sitting before it would matter."
+    }
+  },
+  {
+    "scientist": {
+      "name": "Katherine Johnson",
+      "paragraph": "Katherine Johnson (1918-2020) was a NASA mathematician whose hand calculations of orbital mechanics were trusted to verify the results of early electronic computers. Before John Glenn's 1962 orbital flight, he specifically asked that Johnson personally check the computer's trajectory numbers before he'd fly — a request NASA honored.",
+      "paragraph2": "Her work spanned the Mercury, Apollo, and Space Shuttle programs, including trajectory calculations for the 1969 Apollo 11 Moon landing. She was awarded the Presidential Medal of Freedom in 2015."
+    },
+    "equation": {
+      "name": "Vis-Viva Equation",
+      "formula": "v^2 = GM(2/r - 1/a)",
+      "paragraph": "This equation gives the speed (v) of an object in orbit at any point, given its distance from the body it orbits (r) and the semi-major axis of its orbital ellipse (a). It's the same math behind this app's own Astronomy mode — one equation covers circular orbits, elliptical orbits, and even the exact escape-velocity trajectory."
+    },
+    "fact": {
+      "title": "Neutron stars are so dense a teaspoon would weigh billions of tons",
+      "paragraph": "When a massive star collapses, its matter can be crushed so tightly that protons and electrons merge into neutrons, packing roughly the mass of the Sun into a sphere about the size of a city. A single teaspoon of neutron-star material would weigh on the order of a billion tons on Earth."
+    }
+  }
+]

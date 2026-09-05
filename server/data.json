@@ -1,0 +1,82 @@
+{
+  "users": {
+    "evan.marr@icloud.com": {
+      "passwordHash": "af2688d5be10aab99db843817e08379b:159cb725f891a9467f8cb6100dc6710742abf6a394b1321988d3039944e89238cac0f76f279f130f4f3a21f367bdec314682557bd2b1ae14d1758a253514bc7f",
+      "subscribed": true,
+      "worlds": [],
+      "mathItems": [
+        {
+          "id": "b1121c08-0e73-442c-a0de-a1bca64658f0",
+          "name": "a",
+          "data": {
+            "chartType": "function",
+            "func": {
+              "expr": "sin(x)",
+              "color": "#4f8cff"
+            },
+            "view": {
+              "xMin": -10,
+              "xMax": 10,
+              "yMin": -6,
+              "yMax": 6
+            },
+            "rows": [
+              {
+                "id": 1,
+                "label": "A",
+                "value": 4,
+                "color": "#4f8cff"
+              },
+              {
+                "id": 2,
+                "label": "B",
+                "value": 7,
+                "color": "#ff5c7a"
+              },
+              {
+                "id": 3,
+                "label": "C",
+                "value": 3,
+                "color": "#2ecc71"
+              }
+            ],
+            "nextRowId": 4,
+            "venn": {
+              "sets": 2,
+              "labels": [
+                "A",
+                "B",
+                "C"
+              ],
+              "values": {
+                "a": 6,
+                "b": 5,
+                "c": 4,
+                "ab": 3,
+                "ac": 2,
+                "bc": 2,
+                "abc": 1
+              }
+            }
+          },
+          "updatedAt": 1788631283422
+        }
+      ],
+      "createdAt": 1788631278397
+    }
+  },
+  "sessions": {
+    "22a86850ceffcb9c97b424abb95ed6e0366b21864760c80a07ee943ea5d7c0d7": {
+      "email": "evan.marr@icloud.com",
+      "expires": 1791223278399
+    }
+  },
+  "mailingList": [
+    "evan.marr@icloud.com"
+  ],
+  "unsubscribeSecret": "f0fa27d445fbff06efd42bf6089fdc69002889b56f829dafc65c4ee176f88b29",
+  "newsletter": {
+    "nextContentIndex": 0,
+    "lastSentAt": null
+  }
+}

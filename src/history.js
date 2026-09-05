@@ -180,11 +180,13 @@ export class HistoryMode {
     this.root.appendChild(timelineRow);
     this.root.appendChild(infoPanel);
 
-    // Center the scroll strip on whichever tick is selected, so opening a
-    // category (or clicking a tick near the edge) doesn't leave the reader
-    // staring at an empty stretch of axis.
+    // Bring the selected tick into view if it's actually off-screen (e.g.
+    // opening a fresh category) — "nearest", not "center": re-centering on
+    // every single click, even one on an already-visible tick, was forcing
+    // a jarring scroll after every click, throwing off exactly where the
+    // next tick the reader wanted to click ended up.
     const activeTick = track.querySelector(".history-tick.active");
-    activeTick?.scrollIntoView?.({ inline: "center", block: "nearest" });
+    activeTick?.scrollIntoView?.({ inline: "nearest", block: "nearest" });
   }
 
   _checkChallenge(entry) {
