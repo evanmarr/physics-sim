@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Radial Tree</title>
+<style>
+  :root{
+    --bg: #090b11;
+    --bg-elev: #12151f;
+    --text: #e7e9f2;
+    --text-dim: #8a90a6;
+    --border: rgba(255,255,255,0.09);
+    --accent: #7dd3fc;
+    --accent2: #a78bfa;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;height:100%;overflow:hidden;background:var(--bg);color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;}
+  a{color:inherit;}
+  code{background:rgba(255,255,255,0.08); padding:1px 6px; border-radius:5px; font-size:0.92em;
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;}
+  .demo-head{
+    position:fixed; z-index:5; top:16px; left:24px; max-width:440px;
+    background:rgba(9,11,17,0.72); backdrop-filter:blur(10px);
+    border:1px solid var(--border); border-radius:14px; padding:16px 20px 18px;
+    pointer-events:none;
+  }
+  .demo-head a, .demo-head code{pointer-events:auto;}
+  .kicker{font-size:12px; letter-spacing:0.14em; text-transform:uppercase;
+    color:var(--accent); font-weight:600; margin-bottom:12px;}
+  .demo-head h1{font-size:clamp(22px,3.4vw,30px); line-height:1.1; margin:0 0 12px; letter-spacing:-0.02em;}
+  .demo-head p{color:var(--text-dim); font-size:14px; line-height:1.6; margin:0;}
+  .demo-head a{color:var(--accent); text-decoration:none;}
+  .demo-head a:hover{text-decoration:underline;}
+  .stage{position:fixed; top:0; left:0; right:0; bottom:0;}
+  .stage canvas{display:block; width:100%; height:100%; cursor:grab;}
+</style>
+</head>
+<body>
+
+<div class="demo-head">
+  <div class="kicker">d3-force · forceRadial · forceLink · forceCollide</div>
+  <h1>Radial tree</h1>
+  <p>Not from Observable &mdash; a randomly-generated 220-node hierarchy, each node held
+    at its depth's own radius by a single <code>d3.forceRadial</code> with a per-node
+    accessor, while <code>forceLink</code> keeps parent and child close. Drag a branch
+    off its ring and let go.</p>
+</div>
+
+<div class="stage" id="stage"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+<script>
+const stage = document.getElementById("stage");
+const canvas = document.createElement("canvas");
+const context = canvas.getContext("2d");
+stage.appendChild(canvas);
+
+// This preview environment can occasionally report 0 (even window.innerWidth)
+// on the very first script tick, before the pane finishes laying out -- so
+// retry via requestAnimationFrame until a real, positive size shows up.
+// Node seed positions depend on width/height (see the seeding comment below),
+// so this must resolve before anything else runs.
+let width, height;
+function start() {
+  width = stage.clientWidth;
+  height = stage.clientHeight;
+  if (!(width > 0 && height > 0)) { requestAnimationFrame(start); return; }
+
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  canvas.width = width * dpr;
+  canvas.height = height * dpr;
+  canvas.style.width = width + "px";
+  canvas.style.height = height + "px";
+  context.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  // Build a random tree: each new node attaches to a random existing one.
+  const N = 220;
+  const MAX_DEPTH = 7;
+  const nodes = [{ depth: 0 }];
+  const links = [];
+  for (let i = 1; i < N; i++) {
+    const parentIndex = Math.floor(Math.random() * nodes.length);
+    const depth = Math.min(nodes[parentIndex].depth + 1, MAX_DEPTH);
+    nodes.push({ depth, hue: 190 + (depth / MAX_DEPTH) * 130 });
+    links.push({ source: i, target: parentIndex });
+  }
+
+  function ringRadius(depth) {
+    return (depth / MAX_DEPTH) * Math.min(width, height) * 0.46;
+  }
+
+  // Seed each node on its ring at a spread-out angle -- forceRadial only
+  // corrects *distance* from center, it never adjusts angle, so nodes that
+  // all started clumped at D3's default spiral-from-origin would stay
+  // clumped on one small arc instead of spreading around the ring.
+  const perDepthCount = {};
+  for (const n of nodes) perDepthCount[n.depth] = (perDepthCount[n.depth] || 0) + 1;
+  const perDepthSeen = {};
+  for (const n of nodes) {
+    const seen = perDepthSeen[n.depth] || 0;
+    perDepthSeen[n.depth] = seen + 1;
+    const angle = (seen / perDepthCount[n.depth]) * Math.PI * 2;
+    const r = ringRadius(n.depth);
+    n.x = width / 2 + Math.cos(angle) * r;
+    n.y = height / 2 + Math.sin(angle) * r;
+  }
+
+  const simulation = d3.forceSimulation(nodes)
+      .force("link", d3.forceLink(links).distance(10).strength(0.15))
+      .force("charge", d3.forceManyBody().strength(-10))
+      .force("collide", d3.forceCollide(5))
+      .force("radial", d3.forceRadial(d => ringRadius(d.depth), width / 2, height / 2).strength(0.9))
+      .alphaTarget(0.015) // never fully settles -- keeps a gentle perpetual drift
+      .on("tick", draw);
+
+  window.addEventListener("resize", () => {
+    width = stage.clientWidth;
+    height = stage.clientHeight;
+    canvas.width = width * dpr;
+    canvas.height = height * dpr;
+    canvas.style.width = width + "px";
+    canvas.style.height = height + "px";
+    context.setTransform(dpr, 0, 0, dpr, 0, 0);
+    // Radius/center are baked in at initialize time -- redo on resize.
+    simulation.force("radial", d3.forceRadial(d => ringRadius(d.depth), width / 2, height / 2).strength(0.9));
+    simulation.alpha(0.3).restart();
+  });
+
+  function draw() {
+    context.clearRect(0, 0, width, height);
+    context.beginPath();
+    for (const l of links) {
+      context.moveTo(l.source.x, l.source.y);
+      context.lineTo(l.target.x, l.target.y);
+    }
+    context.strokeStyle = "rgba(148,163,184,0.35)";
+    context.stroke();
+
+    for (const d of nodes) {
+      context.beginPath();
+      context.arc(d.x, d.y, 3.5, 0, 2 * Math.PI);
+      const color = `hsl(${d.hue}, 85%, 65%)`;
+      context.fillStyle = color;
+      context.shadowColor = color;
+      context.shadowBlur = 4;
+      context.fill();
+    }
+    context.shadowBlur = 0;
+  }
+
+  const drag = d3.drag()
+      .subject((event) => simulation.find(event.x, event.y, 18))
+      .on("start", (event) => {
+        if (!event.active) simulation.alphaTarget(0.3).restart();
+        event.subject.fx = event.subject.x;
+        event.subject.fy = event.subject.y;
+      })
+      .on("drag", (event) => {
+        event.subject.fx = event.x;
+        event.subject.fy = event.y;
+      })
+      .on("end", (event) => {
+        if (!event.active) simulation.alphaTarget(0.015);
+        event.subject.fx = null;
+        event.subject.fy = null;
+      });
+  d3.select(canvas).call(drag);
+}
+start();
+</script>
+</body>
+</html>

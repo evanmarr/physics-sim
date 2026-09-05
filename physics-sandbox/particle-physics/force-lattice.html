@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Force-Directed Lattice</title>
+<style>
+  
+  :root{
+    --bg: #090b11;
+    --bg-elev: #12151f;
+    --card-bg: #ffffff;
+    --text: #e7e9f2;
+    --text-dim: #8a90a6;
+    --border: rgba(255,255,255,0.09);
+    --accent: #7dd3fc;
+    --accent2: #a78bfa;
+    --accent3: #34d399;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;height:100%;overflow:hidden;background:var(--bg);color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;}
+  a{color:inherit;}
+  code{background:rgba(255,255,255,0.08); padding:1px 6px; border-radius:5px; font-size:0.92em;
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;}
+
+  /* Floating overlay -- pointer-events:none lets drags underneath the panel
+     pass straight through to the canvas; only links/buttons opt back in. */
+  .demo-head{
+    position:fixed; z-index:5; top:16px; left:24px;
+    max-width:440px;
+    background:rgba(9,11,17,0.72);
+    backdrop-filter:blur(10px);
+    border:1px solid var(--border);
+    border-radius:14px;
+    padding:16px 20px 18px;
+    pointer-events:none;
+  }
+  .demo-head a, .demo-head button, .demo-head code{pointer-events:auto;}
+  .kicker{
+    font-size:12px; letter-spacing:0.14em; text-transform:uppercase;
+    color:var(--accent); font-weight:600; margin-bottom:12px;
+  }
+  .demo-head h1{
+    font-size:clamp(22px,3.4vw,30px); line-height:1.1; margin:0 0 12px; letter-spacing:-0.02em;
+  }
+  .demo-head p{color:var(--text-dim); font-size:14px; line-height:1.6; margin:0;}
+  .demo-head a{color:var(--accent); text-decoration:none;}
+  .demo-head a:hover{text-decoration:underline;}
+
+  /* Fills the entire viewport below the nav -- not a bounded box -- so a
+     dragged node stays on the visible canvas no matter where it's dropped. */
+  .stage{
+    position:fixed; top:0; left:0; right:0; bottom:0;
+  }
+  .stage svg, .stage canvas{display:block; width:100%; height:100%;}
+
+  .replay-btn{
+    display:inline-flex; align-items:center; gap:6px;
+    background:var(--bg-elev); color:var(--text);
+    border:1px solid var(--border); border-radius:8px;
+    padding:8px 14px; font-size:13px; font-weight:600; cursor:pointer;
+    margin-top:14px;
+  }
+  .replay-btn:hover{border-color:var(--accent);}
+</style>
+</head>
+<body>
+
+<div class="demo-head">
+  <div class="kicker">d3-force · forceLink.iterations(10)</div>
+  <h1>Force-directed lattice</h1>
+  <p>This demonstrates <code>forceLink</code>'s <code>iterations</code> setting, which
+    strengthens the link constraint by applying it multiple times per simulation step &mdash;
+    strong enough to hold a 20&times;20 grid of 400 nodes almost rigid. Faithful port of the
+    <a href="https://observablehq.com/@d3/force-directed-lattice" target="_blank" rel="noopener">original notebook</a>,
+    stretched to fill the window. Drag a corner anywhere on screen and let go to watch it
+    spring back.</p>
+  <button class="replay-btn" id="replay">&#8635; Replay</button>
+</div>
+
+<div class="stage" id="stage"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+<script>
+// --- data() cell, unchanged ---
+function makeData() {
+  const n = 20;
+  const nodes = Array.from({length: n * n}, (_, i) => ({index: i}));
+  const links = [];
+  for (let y = 0; y < n; ++y) {
+    for (let x = 0; x < n; ++x) {
+      if (y > 0) links.push({source: (y - 1) * n + x, target: y * n + x});
+      if (x > 0) links.push({source: y * n + (x - 1), target: y * n + x});
+    }
+  }
+  return {nodes, links};
+}
+
+const data = makeData();
+const stage = document.getElementById("stage");
+
+// width/height now track the stage's actual pixel size (the whole window
+// below the nav) and are kept live on resize -- see resizeCanvas() below.
+let width, height, simulation, canvas, context, redraw = null;
+
+function buildCanvas() {
+  canvas = document.createElement("canvas");
+  canvas.style.display = "block";
+  context = canvas.getContext("2d");
+  stage.appendChild(canvas);
+  resizeCanvas();
+}
+
+function resizeCanvas() {
+  width = stage.clientWidth;
+  height = stage.clientHeight;
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  canvas.width = width * dpr;
+  canvas.height = height * dpr;
+  canvas.style.width = width + "px";
+  canvas.style.height = height + "px";
+  context.setTransform(dpr, 0, 0, dpr, 0, 0);
+  // A resize only ever changes the visible framing -- node positions are
+  // untouched -- so just redraw at the new size instead of restarting.
+  if (redraw) redraw();
+}
+window.addEventListener("resize", resizeCanvas);
+
+function chart() {
+  // --- the notebook's chart() cell: forces unchanged, drawing adapted for
+  // a resizable canvas and a hue-glow palette matching the rest of the site
+  // (the notebook draws flat white dots) ---
+  const links = data.links.map(d => Object.assign({}, d));
+  const nodes = data.nodes.map(d => {
+    const hue = 190 + (d.index / (data.nodes.length - 1)) * 130;
+    return Object.assign({ color: `hsl(${hue}, 85%, 65%)` }, d);
+  });
+
+  if (simulation) simulation.stop();
+  simulation = d3.forceSimulation(nodes)
+      .force("charge", d3.forceManyBody().strength(-30))
+      .force("link", d3.forceLink(links).strength(1).distance(20).iterations(10))
+      .on("tick", ticked);
+
+  const drag = d3.drag()
+      .subject(({x, y}) => simulation.find(x - width / 2, y - height / 2, 40))
+      .on("start", dragstarted)
+      .on("drag", dragged)
+      .on("end", dragended);
+
+  function ticked() {
+    context.clearRect(0, 0, width, height);
+    context.save();
+    context.translate(width / 2, height / 2);
+
+    context.beginPath();
+    for (const d of links) {
+      context.moveTo(d.source.x, d.source.y);
+      context.lineTo(d.target.x, d.target.y);
+    }
+    context.strokeStyle = "rgba(148,163,184,0.4)";
+    context.stroke();
+
+    for (const d of nodes) {
+      context.beginPath();
+      context.arc(d.x, d.y, 3, 0, 2 * Math.PI);
+      context.fillStyle = d.color;
+      context.fill();
+      context.strokeStyle = "#090b11";
+      context.stroke();
+    }
+
+    context.restore();
+  }
+  redraw = ticked;
+
+  function dragstarted(event) {
+    if (!event.active) simulation.alphaTarget(0.3).restart();
+    event.subject.fx = event.subject.x;
+    event.subject.fy = event.subject.y;
+  }
+
+  function dragged(event) {
+    event.subject.fx = event.x;
+    event.subject.fy = event.y;
+  }
+
+  function dragended(event) {
+    if (!event.active) simulation.alphaTarget(0);
+    event.subject.fx = null;
+    event.subject.fy = null;
+  }
+
+  d3.select(canvas).call(drag);
+}
+
+buildCanvas();
+chart();
+document.getElementById("replay").addEventListener("click", chart);
+</script>
+</body>
+</html>

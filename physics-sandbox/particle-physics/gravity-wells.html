@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gravity Wells</title>
+<style>
+  :root{
+    --bg: #090b11;
+    --bg-elev: #12151f;
+    --text: #e7e9f2;
+    --text-dim: #8a90a6;
+    --border: rgba(255,255,255,0.09);
+    --accent: #7dd3fc;
+    --accent2: #a78bfa;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;height:100%;overflow:hidden;background:var(--bg);color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;}
+  a{color:inherit;}
+  code{background:rgba(255,255,255,0.08); padding:1px 6px; border-radius:5px; font-size:0.92em;
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;}
+  .demo-head{
+    position:fixed; z-index:5; top:16px; left:24px; max-width:440px;
+    background:rgba(9,11,17,0.72); backdrop-filter:blur(10px);
+    border:1px solid var(--border); border-radius:14px; padding:16px 20px 18px;
+    pointer-events:none;
+  }
+  .demo-head a, .demo-head code{pointer-events:auto;}
+  .kicker{font-size:12px; letter-spacing:0.14em; text-transform:uppercase;
+    color:var(--accent); font-weight:600; margin-bottom:12px;}
+  .demo-head h1{font-size:clamp(22px,3.4vw,30px); line-height:1.1; margin:0 0 12px; letter-spacing:-0.02em;}
+  .demo-head p{color:var(--text-dim); font-size:14px; line-height:1.6; margin:0;}
+  .demo-head a{color:var(--accent); text-decoration:none;}
+  .demo-head a:hover{text-decoration:underline;}
+  .stage{position:fixed; top:0; left:0; right:0; bottom:0;}
+  .stage canvas{display:block; width:100%; height:100%; cursor:grab;}
+</style>
+</head>
+<body>
+
+<div class="demo-head">
+  <div class="kicker">custom force · n-body attraction · drag</div>
+  <h1>Gravity wells</h1>
+  <p>Not from Observable &mdash; three fixed wells pull 260 free particles toward them
+    with a hand-written inverse-square attraction force, while <code>forceCollide</code>
+    keeps things from stacking exactly on top. Drag a well to reshape the whole field.</p>
+</div>
+
+<div class="stage" id="stage"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+<script>
+const stage = document.getElementById("stage");
+const canvas = document.createElement("canvas");
+const context = canvas.getContext("2d");
+stage.appendChild(canvas);
+
+// This preview environment can occasionally report 0 (even window.innerWidth)
+// on the very first script tick, before the pane finishes laying out -- so
+// retry via requestAnimationFrame until a real, positive size shows up.
+// Wells are seeded in real pixel coordinates below, so this must resolve
+// before anything else runs.
+let width, height;
+function start() {
+  width = stage.clientWidth;
+  height = stage.clientHeight;
+  if (!(width > 0 && height > 0)) { requestAnimationFrame(start); return; }
+
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  canvas.width = width * dpr;
+  canvas.height = height * dpr;
+  canvas.style.width = width + "px";
+  canvas.style.height = height + "px";
+  context.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  window.addEventListener("resize", () => {
+    width = stage.clientWidth;
+    height = stage.clientHeight;
+    canvas.width = width * dpr;
+    canvas.height = height * dpr;
+    canvas.style.width = width + "px";
+    canvas.style.height = height + "px";
+    context.setTransform(dpr, 0, 0, dpr, 0, 0);
+  });
+
+  const WELL_HUES = [45, 320, 210];
+  const wells = WELL_HUES.map((hue, i) => ({
+    well: true, hue, r: 14,
+    fx: width * (0.28 * (i + 1)),
+    fy: height * (0.5 + 0.22 * (i % 2 ? 1 : -1))
+  }));
+
+  const N = 260;
+  const particles = Array.from({ length: N }, (_, i) => ({
+    r: 1.5 + Math.random() * 2,
+    hue: 190 + (i / N) * 130,
+    vx: (Math.random() - 0.5) * 2,
+    vy: (Math.random() - 0.5) * 2,
+    // Scattered across the whole viewport -- D3 otherwise seeds unset x/y
+    // in a tight spiral at world-origin (this canvas's top-left corner,
+    // since it never translates), leaving the weak gravity force to drag
+    // everything across the screen from one clump.
+    x: Math.random() * width,
+    y: Math.random() * height
+  }));
+  const nodes = wells.concat(particles);
+
+  // Custom force: every well pulls every free particle toward it, falling
+  // off with the square of distance (clamped near a well to stay finite).
+  function forceWells(strength) {
+    let allNodes;
+    function force(alpha) {
+      for (const d of allNodes) {
+        if (d.well) continue;
+        for (const w of wells) {
+          const dx = w.x - d.x, dy = w.y - d.y;
+          const dist = Math.max(Math.hypot(dx, dy), 24);
+          const f = (strength / (dist * dist)) * alpha;
+          d.vx += (dx / dist) * f;
+          d.vy += (dy / dist) * f;
+        }
+      }
+    }
+    force.initialize = (_nodes) => { allNodes = _nodes; };
+    return force;
+  }
+
+  const simulation = d3.forceSimulation(nodes)
+      .force("wells", forceWells(4200))
+      .force("collide", d3.forceCollide(d => d.well ? d.r + 6 : d.r + 1))
+      .velocityDecay(0.06)
+      .alphaDecay(0) // perpetual motion -- this is a physical toy, not a settle-once layout
+      .on("tick", ticked);
+
+  function ticked() {
+    // Clamp speed so nothing can fling itself into orbit-breaking velocities.
+    for (const d of particles) {
+      const speed = Math.hypot(d.vx, d.vy);
+      if (speed > 9) { d.vx = (d.vx / speed) * 9; d.vy = (d.vy / speed) * 9; }
+    }
+    draw();
+  }
+
+  function draw() {
+    context.fillStyle = "rgba(9,11,17,0.35)";
+    context.fillRect(0, 0, width, height);
+
+    for (const d of particles) {
+      context.beginPath();
+      context.arc(d.x, d.y, d.r, 0, 2 * Math.PI);
+      context.fillStyle = `hsl(${d.hue}, 85%, 68%)`;
+      context.fill();
+    }
+    for (const w of wells) {
+      context.beginPath();
+      context.arc(w.x, w.y, w.r, 0, 2 * Math.PI);
+      const color = `hsl(${w.hue}, 90%, 65%)`;
+      context.fillStyle = color;
+      context.shadowColor = color;
+      context.shadowBlur = 18;
+      context.fill();
+      context.shadowBlur = 0;
+    }
+  }
+
+  const drag = d3.drag()
+      .subject((event) => {
+        let best = null, bestDist = 30;
+        for (const w of wells) {
+          const dist = Math.hypot(event.x - w.fx, event.y - w.fy);
+          if (dist < bestDist) { best = w; bestDist = dist; }
+        }
+        return best;
+      })
+      .on("drag", (event) => {
+        event.subject.fx = event.x;
+        event.subject.fy = event.y;
+      });
+  d3.select(canvas).call(drag);
+}
+start();
+</script>
+</body>
+</html>

@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flocking</title>
+<style>
+  :root{
+    --bg: #090b11;
+    --bg-elev: #12151f;
+    --text: #e7e9f2;
+    --text-dim: #8a90a6;
+    --border: rgba(255,255,255,0.09);
+    --accent: #7dd3fc;
+    --accent2: #a78bfa;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;height:100%;overflow:hidden;background:var(--bg);color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;}
+  a{color:inherit;}
+  code{background:rgba(255,255,255,0.08); padding:1px 6px; border-radius:5px; font-size:0.92em;
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;}
+  .demo-head{
+    position:fixed; z-index:5; top:16px; left:24px; max-width:440px;
+    background:rgba(9,11,17,0.72); backdrop-filter:blur(10px);
+    border:1px solid var(--border); border-radius:14px; padding:16px 20px 18px;
+    pointer-events:none;
+  }
+  .demo-head a, .demo-head code{pointer-events:auto;}
+  .kicker{font-size:12px; letter-spacing:0.14em; text-transform:uppercase;
+    color:var(--accent); font-weight:600; margin-bottom:12px;}
+  .demo-head h1{font-size:clamp(22px,3.4vw,30px); line-height:1.1; margin:0 0 12px; letter-spacing:-0.02em;}
+  .demo-head p{color:var(--text-dim); font-size:14px; line-height:1.6; margin:0;}
+  .demo-head a{color:var(--accent); text-decoration:none;}
+  .demo-head a:hover{text-decoration:underline;}
+  .stage{position:fixed; top:0; left:0; right:0; bottom:0;}
+  .stage canvas{display:block; width:100%; height:100%; cursor:crosshair;}
+</style>
+</head>
+<body>
+
+<div class="demo-head">
+  <div class="kicker">custom force · separation · alignment · cohesion</div>
+  <h1>Flocking</h1>
+  <p>Not from Observable &mdash; 150 boids steering by the three classic flocking rules,
+    written as a single custom force: steer away from close neighbors, match their
+    heading, and drift toward the group's center. The flock wraps around the screen
+    edges. Move your pointer in among them to scare the flock away.</p>
+</div>
+
+<div class="stage" id="stage"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+<script>
+const stage = document.getElementById("stage");
+const canvas = document.createElement("canvas");
+const context = canvas.getContext("2d");
+stage.appendChild(canvas);
+
+// This preview environment can occasionally report 0 (even window.innerWidth)
+// on the very first script tick, before the pane finishes laying out -- so
+// retry via requestAnimationFrame until a real, positive size shows up.
+// Initial boid positions are seeded from width/height below, so this must
+// resolve before anything else runs.
+let width, height;
+function start() {
+  width = stage.clientWidth;
+  height = stage.clientHeight;
+  if (!(width > 0 && height > 0)) { requestAnimationFrame(start); return; }
+
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  canvas.width = width * dpr;
+  canvas.height = height * dpr;
+  canvas.style.width = width + "px";
+  canvas.style.height = height + "px";
+  context.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  window.addEventListener("resize", () => {
+    width = stage.clientWidth;
+    height = stage.clientHeight;
+    canvas.width = width * dpr;
+    canvas.height = height * dpr;
+    canvas.style.width = width + "px";
+    canvas.style.height = height + "px";
+    context.setTransform(dpr, 0, 0, dpr, 0, 0);
+  });
+
+  const N = 150;
+  const MAX_SPEED = 2.2;
+  const nodes = Array.from({ length: N }, (_, i) => {
+    const angle = Math.random() * Math.PI * 2;
+    return {
+      hue: 190 + (i / N) * 130,
+      x: Math.random() * width,
+      y: Math.random() * height,
+      vx: Math.cos(angle) * MAX_SPEED * 0.5,
+      vy: Math.sin(angle) * MAX_SPEED * 0.5
+    };
+  });
+
+  const pointer = { x: -9999, y: -9999, active: false };
+  canvas.addEventListener("mousemove", (event) => {
+    const rect = canvas.getBoundingClientRect();
+    pointer.x = event.clientX - rect.left;
+    pointer.y = event.clientY - rect.top;
+    pointer.active = true;
+  });
+  canvas.addEventListener("mouseleave", () => { pointer.active = false; });
+
+  // Custom force implementing the three classic boid rules, plus fleeing
+  // the pointer. O(n^2) neighbor search -- fine at this node count.
+  const NEIGHBOR_R = 160, SEP_R = 30;
+  function forceFlock() {
+    let list;
+    function force(alpha) {
+      for (const a of list) {
+        let sepX = 0, sepY = 0, alignX = 0, alignY = 0, cohX = 0, cohY = 0, count = 0;
+        for (const b of list) {
+          if (a === b) continue;
+          const dx = b.x - a.x, dy = b.y - a.y;
+          const dist = Math.hypot(dx, dy) || 0.001;
+          if (dist < NEIGHBOR_R) {
+            count++;
+            alignX += b.vx; alignY += b.vy;
+            cohX += b.x; cohY += b.y;
+            if (dist < SEP_R) { sepX -= dx / dist; sepY -= dy / dist; }
+          }
+        }
+        if (count > 0) {
+          a.vx += (sepX * 1.1 + (alignX / count - a.vx) * 0.2 + (cohX / count - a.x) * 0.03) * alpha * 2;
+          a.vy += (sepY * 1.1 + (alignY / count - a.vy) * 0.2 + (cohY / count - a.y) * 0.03) * alpha * 2;
+        }
+        if (pointer.active) {
+          const dx = a.x - pointer.x, dy = a.y - pointer.y;
+          const dist = Math.hypot(dx, dy) || 0.001;
+          if (dist < 120) { a.vx += (dx / dist) * 1.5 * alpha; a.vy += (dy / dist) * 1.5 * alpha; }
+        }
+      }
+    }
+    force.initialize = (_nodes) => { list = _nodes; };
+    return force;
+  }
+
+  const simulation = d3.forceSimulation(nodes)
+      .force("flock", forceFlock())
+      .velocityDecay(0)
+      .alphaDecay(0) // perpetual motion -- this is a physical toy, not a settle-once layout
+      .on("tick", ticked);
+
+  function ticked() {
+    for (const d of nodes) {
+      const speed = Math.hypot(d.vx, d.vy) || 0.001;
+      const min = MAX_SPEED * 0.6;
+      if (speed > MAX_SPEED) { d.vx = (d.vx / speed) * MAX_SPEED; d.vy = (d.vy / speed) * MAX_SPEED; }
+      else if (speed < min) { d.vx = (d.vx / speed) * min; d.vy = (d.vy / speed) * min; }
+      // Wrap around the edges, boids-style, instead of bouncing off walls.
+      if (d.x < 0) d.x += width; else if (d.x > width) d.x -= width;
+      if (d.y < 0) d.y += height; else if (d.y > height) d.y -= height;
+    }
+    draw();
+  }
+
+  function draw() {
+    context.clearRect(0, 0, width, height);
+    for (const d of nodes) {
+      const heading = Math.atan2(d.vy, d.vx);
+      const s = 5;
+      context.save();
+      context.translate(d.x, d.y);
+      context.rotate(heading);
+      context.beginPath();
+      context.moveTo(s, 0);
+      context.lineTo(-s * 0.7, s * 0.55);
+      context.lineTo(-s * 0.7, -s * 0.55);
+      context.closePath();
+      const color = `hsl(${d.hue}, 85%, 68%)`;
+      context.fillStyle = color;
+      context.shadowColor = color;
+      context.shadowBlur = 4;
+      context.fill();
+      context.restore();
+    }
+    context.shadowBlur = 0;
+  }
+}
+start();
+</script>
+</body>
+</html>

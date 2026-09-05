@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pointer Field</title>
+<style>
+  
+  :root{
+    --bg: #090b11;
+    --bg-elev: #12151f;
+    --card-bg: #ffffff;
+    --text: #e7e9f2;
+    --text-dim: #8a90a6;
+    --border: rgba(255,255,255,0.09);
+    --accent: #7dd3fc;
+    --accent2: #a78bfa;
+    --accent3: #34d399;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;height:100%;overflow:hidden;background:var(--bg);color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;}
+  a{color:inherit;}
+  code{background:rgba(255,255,255,0.08); padding:1px 6px; border-radius:5px; font-size:0.92em;
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;}
+
+  /* Floating overlay -- pointer-events:none lets the pointer-repulsion force
+     underneath the panel keep working; only links opt back in. */
+  .demo-head{
+    position:fixed; z-index:5; top:16px; left:24px;
+    max-width:440px;
+    background:rgba(9,11,17,0.72);
+    backdrop-filter:blur(10px);
+    border:1px solid var(--border);
+    border-radius:14px;
+    padding:16px 20px 18px;
+    pointer-events:none;
+  }
+  .demo-head a, .demo-head button, .demo-head code{pointer-events:auto;}
+  .kicker{
+    font-size:12px; letter-spacing:0.14em; text-transform:uppercase;
+    color:var(--accent); font-weight:600; margin-bottom:12px;
+  }
+  .demo-head h1{
+    font-size:clamp(22px,3.4vw,30px); line-height:1.1; margin:0 0 12px; letter-spacing:-0.02em;
+  }
+  .demo-head p{color:var(--text-dim); font-size:14px; line-height:1.6; margin:0;}
+  .demo-head a{color:var(--accent); text-decoration:none;}
+  .demo-head a:hover{text-decoration:underline;}
+
+  /* Fills the entire viewport below the nav. */
+  .stage{
+    position:fixed; top:0; left:0; right:0; bottom:0;
+  }
+  .stage svg, .stage canvas{display:block; width:100%; height:100%;}
+</style>
+</head>
+<body>
+
+<div class="demo-head">
+  <div class="kicker">custom force · forceCollide · pointer-driven</div>
+  <h1>Pointer field</h1>
+  <p>Not from Observable &mdash; built for this gallery. 220 particles held apart by
+    <code>forceCollide</code> and gently recentered by weak <code>forceX</code>/<code>forceY</code>,
+    plus a hand-written custom force that pushes any particle within range of the cursor
+    radially away. Fills the whole window. Move your pointer to repel, click and hold to
+    suck particles in, release to spit them out.</p>
+</div>
+
+<div class="stage" id="stage"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+<script>
+const stage = document.getElementById("stage");
+
+const canvas = document.createElement("canvas");
+canvas.style.display = "block";
+canvas.style.cursor = "crosshair";
+const context = canvas.getContext("2d");
+stage.appendChild(canvas);
+
+// This preview environment can occasionally report 0 (even window.innerWidth)
+// on the very first script tick, before the pane finishes laying out -- so
+// retry via requestAnimationFrame until a real, positive size shows up.
+// Initial particle positions are seeded from width/height below, so this
+// must resolve before anything else runs.
+let width, height;
+function start() {
+  width = stage.clientWidth;
+  height = stage.clientHeight;
+  if (!(width > 0 && height > 0)) { requestAnimationFrame(start); return; }
+
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  canvas.width = width * dpr;
+  canvas.height = height * dpr;
+  canvas.style.width = width + "px";
+  canvas.style.height = height + "px";
+  context.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  window.addEventListener("resize", () => {
+    width = stage.clientWidth;
+    height = stage.clientHeight;
+    canvas.width = width * dpr;
+    canvas.height = height * dpr;
+    canvas.style.width = width + "px";
+    canvas.style.height = height + "px";
+    context.setTransform(dpr, 0, 0, dpr, 0, 0);
+  });
+
+  run();
+}
+start();
+
+function run() {
+// numbers of nodes
+const N = 440;
+const nodes = Array.from({length: N}, (_, i) => ({
+  r: 2 + Math.random() * 4,
+  hue: 190 + (i / N) * 130 + (Math.random() - 0.5) * 12,
+  // Seed near canvas center -- D3 otherwise seeds unset x/y around world-origin
+  // (0,0), and this canvas (unlike the others) never translates to compensate.
+  x: width / 2 + (Math.random() - 0.5) * width * 0.6,
+  y: height / 2 + (Math.random() - 0.5) * height * 0.6
+}));
+
+// A custom D3 force: any node within `radius` of the pointer gets pushed
+// straight outward (mode "repel"), or pulled straight in (mode "attract",
+// while the pointer is held down), scaled by proximity and simulation alpha.
+// mouse diameter
+function forceRepelPointer() {
+  let nodes;
+  function force(alpha) {
+    if (!pointer.active) return;
+    const attracting = pointer.mode === "attract";
+    const radius = attracting ? Math.max(width, height) : 200;
+    const strength = attracting ? 9 : 8.5;
+    const sign = attracting ? -1 : 1;
+    for (const d of nodes) {
+      const dx = d.x - pointer.x, dy = d.y - pointer.y;
+      const dist = Math.hypot(dx, dy) || 0.001;
+      if (dist < radius) {
+        const f = ((radius - dist) / radius) * strength * alpha * sign;
+        d.vx += (dx / dist) * f;
+        d.vy += (dy / dist) * f;
+      }
+    }
+  }
+  force.initialize = (_nodes) => { nodes = _nodes; };
+  return force;
+}
+
+const pointer = { x: 0, y: 0, active: false, mode: "repel" };
+
+// Release: every particle still in the pull radius gets an outward kick,
+// stronger the closer it sat to the pointer -- the "spit out" burst.
+function spitOut() {
+  const radius = Math.max(width, height);
+  for (const d of nodes) {
+    const dx = d.x - pointer.x, dy = d.y - pointer.y;
+    const dist = Math.hypot(dx, dy) || 0.001;
+    if (dist < radius) {
+      const f = (1 - dist / radius) * 28;
+      d.vx += (dx / dist) * f;
+      d.vy += (dy / dist) * f;
+    }
+  }
+  pointer.mode = "repel";
+}
+
+const simulation = d3.forceSimulation(nodes)
+    .force("charge", d3.forceManyBody().strength(-1.5))
+    .force("collide", d3.forceCollide(d => d.r + 1))
+    // Function targets (not plain numbers) so resizing the window moves the
+    // recentering pull along with it, instead of freezing at the old center.
+    .force("x", d3.forceX(() => width / 2).strength(0.03))
+    .force("y", d3.forceY(() => height / 2).strength(0.03))
+    .force("pointer", forceRepelPointer())
+    .velocityDecay(0.28)
+    .alphaTarget(0.08)
+    .on("tick", draw);
+
+function draw() {
+  context.fillStyle = "rgba(9,11,17,0.28)";
+  context.fillRect(0, 0, width, height);
+
+  for (const d of nodes) {
+    context.beginPath();
+    context.arc(d.x, d.y, d.r, 0, 2 * Math.PI);
+    const color = `hsl(${d.hue}, 85%, 65%)`;
+    context.fillStyle = color;
+    context.shadowColor = color;
+    context.shadowBlur = 6;
+    context.fill();
+  }
+  context.shadowBlur = 0;
+}
+
+let idleTimer;
+  canvas.addEventListener("mousemove", (event) => {
+  const rect = canvas.getBoundingClientRect();
+  pointer.x = event.clientX - rect.left;
+  pointer.y = event.clientY - rect.top;
+  pointer.active = true;
+  simulation.alphaTarget(0.6).restart();
+  clearTimeout(idleTimer);
+  idleTimer = setTimeout(() => simulation.alphaTarget(0.08), 250);
+});
+canvas.addEventListener("mouseleave", () => {
+  if (pointer.mode === "attract") spitOut();
+  pointer.active = false;
+  simulation.alphaTarget(0.08);
+});
+canvas.addEventListener("mousedown", (event) => {
+  pointer.mode = "attract";
+  simulation.alphaTarget(0.7).restart();
+});
+window.addEventListener("mouseup", () => {
+  if (pointer.mode === "attract") spitOut();
+});
+canvas.addEventListener("touchmove", (event) => {
+  const rect = canvas.getBoundingClientRect();
+  const t = event.touches[0];
+  pointer.x = t.clientX - rect.left;
+  pointer.y = t.clientY - rect.top;
+  pointer.active = true;
+  simulation.alphaTarget(0.6).restart();
+}, { passive: true });
+canvas.addEventListener("touchstart", (event) => {
+  const rect = canvas.getBoundingClientRect();
+  const t = event.touches[0];
+  pointer.x = t.clientX - rect.left;
+  pointer.y = t.clientY - rect.top;
+  pointer.active = true;
+  pointer.mode = "attract";
+  simulation.alphaTarget(0.7).restart();
+}, { passive: true });
+canvas.addEventListener("touchend", () => {
+  if (pointer.mode === "attract") spitOut();
+  pointer.active = false;
+});
+}
+</script>
+</body>
+</html>

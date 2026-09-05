@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Swarm Box</title>
+<style>
+  :root{
+    --bg: #090b11;
+    --bg-elev: #12151f;
+    --text: #e7e9f2;
+    --text-dim: #8a90a6;
+    --border: rgba(255,255,255,0.09);
+    --accent: #7dd3fc;
+    --accent2: #a78bfa;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;height:100%;overflow:hidden;background:var(--bg);color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;}
+  a{color:inherit;}
+  code{background:rgba(255,255,255,0.08); padding:1px 6px; border-radius:5px; font-size:0.92em;
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;}
+  .demo-head{
+    position:fixed; z-index:5; top:16px; left:24px; max-width:440px;
+    background:rgba(9,11,17,0.72); backdrop-filter:blur(10px);
+    border:1px solid var(--border); border-radius:14px; padding:16px 20px 18px;
+    pointer-events:none;
+  }
+  .demo-head a, .demo-head code{pointer-events:auto;}
+  .kicker{font-size:12px; letter-spacing:0.14em; text-transform:uppercase;
+    color:var(--accent); font-weight:600; margin-bottom:12px;}
+  .demo-head h1{font-size:clamp(22px,3.4vw,30px); line-height:1.1; margin:0 0 12px; letter-spacing:-0.02em;}
+  .demo-head p{color:var(--text-dim); font-size:14px; line-height:1.6; margin:0;}
+  .demo-head a{color:var(--accent); text-decoration:none;}
+  .demo-head a:hover{text-decoration:underline;}
+  .stage{position:fixed; top:0; left:0; right:0; bottom:0;}
+  .stage canvas{display:block; width:100%; height:100%; cursor:crosshair;}
+</style>
+</head>
+<body>
+
+<div class="demo-head">
+  <div class="kicker">custom force · containment · rapid-fire spawn</div>
+  <h1>Swarm box</h1>
+  <p>Not from Observable &mdash; a hand-written containment force bounces particles off
+    an invisible wall just inside the window edge, like gas in a container, while
+    <code>forceCollide</code> keeps them from overlapping. Click and hold anywhere to
+    rapid-fire spawn a stream of new particles.</p>
+</div>
+
+<div class="stage" id="stage"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+<script>
+const stage = document.getElementById("stage");
+const canvas = document.createElement("canvas");
+const context = canvas.getContext("2d");
+stage.appendChild(canvas);
+
+const MARGIN = 40;
+
+// This preview environment can occasionally report 0 (even window.innerWidth)
+// on the very first script tick, before the pane finishes laying out -- so
+// retry via requestAnimationFrame until a real, positive size shows up.
+// Initial particle positions are seeded from width/height below, so this
+// must resolve before anything else runs.
+let width, height;
+function start() {
+  width = stage.clientWidth;
+  height = stage.clientHeight;
+  if (!(width > 0 && height > 0)) { requestAnimationFrame(start); return; }
+
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  canvas.width = width * dpr;
+  canvas.height = height * dpr;
+  canvas.style.width = width + "px";
+  canvas.style.height = height + "px";
+  context.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  window.addEventListener("resize", () => {
+    width = stage.clientWidth;
+    height = stage.clientHeight;
+    canvas.width = width * dpr;
+    canvas.height = height * dpr;
+    canvas.style.width = width + "px";
+    canvas.style.height = height + "px";
+    context.setTransform(dpr, 0, 0, dpr, 0, 0);
+  });
+
+  function spawn(x, y, vx, vy) {
+    return {
+      x, y, vx, vy,
+      r: 3 + Math.random() * 5,
+      hue: 190 + Math.random() * 130
+    };
+  }
+
+  const START = 70;
+  const nodes = Array.from({ length: START }, () => {
+    const angle = Math.random() * Math.PI * 2, speed = 1 + Math.random() * 2;
+    return spawn(
+      MARGIN + Math.random() * (width - MARGIN * 2),
+      MARGIN + Math.random() * (height - MARGIN * 2),
+      Math.cos(angle) * speed, Math.sin(angle) * speed
+    );
+  });
+
+  // Custom force: reads live width/height/MARGIN every tick (not baked in
+  // at initialize time), so it keeps working correctly across a resize.
+  function forceContain() {
+    let list;
+    function force() {
+      for (const d of list) {
+        const lo = MARGIN + d.r, hiX = width - MARGIN - d.r, hiY = height - MARGIN - d.r;
+        if (d.x < lo) { d.x = lo; d.vx = Math.abs(d.vx); }
+        else if (d.x > hiX) { d.x = hiX; d.vx = -Math.abs(d.vx); }
+        if (d.y < lo) { d.y = lo; d.vy = Math.abs(d.vy); }
+        else if (d.y > hiY) { d.y = hiY; d.vy = -Math.abs(d.vy); }
+      }
+    }
+    force.initialize = (_nodes) => { list = _nodes; };
+    return force;
+  }
+
+  const simulation = d3.forceSimulation(nodes)
+      .force("contain", forceContain())
+      .force("collide", d3.forceCollide(d => d.r + 0.5))
+      .velocityDecay(0) // no drag -- particles coast at constant speed between bounces
+      .alphaDecay(0)
+      .on("tick", draw);
+
+  function draw() {
+    context.clearRect(0, 0, width, height);
+
+    context.strokeStyle = "rgba(148,163,184,0.35)";
+    context.strokeRect(MARGIN, MARGIN, width - MARGIN * 2, height - MARGIN * 2);
+
+    for (const d of nodes) {
+      context.beginPath();
+      context.arc(d.x, d.y, d.r, 0, 2 * Math.PI);
+      const color = `hsl(${d.hue}, 85%, 68%)`;
+      context.fillStyle = color;
+      context.shadowColor = color;
+      context.shadowBlur = 5;
+      context.fill();
+    }
+    context.shadowBlur = 0;
+  }
+
+  const MAX_NODES = 400;
+  const pointer = { x: 0, y: 0 };
+  function fire() {
+    const angle = Math.random() * Math.PI * 2, speed = 2 + Math.random() * 3;
+    nodes.push(spawn(pointer.x, pointer.y, Math.cos(angle) * speed, Math.sin(angle) * speed));
+    if (nodes.length > MAX_NODES) nodes.shift();
+    simulation.nodes(nodes);
+  }
+
+  // Click and hold to rapid-fire spawn a stream of particles at the pointer.
+  let fireTimer = null;
+  canvas.addEventListener("mousedown", (event) => {
+    const rect = canvas.getBoundingClientRect();
+    pointer.x = event.clientX - rect.left;
+    pointer.y = event.clientY - rect.top;
+    fire();
+    fireTimer = setInterval(fire, 60);
+  });
+  canvas.addEventListener("mousemove", (event) => {
+    const rect = canvas.getBoundingClientRect();
+    pointer.x = event.clientX - rect.left;
+    pointer.y = event.clientY - rect.top;
+  });
+  window.addEventListener("mouseup", () => { clearInterval(fireTimer); fireTimer = null; });
+  canvas.addEventListener("mouseleave", () => { clearInterval(fireTimer); fireTimer = null; });
+}
+start();
+</script>
+</body>
+</html>

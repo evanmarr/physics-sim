@@ -1,0 +1,691 @@
+:root {
+  /* Light theme (default) */
+  --bg: #f4f5f7;
+  --panel: #ffffff;
+  --panel-alt: #eef0f3;
+  --border: #d8dce2;
+  --text: #1c1f26;
+  --text-dim: #6b7280;
+  --accent: #3b6fe0;
+  --accent-2: #c9791a;
+  --danger: #d93a3a;
+  --good: #1f9d5c;
+  --grid-minor: #e6e8ec;
+  --grid-major: #d3d7de;
+}
+
+:root[data-theme="dark"] {
+  --bg: #1b1e24;
+  --panel: #23272f;
+  --panel-alt: #2b303b;
+  --border: #383e4a;
+  --text: #e7e9ee;
+  --text-dim: #9aa1af;
+  --accent: #4f8cff;
+  --accent-2: #ffb84f;
+  --danger: #ff5c5c;
+  --good: #4fd18b;
+  --grid-minor: #2c313b;
+  --grid-major: #383f4c;
+}
+
+/* The "cool colors" — cyan/lavender/mint — carried over from the Particle
+   Physics gallery's original look. Fixed rather than theme-swapped: they're
+   meant as a recognizable accent identity for the app's launcher screens
+   (this Home page, that gallery's own home), not something that should
+   flip with light/dark the way the functional --accent does. */
+:root {
+  --cool-1: #38bdf8;
+  --cool-2: #8b5cf6;
+  --cool-3: #10b981;
+}
+:root[data-theme="dark"] {
+  --cool-1: #7dd3fc;
+  --cool-2: #a78bfa;
+  --cool-3: #34d399;
+}
+
+* { box-sizing: border-box; }
+
+/* Every object/palette-item drag in this app is custom (pointerdown/move/up
+   or d3.drag), not native HTML5 drag-and-drop — but SVG shapes, icons, and
+   text are natively draggable/selectable in most browsers regardless, which
+   without this shows up as a stray text-selection highlight or a ghost
+   drag-image fighting the real drag as you move the mouse. `user-select`
+   alone (below) doesn't reliably reach into SVG in every browser, so both
+   are declared here on every element. */
+* {
+  -webkit-user-drag: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+/* ...except actual text-entry fields, which still need normal select/edit. */
+input, textarea {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  font-size: 14px;
+  overflow: hidden;
+}
+
+button {
+  font-family: inherit;
+  font-size: 13px;
+  background: var(--panel-alt);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+button:hover { border-color: var(--accent); }
+button:active { transform: translateY(1px); }
+button.primary { background: var(--accent); border-color: var(--accent); color: #0b1220; font-weight: 600; }
+button.danger { background: var(--danger); border-color: var(--danger); color: #2a0b0b; }
+button:disabled { opacity: .4; cursor: default; }
+
+/* One shared top bar for every section, styled after the Particle Physics
+   gallery's own plain-link nav — a row of text links rather than a
+   button-group of filled tabs — so switching sections and switching demos
+   inside Particle Physics both read as the same kind of navigation. */
+#topbar {
+  height: 52px;
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 0 16px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+.brand { display: flex; align-items: center; gap: 7px; font-weight: 700; letter-spacing: .03em; color: var(--cool-2); background: none; border: none; padding: 4px 2px; font-size: 14px; }
+.brand-logo { flex-shrink: 0; }
+#theme-toggle { margin-left: 8px; padding: 6px 10px; }
+#mode-tabs { display: flex; align-items: center; gap: 22px; }
+.mode-tab {
+  border: none; background: none; padding: 4px 0; border-radius: 0;
+  color: var(--text-dim); font-size: 13.5px; font-weight: 500;
+}
+.mode-tab:hover { border-color: transparent; color: var(--text); }
+.mode-tab.active { background: none; color: var(--text); font-weight: 700; }
+
+#run-controls { display: flex; align-items: center; gap: 8px; }
+#run-controls .hint { color: var(--text-dim); font-size: 11px; border: 1px solid var(--border); padding: 1px 6px; border-radius: 4px; }
+#play-btn { min-width: 92px; }
+#play-btn.playing { background: var(--danger); border-color: var(--danger); color: #2a0b0b; }
+
+#gravity-controls { display: flex; align-items: center; gap: 8px; color: var(--text-dim); }
+#gravity-controls input { width: 140px; }
+#gravity-val { color: var(--text); font-weight: 600; }
+
+#light-mode-toggle-wrap { margin-left: auto; }
+#light-mode-btn.active { background: var(--accent-2); border-color: var(--accent-2); color: #2a1a00; font-weight: 600; }
+#file-controls { display: flex; gap: 8px; }
+
+#workspace {
+  position: absolute;
+  top: 52px; left: 0; right: 0; bottom: 0;
+  display: flex;
+}
+
+#chemistry-root {
+  position: absolute;
+  top: 52px; left: 0; right: 0; bottom: 0;
+  display: flex;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+#home-root {
+  position: absolute;
+  top: 52px; left: 0; right: 0; bottom: 0;
+  overflow-y: auto;
+  background: var(--bg);
+}
+.home-wrap { max-width: 900px; margin: 0 auto; padding: 60px 24px 80px; }
+.home-hero { text-align: center; margin-bottom: 48px; }
+.home-logo { margin-bottom: 14px; }
+.home-kicker {
+  font-size: 12px; letter-spacing: .14em; text-transform: uppercase;
+  color: var(--cool-1); font-weight: 700; margin-bottom: 12px;
+}
+.home-hero h1 {
+  font-size: 42px; margin: 0 0 10px; letter-spacing: -.01em;
+  background: linear-gradient(100deg, var(--cool-1), var(--cool-2) 55%, var(--cool-3));
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+.home-tagline { font-size: 15px; color: var(--text-dim); max-width: 560px; margin: 0 auto; line-height: 1.6; }
+.home-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; margin-bottom: 56px; }
+.home-card {
+  background: var(--panel); border: 1px solid var(--border); border-radius: 14px;
+  padding: 0 20px 20px; text-align: left; cursor: pointer;
+  display: flex; flex-direction: column; gap: 10px;
+  transition: transform .12s, border-color .12s;
+  overflow: hidden;
+}
+.home-card:hover { transform: translateY(-3px); border-color: var(--cool-1); }
+/* Bleeds to the card's edges via negative margin, since the card itself
+   carries no top padding — cards without a thumbnail (History's own
+   category picker, reusing this same class) are unaffected either way. */
+.home-card-thumb { height: 84px; margin: 0 -20px 4px; background: var(--panel-alt); }
+.home-card-thumb svg { width: 100%; height: 100%; display: block; }
+.home-card-title { font-size: 18px; font-weight: 700; margin-top: 20px; }
+.home-card-blurb { font-size: 12.5px; color: var(--text-dim); line-height: 1.5; }
+.home-about { border-top: 1px solid var(--border); padding-top: 32px; }
+.home-about h2 { font-size: 15px; margin: 0 0 8px; }
+.home-about p { font-size: 13px; color: var(--text-dim); line-height: 1.65; margin: 0 0 24px; }
+
+#palette {
+  width: 168px;
+  background: var(--panel);
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+  padding: 10px 8px;
+}
+.palette-section-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--text-dim);
+  margin: 12px 4px 6px;
+}
+.palette-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  cursor: grab;
+  margin-bottom: 4px;
+}
+.palette-item:hover { background: var(--panel-alt); border-color: var(--border); }
+.palette-item.locked { opacity: .45; cursor: not-allowed; }
+.palette-item .swatch { width: 26px; height: 26px; border-radius: 5px; flex-shrink: 0; display:flex; align-items:center; justify-content:center; }
+.palette-item .label { font-size: 12.5px; line-height: 1.25; }
+.palette-item .price { font-size: 10.5px; color: var(--accent-2); }
+.palette-shortcuts { margin-top: 18px; padding: 8px 6px 4px; border-top: 1px solid var(--border); color: var(--text-dim); font-size: 10.5px; line-height: 1.6; }
+
+#canvas-wrap { flex: 1; position: relative; overflow: hidden; background: var(--bg); }
+#canvas { width: 100%; height: 100%; display: block; cursor: default; }
+
+#mode-banner {
+  position: absolute;
+  top: 10px; left: 50%; transform: translateX(-50%);
+  background: rgba(217,58,58,.12);
+  color: var(--danger);
+  border: 1px solid var(--danger);
+  padding: 4px 14px;
+  border-radius: 999px;
+  font-size: 12px;
+  letter-spacing: .04em;
+  pointer-events: none;
+}
+#mode-banner.hidden, .hidden { display: none !important; }
+
+#prop-panel {
+  width: 260px;
+  background: var(--panel);
+  border-left: 1px solid var(--border);
+  overflow-y: auto;
+  padding: 14px;
+}
+
+#physics-math-panel {
+  width: 240px;
+  background: var(--panel);
+  border-left: 1px solid var(--border);
+  overflow-y: auto;
+  padding: 14px;
+}
+#physics-math-panel.hidden { display: none; }
+.math-panel-title { display: flex; justify-content: space-between; align-items: center; font-weight: 700; margin-bottom: 10px; }
+.math-panel-close { background: none; border: none; padding: 2px 6px; color: var(--text-dim); font-size: 15px; line-height: 1; }
+.math-panel-close:hover { color: var(--text); border-color: transparent; }
+.math-panel-empty { color: var(--text-dim); font-size: 12.5px; margin-top: 20px; text-align: center; }
+.panel-empty { color: var(--text-dim); font-size: 13px; margin-top: 20px; text-align: center; }
+.panel-title { font-weight: 700; margin-bottom: 10px; display:flex; justify-content: space-between; align-items:center; }
+.panel-help { font-size: 11.5px; line-height: 1.4; color: var(--text-dim); background: var(--panel-alt); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; margin-bottom: 12px; }
+.field { margin-bottom: 12px; }
+.field label { display: flex; justify-content: space-between; font-size: 12px; color: var(--text-dim); margin-bottom: 4px; }
+.field input[type="range"] { width: 100%; }
+.field input[type="number"], .field select {
+  width: 100%;
+  background: var(--panel-alt);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 5px 7px;
+}
+.field.checkbox { display: flex; align-items: center; gap: 8px; }
+.field.checkbox label { margin: 0; }
+.field-row { display: flex; gap: 8px; }
+.field-row .field { flex: 1; }
+.material-swatches { display: flex; gap: 6px; flex-wrap: wrap; }
+.material-option {
+  display: flex; flex-direction: column; align-items: center; gap: 3px;
+  width: 52px; padding: 4px 2px 6px; border-radius: 6px; cursor: pointer;
+  border: 2px solid transparent;
+}
+.material-option:hover { background: var(--panel-alt); }
+.material-option.selected { border-color: var(--accent); background: var(--panel-alt); }
+.material-swatch { width: 26px; height: 26px; border-radius: 6px; }
+.material-name { font-size: 10px; color: var(--text-dim); text-align: center; line-height: 1.1; }
+.material-option.selected .material-name { color: var(--text); }
+.panel-delete { width: 100%; margin-top: 6px; }
+
+.reopen-math-link {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: var(--panel-alt);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 12px;
+  color: var(--accent);
+  font-weight: 600;
+  margin-bottom: 12px;
+}
+.math-row {
+  padding: 8px 2px 12px;
+  border-top: 1px solid var(--border);
+}
+.math-row:first-of-type { border-top: none; }
+.math-formula {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  color: var(--accent-2);
+  margin-bottom: 4px;
+  word-break: break-word;
+}
+.math-note { font-size: 11.5px; line-height: 1.45; color: var(--text-dim); }
+.math-edit-row { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
+.math-edit-row input[type="range"] { flex: 1; }
+.math-edit-value { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; color: var(--text-dim); min-width: 2.4em; text-align: right; }
+.math-edit-reset { background: none; border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px; font-size: 11px; color: var(--text-dim); line-height: 1.4; }
+.math-edit-reset:hover { color: var(--text); border-color: var(--accent-2); }
+
+.modal { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: flex; align-items: center; justify-content: center; z-index: 50; }
+.modal-box { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 20px; width: 360px; max-height: 70vh; overflow-y: auto; }
+.modal-box h2 { margin-top: 0; }
+.shop-item { display: flex; align-items: center; gap: 10px; padding: 10px; border: 1px solid var(--border); border-radius: 8px; margin-bottom: 8px; }
+.shop-item .swatch { width: 32px; height: 32px; border-radius: 6px; }
+.shop-item .info { flex: 1; }
+.shop-item .info .name { font-weight: 600; }
+.shop-item .info .desc { font-size: 11.5px; color: var(--text-dim); }
+.concept-tag {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .02em;
+  color: var(--accent);
+  background: rgba(79,140,255,.12);
+  border: 1px solid rgba(79,140,255,.3);
+  border-radius: 999px;
+  padding: 1px 8px;
+  margin: 3px 0 5px;
+}
+
+.toast {
+  position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
+  background: var(--panel); border: 1px solid var(--good); color: var(--good);
+  padding: 10px 18px; border-radius: 8px; font-size: 13px; z-index: 40;
+  transition: opacity .3s;
+}
+.toast.hidden { opacity: 0; pointer-events: none; }
+
+.grid-bg { fill: var(--bg); }
+
+.world-object.selected > .shape { stroke: var(--accent) !important; stroke-width: 3px; }
+/* Rope keeps its own configured tube thickness even while selected —
+   the generic 3px override above would otherwise thin a fat rope down to
+   a spindly line the moment you click it. --rope-width is set inline by
+   render.js from the rope's actual thickness field. */
+.world-object.selected > .shape.rope-preview { stroke-width: var(--rope-width, 10px) !important; }
+.rope-preview { stroke-linecap: round; }
+.rope-end-handle { cursor: grab; }
+.rope-end-outer { fill: #9aa1ac; stroke: #5f6672; stroke-width: 2; }
+.rope-end-dot { fill: #1b1e24; }
+.world-object.selected .rope-end-outer { stroke: var(--accent); }
+.rope-tube { stroke-linecap: round; stroke-linejoin: round; }
+.rotate-handle { cursor: grab; }
+.rotate-handle circle { fill: var(--accent); }
+.marquee-select-box { fill: var(--accent); fill-opacity: 0.12; stroke: var(--accent); stroke-width: 1.5; stroke-dasharray: 4 3; pointer-events: none; }
+
+/* ---------- Track ---------- */
+.track-rail { stroke: #8a8f98; stroke-dasharray: 2 5; }
+.track-ball-preview { opacity: .8; }
+.track-ball-outer { fill: #9aa1ac; stroke: #5f6672; stroke-width: 2; }
+.track-ball-dot { fill: #1b1e24; }
+
+/* ---------- Mirror ---------- */
+/* Body color/stroke come from the chosen material like every other object
+   (set inline in updateShape's generic .shape block) — this is just the
+   glassy sheen accent on top. */
+.mirror-highlight { stroke: #ffffff; stroke-width: 2; stroke-opacity: .8; stroke-linecap: round; pointer-events: none; }
+
+/* ---------- Wire ---------- */
+/* Colors fixed regardless of material — the whole point is a recognizable
+   tricolor braid, not something that should blend into the palette like a
+   normal material-colored object. */
+.wire-strand { fill: none; stroke-width: 2; stroke-linecap: round; }
+.wire-strand-red { stroke: #e0473f; }
+.wire-strand-green { stroke: #2ecc71; }
+.wire-strand-blue { stroke: #4f8cff; }
+.world-object.selected .wire-strand { stroke-width: 3; filter: drop-shadow(0 0 3px var(--accent)); }
+
+/* ---------- Motor ---------- */
+.motor-spoke { stroke: #1b1e24; stroke-width: 2.5; stroke-linecap: round; }
+.motor-hub { fill: #1b1e24; }
+
+.rotate-handle line { stroke: var(--accent); stroke-width: 1.5px; }
+
+/* ---------- Chemistry mode ---------- */
+
+.chem-panel {
+  overflow-y: auto;
+  padding: 14px;
+}
+.chem-panel-title { font-weight: 700; margin-bottom: 10px; font-size: 14px; }
+.chem-periodic { flex: 2.1; border-right: 1px solid var(--border); min-width: 460px; }
+.chem-center { flex: 1.1; border-right: 1px solid var(--border); display: flex; flex-direction: column; min-width: 240px; }
+.chem-mix { flex: 0.9; min-width: 220px; }
+
+.chem-legend { display: flex; flex-wrap: wrap; gap: 8px 12px; margin-bottom: 12px; }
+.chem-legend-item { display: flex; align-items: center; gap: 5px; font-size: 10.5px; color: var(--text-dim); }
+.chem-legend-item i { width: 9px; height: 9px; border-radius: 2px; display: inline-block; }
+
+.chem-grid {
+  display: grid;
+  grid-template-columns: repeat(18, minmax(28px, 1fr));
+  grid-auto-rows: minmax(30px, auto);
+  gap: 3px;
+}
+.chem-tile {
+  border: 1px solid rgba(0,0,0,.25);
+  border-radius: 4px;
+  color: #14161a;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  padding: 2px 0;
+  cursor: pointer;
+  line-height: 1.05;
+  transition: transform .08s;
+}
+.chem-tile:hover { transform: scale(1.12); z-index: 2; border-color: #fff; }
+.chem-tile-num { font-size: 7px; opacity: .75; }
+.chem-tile-sym { font-size: 11.5px; font-weight: 700; }
+.chem-hint { margin-top: 12px; font-size: 11px; color: var(--text-dim); line-height: 1.4; }
+
+.chem-atom-viewer { width: 100%; height: 280px; border: 1px solid var(--border); border-radius: 10px; background: radial-gradient(circle at 50% 40%, #232a38, #14171c); overflow: hidden; }
+.chem-atom-viewer canvas { display: block; }
+
+.chem-info-card { margin-top: 12px; background: var(--panel-alt); border: 1px solid var(--border); border-radius: 8px; padding: 12px; }
+.chem-info-title { font-size: 16px; font-weight: 700; margin-bottom: 8px; }
+.chem-info-sym { color: var(--text-dim); font-weight: 400; font-size: 13px; }
+.chem-info-row { display: flex; justify-content: space-between; font-size: 12px; padding: 4px 0; border-top: 1px solid var(--border); color: var(--text-dim); }
+.chem-info-row b { color: var(--text); font-weight: 600; }
+.chem-add-btn { margin-top: 12px; width: 100%; }
+
+/* auto-fill (not a hard repeat(2,...)) so a slot — and its temperature
+   slider — gets real width whenever the panel has room, instead of always
+   being squeezed to half-width; a 0-3000K range in a ~70px-wide slider
+   moved ~25K per pixel of drag, which is what made it feel unslidable. */
+.chem-slots { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 6px; margin-bottom: 10px; }
+.chem-slot {
+  min-height: 62px; border: 2px dashed var(--border); border-radius: 8px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  font-size: 11px; color: var(--text-dim); position: relative; padding: 6px 4px;
+}
+.chem-slot.filled { border-style: solid; background: var(--panel-alt); cursor: pointer; }
+.chem-slot-sym { font-size: 16px; font-weight: 700; color: var(--text); }
+.chem-slot-name { font-size: 9.5px; color: var(--text-dim); text-align: center; }
+.chem-slot-clear {
+  position: absolute; top: 2px; right: 4px; background: none; border: none;
+  color: var(--text-dim); font-size: 14px; padding: 0 4px; cursor: pointer;
+}
+.chem-slot-temp { display: flex; align-items: center; gap: 4px; width: 100%; margin-top: 3px; }
+.chem-slot-temp input[type="range"] { flex: 1; height: 12px; }
+.chem-slot-temp span { font-size: 9px; color: var(--text-dim); min-width: 34px; text-align: right; }
+.chem-slot-phase-row { display: flex; gap: 3px; width: 100%; margin-top: 4px; }
+.chem-phase-btn {
+  flex: 1; font-size: 9px; text-transform: capitalize; padding: 2px 0;
+  border: 1px solid var(--border); border-radius: 4px; background: var(--panel);
+  color: var(--text-dim);
+}
+.chem-phase-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.chem-phase-btn:hover:not(.active) { border-color: var(--accent-2); color: var(--text); }
+.chem-slot-btn-row { display: flex; gap: 8px; margin-bottom: 10px; }
+.chem-slot-btn-row button { flex: 1; font-size: 11.5px; padding: 6px 4px; }
+.chem-water-btn { width: 100%; margin-bottom: 10px; }
+.chem-react-btn { width: 100%; }
+.chem-result-badge {
+  display: inline-block; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
+  color: #a3690f; background: rgba(201,121,26,.15); border: 1px solid rgba(201,121,26,.4);
+  border-radius: 999px; padding: 2px 9px; margin-bottom: 8px;
+}
+.chem-result-card.chem-result-wrong-ratio { border-color: var(--accent-2); }
+
+.chem-result-card { margin-top: 14px; background: var(--panel-alt); border: 1px solid var(--border); border-radius: 8px; padding: 14px; text-align: center; }
+.chem-result-formula { font-size: 22px; font-weight: 700; color: var(--accent-2); margin-bottom: 4px; }
+.chem-result-name { font-size: 13px; font-weight: 600; margin-bottom: 6px; }
+.chem-result-tags { display: flex; justify-content: center; gap: 6px; margin-bottom: 8px; }
+.chem-result-tags span { font-size: 10px; text-transform: uppercase; letter-spacing: .04em; color: var(--text-dim); border: 1px solid var(--border); border-radius: 999px; padding: 1px 8px; }
+.chem-result-note { font-size: 11.5px; line-height: 1.45; color: var(--text-dim); text-align: left; }
+.chem-result-structure-label { font-size: 10px; text-transform: uppercase; letter-spacing: .04em; color: var(--text-dim); margin-top: 4px; }
+.chem-result-structure { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 15px; color: var(--text); margin: 3px 0 8px; }
+.chem-molecule-note { font-size: 10.5px; color: var(--text-dim); line-height: 1.4; margin-top: 10px; font-style: italic; }
+.chem-result-card.chem-result-none .chem-result-name { color: var(--text-dim); }
+
+/* ---------- Shared 3-panel mode layout (Astronomy) ---------- */
+/* Class names kept as "anat-*" since Astronomy's panel layout reuses the
+   same layers/viewer/info column structure originally built for Anatomy. */
+
+#astronomy-root {
+  position: absolute;
+  top: 52px; left: 0; right: 0; bottom: 0;
+  display: flex;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+.anat-layers { flex: 0.9; border-right: 1px solid var(--border); min-width: 220px; }
+.anat-viewer { flex: 1.4; border-right: 1px solid var(--border); min-width: 340px; display: flex; flex-direction: column; position: relative; }
+.anat-info { flex: 1; min-width: 260px; }
+
+.anat-svg-wrap { flex: 1; display: flex; align-items: center; justify-content: center; padding: 10px; }
+
+/* ---------- Quiz ---------- */
+
+#quiz-modal-box { width: 420px; }
+.quiz-header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 10px; }
+.quiz-header h2 { margin: 0; font-size: 17px; }
+.quiz-progress { font-size: 12px; color: var(--text-dim); }
+.quiz-visual { display: flex; justify-content: center; margin-bottom: 10px; background: var(--panel-alt); border-radius: 10px; padding: 10px; }
+.quiz-prompt { font-size: 14px; font-weight: 600; margin-bottom: 12px; }
+.quiz-options { display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; }
+.quiz-option { text-align: left; padding: 9px 12px; }
+.quiz-option.correct { background: rgba(31,157,107,.18); border-color: var(--good); color: var(--good); }
+.quiz-option.incorrect { background: rgba(217,58,58,.15); border-color: var(--danger); color: var(--danger); }
+.quiz-explanation { font-size: 12.5px; line-height: 1.5; padding: 10px; border-radius: 8px; background: var(--panel-alt); margin-bottom: 12px; }
+.quiz-explanation.quiz-correct { color: var(--good); }
+.quiz-explanation.quiz-incorrect { color: var(--danger); }
+.quiz-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.quiz-score { font-size: 20px; font-weight: 700; margin: 14px 0 18px; }
+
+/* ---------- Astronomy ---------- */
+
+.astro-date-input {
+  width: 100%; background: var(--panel-alt); color: var(--text); border: 1px solid var(--border);
+  border-radius: 6px; padding: 7px 8px; font-family: inherit; font-size: 13px;
+}
+#astronomy-root .anat-viewer canvas { border-radius: 8px; }
+.astro-date-label { font-size: 11.5px; color: var(--text-dim); margin-bottom: 14px; padding-bottom: 10px; border-bottom: 1px solid var(--border); }
+.astro-time-slider { width: 100%; margin: 4px 0 2px; }
+.astro-time-slider-readout { font-size: 11px; color: var(--text-dim); text-align: center; margin-bottom: 14px; }
+.astro-speed-row { display: flex; flex-direction: column; gap: 4px; }
+.astro-speed-btn { text-align: left; }
+.astro-speed-btn.active { background: var(--accent); border-color: var(--accent); color: #0b1220; font-weight: 600; }
+.astro-eclipse-result { margin-top: 10px; background: var(--panel-alt); border: 1px solid var(--border); border-radius: 8px; padding: 12px; text-align: center; }
+.astro-eclipse-result button { width: 100%; margin-top: 10px; }
+
+/* ---------- History ---------- */
+
+.history-root {
+  position: absolute;
+  top: 52px; left: 0; right: 0; bottom: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: var(--bg);
+}
+
+.history-picker { max-width: 900px; margin: 0 auto; padding: 48px 24px 60px; width: 100%; }
+.history-picker-title-row { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-bottom: 6px; }
+.history-picker-title { font-size: 32px; margin: 0; color: var(--accent); letter-spacing: -.01em; }
+.history-picker-sub { font-size: 14px; color: var(--text-dim); margin: 0 0 32px; }
+.history-challenge-banner {
+  font-size: 12.5px; color: var(--accent); background: rgba(79,140,255,.12);
+  border: 1px solid var(--accent); border-radius: 8px; padding: 8px 12px;
+  flex: 1; min-width: 200px;
+}
+.history-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+@media (max-width: 700px) { .history-cards { grid-template-columns: repeat(2, 1fr); } }
+
+.history-timeline-header {
+  display: flex; align-items: center; gap: 16px;
+  padding: 16px 20px; border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.history-timeline-header button { flex-shrink: 0; }
+
+.history-timeline-row { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+/* Always-visible, gesture-free way to move through the strip — wheel and
+   click-drag both work on it too (wired in JS), but neither depends on
+   trackpad/mouse-wheel behavior the way a plain button click doesn't. */
+.history-timeline-nav {
+  flex-shrink: 0; align-self: stretch; width: 32px;
+  background: var(--panel-alt); border: none; color: var(--text-dim);
+  font-size: 14px; cursor: pointer;
+}
+.history-timeline-nav:hover { color: var(--text); background: var(--border); }
+
+/* The horizontal scroller: fixed height, wide inner track set by JS so
+   every tick gets even spacing regardless of how many entries there are. */
+.history-timeline-scroll { overflow-x: auto; overflow-y: hidden; flex: 1; min-width: 0; padding: 18px 0 16px; }
+.history-timeline-track { position: relative; height: 120px; }
+.history-timeline-axis {
+  position: absolute; left: 0; right: 0; top: 50%;
+  height: 2px; background: var(--border);
+}
+.history-tick {
+  position: absolute; top: 0; transform: translateX(-50%);
+  width: 116px; display: flex; flex-direction: column; align-items: center; gap: 4px;
+  background: none; border: none; padding: 0; cursor: pointer;
+}
+.history-tick-mark {
+  width: 2px; height: 16px; background: var(--text-dim);
+  margin-top: 52px; /* centers the mark on the axis line at track height/2 */
+  transition: background .12s, height .12s;
+}
+.history-tick-year { font-size: 10.5px; color: var(--text-dim); font-weight: 600; }
+.history-tick-title { font-size: 11px; line-height: 1.3; text-align: center; color: var(--text); max-width: 110px; }
+.history-tick:hover .history-tick-mark { background: var(--text); }
+.history-tick.active .history-tick-mark { background: var(--accent); height: 20px; width: 3px; margin-top: 50px; }
+.history-tick.active .history-tick-year { color: var(--accent); }
+.history-tick.active .history-tick-title { font-weight: 700; }
+
+.history-info-panel { flex: 1; overflow-y: auto; padding: 24px; border-top: 1px solid var(--border); }
+
+.history-info-year { font-size: 12px; color: var(--accent); font-weight: 700; letter-spacing: .03em; text-transform: uppercase; margin-bottom: 6px; }
+.history-info-title { font-size: 22px; margin-bottom: 8px; }
+.history-info-people { font-size: 13.5px; color: var(--text-dim); margin-bottom: 18px; padding-bottom: 18px; border-bottom: 1px solid var(--border); }
+.history-info-summary { font-size: 15px; line-height: 1.6; margin-bottom: 14px; max-width: 640px; }
+.history-info-detail { font-size: 13.5px; line-height: 1.7; color: var(--text-dim); max-width: 640px; }
+
+/* ---------- Cybersecurity ---------- */
+
+.cyber-root {
+  position: absolute;
+  top: 52px; left: 0; right: 0; bottom: 0;
+  display: flex; flex-direction: column;
+  overflow: hidden;
+  background: var(--bg);
+  padding: 28px 32px;
+  gap: 4px;
+}
+.cyber-header { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; }
+.cyber-title { font-size: 32px; margin: 0; color: var(--accent); letter-spacing: -.01em; }
+.cyber-sub { font-size: 14px; color: var(--text-dim); margin: 0 0 14px; }
+
+.cyber-challenge-banner {
+  font-size: 12.5px; color: var(--accent); background: rgba(79,140,255,.12);
+  border: 1px solid var(--accent); border-radius: 8px; padding: 8px 12px;
+  margin-bottom: 14px;
+}
+
+.cyber-controls { display: flex; flex-direction: column; gap: 10px; margin-bottom: 16px; flex-shrink: 0; }
+.cyber-search {
+  width: 100%; max-width: 460px; padding: 10px 14px; font-size: 14px;
+  border-radius: 8px; border: 1px solid var(--border);
+  background: var(--panel-alt); color: var(--text);
+}
+.cyber-filter-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.cyber-filter {
+  font-size: 12.5px; padding: 7px 12px; border-radius: 999px;
+  border: 1px solid var(--border); background: transparent; color: var(--text-dim);
+  cursor: pointer;
+}
+.cyber-filter.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.cyber-filter:not(.active):hover { border-color: var(--text-dim); color: var(--text); }
+
+.cyber-body { display: flex; gap: 20px; flex: 1; min-height: 0; }
+.cyber-results { width: 380px; flex-shrink: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding-right: 4px; }
+.cyber-empty { font-size: 13px; color: var(--text-dim); padding: 20px 4px; }
+
+.cyber-card {
+  display: flex; gap: 12px; text-align: left; align-items: flex-start;
+  padding: 12px; border-radius: 10px; border: 1px solid var(--border);
+  background: var(--panel-alt);
+  cursor: pointer;
+}
+.cyber-card:hover { border-color: var(--text-dim); }
+.cyber-card.active { border-color: var(--accent); background: rgba(79,140,255,.1); }
+.cyber-card-name { font-weight: 600; font-size: 14px; }
+.cyber-card-year { font-size: 11px; color: var(--accent); margin: 1px 0 4px; }
+.cyber-card-summary { font-size: 12px; color: var(--text-dim); line-height: 1.4; }
+
+.cyber-info { flex: 1; overflow-y: auto; padding: 24px; min-width: 0; }
+.cyber-info-empty { font-size: 13.5px; color: var(--text-dim); }
+
+/* ---------- Particle Physics ---------- */
+/* The demos are a separate, self-contained static site (see
+   particle-physics/) rather than ported into this app's own object model,
+   so this mode is an iframe onto it — but each demo's own top bar was
+   removed (it duplicated Contraption's own nav one level up), so this
+   subnav is the only way left to switch between the 8 demos, driving the
+   iframe's src directly instead of relying on links inside the frame. */
+#particles-root {
+  position: absolute;
+  top: 52px; left: 0; right: 0; bottom: 0;
+  display: flex; flex-direction: column;
+  background: var(--bg);
+}
+#particles-subnav {
+  display: flex; align-items: center; gap: 20px; flex-shrink: 0;
+  padding: 10px 20px; background: var(--panel); border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+}
+.particles-tab {
+  border: none; background: none; padding: 4px 0; white-space: nowrap;
+  color: var(--text-dim); font-size: 13px; font-weight: 500;
+}
+.particles-tab:hover { border-color: transparent; color: var(--text); }
+.particles-tab.active { background: none; color: var(--cool-1); font-weight: 700; }
+#particles-frame { display: block; width: 100%; height: 100%; flex: 1; border: none; }

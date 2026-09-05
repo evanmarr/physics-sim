@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Magnetic Charges</title>
+<style>
+  :root{
+    --bg: #090b11;
+    --bg-elev: #12151f;
+    --text: #e7e9f2;
+    --text-dim: #8a90a6;
+    --border: rgba(255,255,255,0.09);
+    --accent: #7dd3fc;
+    --accent2: #a78bfa;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;height:100%;overflow:hidden;background:var(--bg);color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;}
+  a{color:inherit;}
+  code{background:rgba(255,255,255,0.08); padding:1px 6px; border-radius:5px; font-size:0.92em;
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;}
+  .demo-head{
+    position:fixed; z-index:5; top:16px; left:24px; max-width:440px;
+    background:rgba(9,11,17,0.72); backdrop-filter:blur(10px);
+    border:1px solid var(--border); border-radius:14px; padding:16px 20px 18px;
+    pointer-events:none;
+  }
+  .demo-head a, .demo-head code{pointer-events:auto;}
+  .kicker{font-size:12px; letter-spacing:0.14em; text-transform:uppercase;
+    color:var(--accent); font-weight:600; margin-bottom:12px;}
+  .demo-head h1{font-size:clamp(22px,3.4vw,30px); line-height:1.1; margin:0 0 12px; letter-spacing:-0.02em;}
+  .demo-head p{color:var(--text-dim); font-size:14px; line-height:1.6; margin:0;}
+  .demo-head a{color:var(--accent); text-decoration:none;}
+  .demo-head a:hover{text-decoration:underline;}
+  .stage{position:fixed; top:0; left:0; right:0; bottom:0;}
+  .stage canvas{display:block; width:100%; height:100%; cursor:pointer;}
+</style>
+</head>
+<body>
+
+<div class="demo-head">
+  <div class="kicker">custom force · attract/repel · click to flip</div>
+  <h1>Magnetic charges</h1>
+  <p>Not from Observable &mdash; 120 particles, each carrying a positive (cyan) or
+    negative (violet) charge. A hand-written pairwise force makes opposite charges pull
+    together and like charges push apart, real-magnet style. Click any particle to flip
+    its polarity and watch the field react.</p>
+</div>
+
+<div class="stage" id="stage"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+<script>
+const stage = document.getElementById("stage");
+const canvas = document.createElement("canvas");
+const context = canvas.getContext("2d");
+stage.appendChild(canvas);
+
+// This preview environment can occasionally report 0 (even window.innerWidth)
+// on the very first script tick, before the pane finishes laying out -- so
+// retry via requestAnimationFrame until a real, positive size shows up.
+// Initial particle positions are seeded from width/height below, so this
+// must resolve before anything else runs.
+let width, height;
+function start() {
+  width = stage.clientWidth;
+  height = stage.clientHeight;
+  if (!(width > 0 && height > 0)) { requestAnimationFrame(start); return; }
+
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  canvas.width = width * dpr;
+  canvas.height = height * dpr;
+  canvas.style.width = width + "px";
+  canvas.style.height = height + "px";
+  context.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  window.addEventListener("resize", () => {
+    width = stage.clientWidth;
+    height = stage.clientHeight;
+    canvas.width = width * dpr;
+    canvas.height = height * dpr;
+    canvas.style.width = width + "px";
+    canvas.style.height = height + "px";
+    context.setTransform(dpr, 0, 0, dpr, 0, 0);
+  });
+
+  const N = 120;
+  const nodes = Array.from({ length: N }, () => ({
+    charge: Math.random() < 0.5 ? 1 : -1,
+    r: 4,
+    x: Math.random() * width,
+    y: Math.random() * height
+  }));
+
+  // Custom force: every pair of particles either attracts (opposite charge)
+  // or repels (same charge), falling off with distance and clamped near
+  // contact so nothing shoots off to infinity.
+  const K = 900;
+  function forceMagnetic() {
+    let list;
+    function force(alpha) {
+      for (let i = 0; i < list.length; i++) {
+        const a = list[i];
+        for (let j = i + 1; j < list.length; j++) {
+          const b = list[j];
+          const dx = b.x - a.x, dy = b.y - a.y;
+          const dist = Math.max(Math.hypot(dx, dy), 12);
+          const sign = a.charge * b.charge > 0 ? -1 : 1; // like repels, opposite attracts
+          const f = (sign * K / (dist * dist)) * alpha;
+          const fx = (dx / dist) * f, fy = (dy / dist) * f;
+          a.vx -= fx; a.vy -= fy;
+          b.vx += fx; b.vy += fy;
+        }
+      }
+    }
+    force.initialize = (_nodes) => { list = _nodes; };
+    return force;
+  }
+
+  const simulation = d3.forceSimulation(nodes)
+      .force("magnetic", forceMagnetic())
+      .force("collide", d3.forceCollide(d => d.r + 1))
+      .force("x", d3.forceX(() => width / 2).strength(0.008))
+      .force("y", d3.forceY(() => height / 2).strength(0.008))
+      .velocityDecay(0.2)
+      .alphaDecay(0) // perpetual motion -- this is a physical toy, not a settle-once layout
+      .on("tick", ticked);
+
+  function ticked() {
+    for (const d of nodes) {
+      const speed = Math.hypot(d.vx, d.vy);
+      if (speed > 6) { d.vx = (d.vx / speed) * 6; d.vy = (d.vy / speed) * 6; }
+    }
+    draw();
+  }
+
+  function draw() {
+    context.fillStyle = "rgba(9,11,17,0.3)";
+    context.fillRect(0, 0, width, height);
+    for (const d of nodes) {
+      context.beginPath();
+      context.arc(d.x, d.y, d.r, 0, 2 * Math.PI);
+      const color = d.charge > 0 ? "hsl(190, 85%, 65%)" : "hsl(320, 85%, 65%)";
+      context.fillStyle = color;
+      context.shadowColor = color;
+      context.shadowBlur = 8;
+      context.fill();
+    }
+    context.shadowBlur = 0;
+  }
+
+  canvas.addEventListener("click", (event) => {
+    const rect = canvas.getBoundingClientRect();
+    const x = event.clientX - rect.left, y = event.clientY - rect.top;
+    let closest = null, bestDist = 20;
+    for (const d of nodes) {
+      const dist = Math.hypot(d.x - x, d.y - y);
+      if (dist < bestDist) { bestDist = dist; closest = d; }
+    }
+    if (closest) closest.charge *= -1;
+  });
+}
+start();
+</script>
+</body>
+</html>
