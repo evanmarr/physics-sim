@@ -95,6 +95,7 @@ export class CybersecurityMode {
     body.appendChild(infoEl);
     this.root.appendChild(body);
 
+    this.infoEl = infoEl;
     this._renderResults(resultsEl);
     this._renderInfo(infoEl);
     searchInput.focus();
@@ -132,8 +133,19 @@ export class CybersecurityMode {
       `;
       card.addEventListener("click", () => {
         this.selectedId = entry.id;
+        const hadChallenge = this.activeChallengeId;
         this._checkChallenge(entry);
-        this._renderView();
+        // Clicking a card should only update the results list and the info
+        // panel next to it — a full _renderView() rebuild recreates the
+        // search input, which steals focus and scrolls the page back up to
+        // it. Only rebuild everything when the challenge banner needs to
+        // disappear (challenge just completed).
+        if (hadChallenge && !this.activeChallengeId) {
+          this._renderView();
+        } else {
+          this._renderResults(resultsEl);
+          this._renderInfo(this.infoEl);
+        }
       });
       resultsEl.appendChild(card);
     }

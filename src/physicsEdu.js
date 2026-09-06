@@ -97,7 +97,8 @@ export function physicsMath(spec) {
     const vy = spec.power * Math.sin(rad);
     lines.push({
       formula: `v = (P·cos θ, P·sin θ) = (${fmt(vx, 1)}, ${fmt(vy, 1)})`,
-      note: `Power P is the launch speed; θ is the Fire Angle. This is the same vector decomposition used for any projectile's launch velocity.`,
+      note: `Power P is the launch speed; θ is the Fire Angle. Drag P here, or switch to the property panel for both P and θ.`,
+      edit: { key: "power", value: spec.power, min: 4, max: 50, step: 1, resetValue: 22 },
     });
   }
 
@@ -105,6 +106,12 @@ export function physicsMath(spec) {
     lines.push({
       formula: `F(d) = power · (1 − d / radius)`,
       note: `The push falls off linearly with distance d from the blast center — nothing right at the edge of the radius, full strength at the center.`,
+      edit: { key: "power", value: spec.power, min: 4, max: 50, step: 1, resetValue: 26 },
+    });
+    lines.push({
+      formula: `radius = ${fmt(spec.radiusOfEffect ?? 260, 0)}`,
+      note: `How far F(d) above reaches before it drops to zero — anything past this is untouched by the blast.`,
+      edit: { key: "radiusOfEffect", value: spec.radiusOfEffect ?? 260, min: 60, max: 600, step: 10, resetValue: 260 },
     });
   }
 
@@ -112,6 +119,12 @@ export function physicsMath(spec) {
     lines.push({
       formula: `F(d) = power · (1 − d / range), applied every tick`,
       note: `Unlike a bomb's one-time push, a fan applies this continuously — so a body sitting in the wind keeps accelerating as long as it stays in range.`,
+      edit: { key: "power", value: spec.power, min: 4, max: 50, step: 1, resetValue: 18 },
+    });
+    lines.push({
+      formula: `range = ${fmt(spec.range ?? 400, 0)}`,
+      note: `How far the wind stream reaches before it stops pushing at all.`,
+      edit: { key: "range", value: spec.range ?? 400, min: 80, max: 1000, step: 10, resetValue: 400 },
     });
   }
 
@@ -119,6 +132,12 @@ export function physicsMath(spec) {
     lines.push({
       formula: `F(d) = power · (1 − d / range), toward/away from center`,
       note: `Only pulls on metal objects. Positive power attracts, negative repels — like the field around a real magnet, but simplified to fall off linearly with distance instead of by the inverse square.`,
+      edit: { key: "power", value: spec.power, min: -50, max: 50, step: 1, resetValue: 20 },
+    });
+    lines.push({
+      formula: `range = ${fmt(spec.range ?? 350, 0)}`,
+      note: `How far the magnetic pull (or push) reaches before it stops entirely.`,
+      edit: { key: "range", value: spec.range ?? 350, min: 80, max: 1000, step: 10, resetValue: 350 },
     });
   }
 
@@ -126,6 +145,7 @@ export function physicsMath(spec) {
     lines.push({
       formula: `v = power, directed straight off the pad's face`,
       note: `On contact, this instantly sets the object's velocity — an idealized spring that always launches at the same speed, regardless of how fast it landed.`,
+      edit: { key: "power", value: spec.power, min: 4, max: 50, step: 1, resetValue: 30 },
     });
   }
 
@@ -134,6 +154,7 @@ export function physicsMath(spec) {
     lines.push({
       formula: `ω = RPM/60 · 2π = ${fmt(omega, 2)} rad/s`,
       note: `A scripted rotation, not torque-driven — it spins at exactly this angular speed the moment you press Play, regardless of what's touching it.`,
+      edit: { key: "rpm", value: spec.rpm ?? 60, min: 1, max: 300, step: 1, resetValue: 60 },
     });
   }
 
@@ -145,6 +166,7 @@ export function physicsMath(spec) {
       note: (spec.cycles ?? 0) > 0
         ? `The ball bearing completes ${spec.cycles} round trip${spec.cycles === 1 ? "" : "s"} then parks back at the start.`
         : `Cycles is set to 0, so the ball bearing shuttles back and forth forever once you press Play.`,
+      edit: { key: "speed", value: spec.speed ?? 200, min: 20, max: 800, step: 10, resetValue: 200 },
     });
   }
 

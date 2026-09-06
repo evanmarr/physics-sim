@@ -4,6 +4,72 @@ import { cannonCatchRadius } from "./objectTypes.js";
 
 const RAD = Math.PI / 180;
 
+// Physics mode treats its sim units as loosely-real SI units elsewhere too
+// (see physicsEdu.js's G=9.8 comment) — so an object's raw Matter.js speed
+// is displayed as-is under "m/s", with the other choices just unit
+// conversions of that same number, not a different physical scale.
+const SPEED_UNITS = [
+  { key: "mps", label: "m/s", factor: 1 },
+  { key: "kmh", label: "km/h", factor: 3.6 },
+  { key: "mph", label: "mph", factor: 2.23694 },
+  { key: "fts", label: "ft/s", factor: 3.28084 },
+];
+// Types with no single meaningful "center speed" reading: light-optics
+// elements are always fixed, a wire isn't simulated at all, shards are
+// numerous transient debris (the label would just clutter an explosion),
+// and rope/track render at one endpoint rather than a shape center.
+const NO_SPEED_LABEL_TYPES = new Set(["wire", "lightSource", "mirror", "lens", "shard", "rope", "track"]);
+let speedUnitKey = localStorage.getItem("physics-speed-unit") || SPEED_UNITS[0].key;
+
+function currentSpeedUnit() {
+  return SPEED_UNITS.find((u) => u.key === speedUnitKey) || SPEED_UNITS[0];
+}
+
+function formatSpeed(mps) {
+  const unit = currentSpeedUnit();
+  return `${(mps * unit.factor).toFixed(1)} ${unit.label}`;
+}
+
+// One small floating menu shared by every speed label — double-clicking
+// any of them lets you switch every readout in the scene to a different
+// unit at once (a global, persisted preference, not a per-object setting).
+let speedUnitMenuEl = null;
+function closeSpeedUnitMenu() {
+  speedUnitMenuEl?.remove();
+  speedUnitMenuEl = null;
+  document.removeEventListener("pointerdown", onSpeedMenuOutsideClick, true);
+}
+function onSpeedMenuOutsideClick(e) {
+  if (speedUnitMenuEl && !speedUnitMenuEl.contains(e.target)) closeSpeedUnitMenu();
+}
+function openSpeedUnitMenu(clientX, clientY) {
+  closeSpeedUnitMenu();
+  const menu = document.createElement("div");
+  menu.className = "speed-unit-menu";
+  menu.style.left = `${clientX}px`;
+  menu.style.top = `${clientY}px`;
+  for (const unit of SPEED_UNITS) {
+    const btn = document.createElement("button");
+    btn.textContent = unit.label;
+    btn.className = unit.key === speedUnitKey ? "active" : "";
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      speedUnitKey = unit.key;
+      localStorage.setItem("physics-speed-unit", unit.key);
+      closeSpeedUnitMenu();
+      // Refresh every visible label immediately, instead of waiting for
+      // the next physics frame to happen to redraw it.
+      document.querySelectorAll(".speed-label-text").forEach((node) => {
+        node.textContent = formatSpeed(+node.dataset.speed || 0);
+      });
+    });
+    menu.appendChild(btn);
+  }
+  document.body.appendChild(menu);
+  speedUnitMenuEl = menu;
+  setTimeout(() => document.addEventListener("pointerdown", onSpeedMenuOutsideClick, true), 0);
+}
+
 export class Renderer {
   constructor(svgEl, handlers) {
     this.svg = d3.select(svgEl);
@@ -32,6 +98,21 @@ export class Renderer {
       .append("path")
       .attr("d", `M ${GRID_SIZE * 4} 0 L 0 0 0 ${GRID_SIZE * 4}`)
       .attr("fill", "none").attr("stroke", "var(--grid-major)").attr("stroke-width", 1.2);
+
+    // The classic "gooey" filter trick: blur a bunch of separate circles
+    // together until they overlap into soft blobs, then sharpen the alpha
+    // channel back up so those blobs fuse into one shape with a clean,
+    // continuous edge instead of a pile of visibly-separate dots. Applied
+    // to the water particle layer only — the physics underneath is still a
+    // few hundred small rigid circles, but this is what turns that into
+    // something that actually reads as a body of water with a real
+    // surface, flowing and merging as it moves.
+    const goo = defs.append("filter").attr("id", "water-goo").attr("x", "-40%").attr("y", "-40%").attr("width", "180%").attr("height", "180%");
+    goo.append("feGaussianBlur").attr("in", "SourceGraphic").attr("stdDeviation", 7).attr("result", "blur");
+    goo.append("feColorMatrix")
+      .attr("in", "blur")
+      .attr("mode", "matrix")
+      .attr("values", "1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 22 -10");
 
     this.viewport = svg.append("g").attr("class", "viewport");
 
@@ -64,6 +145,11 @@ export class Renderer {
     // Play. This draws the smooth tube from collectRopePaths() instead.
     this.ropeTubeLayer = this.viewport.append("g").attr("class", "rope-tube-layer").attr("pointer-events", "none");
     this.particleLayer = this.viewport.append("g").attr("class", "particle-layer").attr("pointer-events", "none");
+    // Water bubbles get the gooey filter (so they read as one flowing
+    // liquid surface); wind streaks live in a separate, unfiltered group
+    // right after so blurring one never bleeds into the other.
+    this.waterLayer = this.particleLayer.append("g").attr("class", "water-layer").attr("filter", "url(#water-goo)");
+    this.streakLayer = this.particleLayer.append("g").attr("class", "streak-layer");
     this.trajectoryLayer = this.viewport.append("g").attr("class", "trajectory-layer").attr("pointer-events", "none");
     this.rayLayer = this.viewport.append("g").attr("class", "ray-layer").attr("pointer-events", "none");
 
@@ -182,28 +268,34 @@ export class Renderer {
     });
   }
 
-  // Cosmetic water-bubble / wind-streak particles, purely decorative.
+  // Water bubbles (goo-filtered into one continuous liquid surface — see
+  // the #water-goo filter) and wind streaks — the streaks are cosmetic,
+  // but the water particles are real Matter bodies rendered as a fluid.
   renderParticles(particles) {
-    const sel = this.particleLayer.selectAll(".p").data(particles, (p) => p.id);
-    sel.exit().remove();
-    const enter = sel.enter().append(function (d) {
-      return document.createElementNS("http://www.w3.org/2000/svg", d.kind === "bubble" ? "circle" : "line");
-    }).attr("class", "p");
-    enter.merge(sel).each(function (d) {
-      const el = d3.select(this);
-      if (d.kind === "bubble") {
-        el.attr("cx", d.x).attr("cy", d.y).attr("r", d.r)
-          .attr("fill", "#cfe9ff").attr("fill-opacity", d.opacity ?? 0.5);
-      } else {
+    const bubbles = particles.filter((p) => p.kind === "bubble");
+    const streaks = particles.filter((p) => p.kind !== "bubble");
+
+    const bSel = this.waterLayer.selectAll(".p").data(bubbles, (p) => p.id);
+    bSel.exit().remove();
+    bSel.enter().append("circle").attr("class", "p")
+      .merge(bSel)
+      .attr("cx", (d) => d.x).attr("cy", (d) => d.y).attr("r", (d) => d.r)
+      .attr("fill", "#3f8fd6");
+
+    const sSel = this.streakLayer.selectAll(".p").data(streaks, (p) => p.id);
+    sSel.exit().remove();
+    sSel.enter().append("line").attr("class", "p")
+      .merge(sSel)
+      .each(function (d) {
         // Wind streaks are colored by speed — a CFD-style cold→hot gradient
         // (slow=blue, fast=yellow/red) so a fan's flow field reads like a
         // real airflow visualization instead of a flat tint.
-        el.attr("x1", d.x).attr("y1", d.y).attr("x2", d.x2).attr("y2", d.y2)
+        d3.select(this)
+          .attr("x1", d.x).attr("y1", d.y).attr("x2", d.x2).attr("y2", d.y2)
           .attr("stroke", speedColor(d.speed))
           .attr("stroke-width", 1.6).attr("stroke-opacity", d.opacity ?? 0.5)
           .attr("stroke-linecap", "round");
-      }
-    });
+      });
   }
 
   // A one-off, non-physics visual burst — a flash, an expanding ring, and a
@@ -570,6 +662,20 @@ function buildShape(g, d) {
       break;
     }
   }
+
+  if (!NO_SPEED_LABEL_TYPES.has(d.type)) {
+    const speedLabel = g.append("g").attr("class", "speed-label").style("display", "none");
+    speedLabel.append("rect").attr("class", "speed-label-bg").attr("rx", 4);
+    speedLabel.append("text").attr("class", "speed-label-text")
+      .attr("text-anchor", "middle").attr("dominant-baseline", "central");
+    // Play mode detaches every other pointer handler from world-objects
+    // (see render()'s editable branch below), so this dblclick is never in
+    // contention with drag/select — it only exists while Play is running.
+    speedLabel.on("dblclick", (event) => {
+      event.stopPropagation();
+      openSpeedUnitMenu(event.clientX, event.clientY);
+    });
+  }
 }
 
 function updateShape(g, d, editable) {
@@ -728,6 +834,24 @@ function updateShape(g, d, editable) {
 
   // fixed objects get a subtle hatch stroke to distinguish from dynamic
   g.classed("is-fixed", !!d.fixed);
+
+  const speedLabel = g.select(".speed-label");
+  if (!speedLabel.empty()) {
+    const show = !editable && d.vx != null && d.vy != null && !d.fixed;
+    speedLabel.style("display", show ? null : "none");
+    if (show) {
+      const mps = Math.hypot(d.vx, d.vy);
+      const textSel = speedLabel.select(".speed-label-text").text(formatSpeed(mps));
+      textSel.node().dataset.speed = mps;
+      // Counter-rotate so the label reads upright no matter how the object
+      // itself is spinning — its parent <g> already carries d.rotation.
+      speedLabel.attr("transform", `rotate(${-(d.rotation || 0)})`);
+      const bbox = textSel.node().getBBox();
+      speedLabel.select(".speed-label-bg")
+        .attr("x", bbox.x - 5).attr("y", bbox.y - 3)
+        .attr("width", bbox.width + 10).attr("height", bbox.height + 6);
+    }
+  }
 }
 
 // Equilateral triangle (all sides = size), centroid at the origin, apex up.

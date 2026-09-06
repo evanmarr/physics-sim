@@ -101,7 +101,7 @@ export class ChemistryMode {
     this.mixPanel.appendChild(title);
 
     const hint = div("chem-hint");
-    hint.textContent = "Combinations are exact: water is H₂O only with a 2:1 ratio of hydrogen to oxygen, not any two elements. Each slot has its own temperature, which sets whether that element is solid, liquid, or gas.";
+    hint.innerHTML = "Combinations are exact: water is H₂O only with a 2:1 ratio of hydrogen to oxygen, not any two elements.<br>Each slot has its own temperature, which sets whether that element is solid, liquid, or gas.";
     this.mixPanel.appendChild(hint);
 
     this.slotsEl = div("chem-slots");

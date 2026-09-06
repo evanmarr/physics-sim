@@ -428,6 +428,13 @@ function closeQuiz() {
   document.getElementById("quiz-modal").classList.add("hidden");
 }
 
+// Clicking the dimmed backdrop (not the question box itself) closes the
+// quiz too, same as pressing Close — wired once at load, since the modal
+// element itself is static markup that never gets rebuilt.
+document.getElementById("quiz-modal")?.addEventListener("click", (e) => {
+  if (e.target.id === "quiz-modal") closeQuiz();
+});
+
 function renderQuiz() {
   const box = document.getElementById("quiz-modal-box");
   if (state.index >= state.questions.length) {

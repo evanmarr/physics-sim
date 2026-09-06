@@ -36,11 +36,27 @@ export class MathematicsMode {
     // proportional-area — exact proportional Venn diagrams don't exist in
     // general for more than 2 sets, so showing true counts per region,
     // labeled plainly, is the mathematically honest choice.
+    //
+    // Region totals aren't typed directly — each is the sum of whatever
+    // "value" chips have been dragged into it. An item's region stays
+    // remembered even if you switch to 2 sets while it's sitting in a
+    // 3-sets-only region (e.g. "c") — it just shows back up in the
+    // unassigned pool until you switch back or drag it somewhere valid.
     this.venn = {
       sets: 2,
       labels: ["A", "B", "C"],
-      values: { a: 6, b: 5, c: 4, ab: 3, ac: 2, bc: 2, abc: 1 },
+      items: [
+        { id: 1, value: 6, color: CURVE_COLORS[3], region: "a" },
+        { id: 2, value: 5, color: CURVE_COLORS[4], region: "b" },
+        { id: 3, value: 3, color: CURVE_COLORS[5], region: "ab" },
+        { id: 4, value: 4, color: CURVE_COLORS[3], region: "c" },
+        { id: 5, value: 2, color: CURVE_COLORS[4], region: "ac" },
+        { id: 6, value: 2, color: CURVE_COLORS[5], region: "bc" },
+        { id: 7, value: 1, color: CURVE_COLORS[0], region: "abc" },
+      ],
+      nextItemId: 8,
     };
+    this._vennRegionRects = null; // populated by _drawVenn, read by the drag/drop hit-test
 
     this._build();
   }
@@ -122,8 +138,7 @@ export class MathematicsMode {
   _buildFunctionControls() {
     const wrap = div("math-func-row");
     const inputRow = div("math-func-input-row");
-    const swatch = div("math-func-swatch");
-    swatch.style.background = this.func.color;
+    const swatch = colorSwatchInput(this.func.color, (color) => { this.func.color = color; this._draw(); });
     inputRow.appendChild(swatch);
     const label = document.createElement("span");
     label.className = "math-func-label";
@@ -154,8 +169,7 @@ export class MathematicsMode {
     const list = div("math-data-list");
     this.rows.forEach((r, i) => {
       const row = div("math-data-row");
-      const swatch = div("math-func-swatch");
-      swatch.style.background = r.color;
+      const swatch = colorSwatchInput(r.color, (color) => { r.color = color; this._draw(); });
       row.appendChild(swatch);
       const labelInput = document.createElement("input");
       labelInput.type = "text";
@@ -198,6 +212,18 @@ export class MathematicsMode {
 
   // ---------- Venn diagram ----------
 
+  // Which region keys actually exist for the current set count — an item
+  // parked in a 3-sets-only region (e.g. "c") when sets===2 is neither
+  // drawn nor counted, but isn't deleted either; it just falls back into
+  // "unassigned" below until it's valid again.
+  _vennRegionKeys() {
+    return this.venn.sets === 2 ? ["a", "b", "ab"] : ["a", "b", "c", "ab", "ac", "bc", "abc"];
+  }
+
+  _vennItemsIn(key) {
+    return this.venn.items.filter((it) => it.region === key);
+  }
+
   _buildVennControls() {
     const toggle = div("math-venn-toggle");
     [2, 3].forEach((n) => {
@@ -222,29 +248,121 @@ export class MathematicsMode {
     }
     this.controlsEl.appendChild(labelWrap);
 
-    const fields = n === 2
-      ? [["a", `Only ${this.venn.labels[0]}`], ["b", `Only ${this.venn.labels[1]}`], ["ab", `${this.venn.labels[0]} ∩ ${this.venn.labels[1]}`]]
-      : [
-          ["a", `Only ${this.venn.labels[0]}`], ["b", `Only ${this.venn.labels[1]}`], ["c", `Only ${this.venn.labels[2]}`],
-          ["ab", `${this.venn.labels[0]} ∩ ${this.venn.labels[1]} only`], ["ac", `${this.venn.labels[0]} ∩ ${this.venn.labels[2]} only`],
-          ["bc", `${this.venn.labels[1]} ∩ ${this.venn.labels[2]} only`], ["abc", "All three"],
-        ];
-    const fieldWrap = div("math-venn-fields");
-    for (const [key, text] of fields) {
-      const field = div("math-venn-field");
-      const lab = document.createElement("label");
-      lab.textContent = text;
-      field.appendChild(lab);
-      const input = document.createElement("input");
-      input.type = "number";
-      input.min = "0";
-      input.step = "any";
-      input.value = this.venn.values[key];
-      input.addEventListener("input", () => { this.venn.values[key] = Math.max(0, parseFloat(input.value) || 0); this._draw(); });
-      field.appendChild(input);
-      fieldWrap.appendChild(field);
+    const hint = div("math-venn-hint");
+    hint.textContent = "Drag a value onto a circle (or where circles overlap) to place it there — drag it back here to unplace it.";
+    this.controlsEl.appendChild(hint);
+
+    const validKeys = new Set(this._vennRegionKeys());
+    const pool = div("math-venn-pool");
+    const unassigned = this.venn.items.filter((it) => !it.region || !validKeys.has(it.region));
+    if (!unassigned.length) {
+      const empty = div("math-venn-pool-empty");
+      empty.textContent = "All values are placed — drag one out of the diagram to move it.";
+      pool.appendChild(empty);
+    } else {
+      for (const item of unassigned) pool.appendChild(this._buildVennChip(item));
     }
-    this.controlsEl.appendChild(fieldWrap);
+    this._vennPoolEl = pool;
+    this.controlsEl.appendChild(pool);
+
+    const addRow = div("math-venn-add-row");
+    const addColor = colorSwatchInput(CURVE_COLORS[this.venn.items.length % CURVE_COLORS.length], () => {});
+    addRow.appendChild(addColor);
+    const addValue = document.createElement("input");
+    addValue.type = "number";
+    addValue.min = "0";
+    addValue.step = "any";
+    addValue.value = "1";
+    addValue.className = "math-data-value-input";
+    addRow.appendChild(addValue);
+    const addBtn = document.createElement("button");
+    addBtn.textContent = "+ Add value";
+    addBtn.className = "primary";
+    addBtn.addEventListener("click", () => {
+      const value = Math.max(0, parseFloat(addValue.value) || 0);
+      this.venn.items.push({ id: this.venn.nextItemId++, value, color: addColor.value, region: null });
+      this._buildControls();
+      this._draw();
+    });
+    addRow.appendChild(addBtn);
+    this.controlsEl.appendChild(addRow);
+  }
+
+  // One draggable chip in the unassigned-values pool — its color and value
+  // stay editable in place, and pressing down anywhere else on it starts a
+  // drag toward the diagram (mirrors main.js's palette-drag pattern: a
+  // ghost follows the pointer, and pointerup hit-tests the drop point).
+  _buildVennChip(item) {
+    const chip = div("math-venn-chip");
+    const swatch = colorSwatchInput(item.color, (color) => { item.color = color; this._draw(); });
+    chip.appendChild(swatch);
+    const valueInput = document.createElement("input");
+    valueInput.type = "number";
+    valueInput.step = "any";
+    valueInput.className = "math-venn-chip-value";
+    valueInput.value = item.value;
+    valueInput.addEventListener("input", () => { item.value = parseFloat(valueInput.value) || 0; this._draw(); });
+    chip.appendChild(valueInput);
+    const rm = document.createElement("button");
+    rm.textContent = "×";
+    rm.className = "math-func-remove";
+    rm.title = "Delete this value";
+    rm.addEventListener("click", () => {
+      this.venn.items = this.venn.items.filter((it) => it.id !== item.id);
+      this._buildControls();
+      this._draw();
+    });
+    chip.appendChild(rm);
+    chip.addEventListener("pointerdown", (e) => {
+      if (e.target === valueInput || e.target === swatch || e.target === rm) return;
+      this._beginVennDrag(item, e);
+    });
+    return chip;
+  }
+
+  // Picks up `item` and follows the pointer with a small ghost until
+  // release, then assigns it to whichever region circle (or the pool) the
+  // pointer was over — a miss (dropped somewhere else entirely) leaves the
+  // item's region unchanged, same as a cancelled drag.
+  _beginVennDrag(item, pointerEvent) {
+    pointerEvent.preventDefault();
+    const ghost = document.createElement("div");
+    ghost.className = "math-venn-drag-ghost";
+    ghost.style.background = item.color;
+    ghost.textContent = item.value;
+    document.body.appendChild(ghost);
+
+    const move = (ev) => {
+      ghost.style.left = `${ev.clientX}px`;
+      ghost.style.top = `${ev.clientY}px`;
+    };
+    move(pointerEvent);
+
+    const up = (ev) => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      ghost.remove();
+
+      const stageRect = this.stageEl.getBoundingClientRect();
+      const inStage = ev.clientX >= stageRect.left && ev.clientX <= stageRect.right && ev.clientY >= stageRect.top && ev.clientY <= stageRect.bottom;
+      if (inStage && this._vennRegionRects) {
+        const lx = ev.clientX - stageRect.left, ly = ev.clientY - stageRect.top;
+        let best = null, bestDist = Infinity;
+        for (const r of this._vennRegionRects) {
+          const d = Math.hypot(lx - r.x, ly - r.y);
+          if (d <= r.hitR && d < bestDist) { best = r.key; bestDist = d; }
+        }
+        if (best) item.region = best;
+      } else {
+        const poolRect = this._vennPoolEl?.getBoundingClientRect();
+        const inPool = poolRect && ev.clientX >= poolRect.left && ev.clientX <= poolRect.right && ev.clientY >= poolRect.top && ev.clientY <= poolRect.bottom;
+        if (inPool) item.region = null;
+      }
+      this._buildControls();
+      this._draw();
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
   }
 
   _openSaves() {
@@ -266,7 +384,7 @@ export class MathematicsMode {
         if (data.view) this.view = data.view;
         if (Array.isArray(data.rows) && data.rows.length) this.rows = data.rows;
         if (data.nextRowId) this.nextRowId = data.nextRowId;
-        if (data.venn) this.venn = data.venn;
+        if (data.venn) this.venn = migrateVennData(data.venn);
         for (const [id, btn] of Object.entries(this._typeButtons)) btn.classList.toggle("active", id === this.chartType);
         this._buildControls();
         this._draw();
@@ -504,15 +622,34 @@ export class MathematicsMode {
   _drawVenn() {
     const cx = this.width / 2, cy = this.height / 2;
     const R = Math.max(30, Math.min(this.width, this.height) * 0.22);
-    const v = this.venn.values;
+    const sum = (key) => this._vennItemsIn(key).reduce((s, it) => s + it.value, 0);
     const [labelA, labelB, labelC] = this.venn.labels;
     const g = this.gCurves;
+    const hitR = R * 0.38;
+    const regionRects = [];
 
     const circle = (x, y, color) =>
       g.append("circle").attr("cx", x).attr("cy", y).attr("r", R).attr("fill", color).attr("fill-opacity", 0.35).attr("stroke", color).attr("stroke-width", 2);
     const text = (x, y, str, opts = {}) =>
       g.append("text").attr("x", x).attr("y", y).attr("text-anchor", "middle").attr("class", "math-axis-label")
         .style("font-weight", opts.bold ? "600" : null).style("font-size", opts.big ? "13px" : null).text(str);
+    // Drop tokens (small draggable circles for whatever values already sit
+    // in this region) wrapped into rows of 3, starting just below the
+    // region's total-so-far number.
+    const tokens = (key, x, y) => {
+      const items = this._vennItemsIn(key);
+      const tr = 7;
+      items.forEach((it, i) => {
+        const col = i % 3, row = Math.floor(i / 3);
+        const tx = x + (col - 1) * tr * 2.4;
+        const ty = y + 15 + row * tr * 2.4;
+        const token = g.append("circle").attr("cx", tx).attr("cy", ty).attr("r", tr)
+          .attr("fill", it.color).attr("stroke", "var(--bg)").attr("stroke-width", 1.5)
+          .attr("class", "math-venn-token");
+        token.node().addEventListener("pointerdown", (e) => this._beginVennDrag(it, e));
+      });
+      regionRects.push({ key, x, y, hitR });
+    };
 
     if (this.venn.sets === 2) {
       const cA = { x: cx - R * 0.55, y: cy }, cB = { x: cx + R * 0.55, y: cy };
@@ -520,10 +657,13 @@ export class MathematicsMode {
       circle(cB.x, cB.y, CURVE_COLORS[1]);
       text(cA.x, cA.y - R - 12, labelA, { bold: true, big: true });
       text(cB.x, cB.y - R - 12, labelB, { bold: true, big: true });
-      text(cA.x - R * 0.55, cy, v.a);
-      text(cB.x + R * 0.55, cy, v.b);
-      text(cx, cy, v.ab);
-      const total = v.a + v.b + v.ab;
+      text(cA.x - R * 0.55, cy, sum("a"));
+      text(cB.x + R * 0.55, cy, sum("b"));
+      text(cx, cy, sum("ab"));
+      tokens("a", cA.x - R * 0.55, cy);
+      tokens("b", cB.x + R * 0.55, cy);
+      tokens("ab", cx, cy);
+      const total = sum("a") + sum("b") + sum("ab");
       text(cx, cy + R + 26, `Total: ${total}`, { bold: true });
     } else {
       const cA = { x: cx, y: cy - R * 0.55 };
@@ -535,16 +675,27 @@ export class MathematicsMode {
       text(cA.x, cA.y - R - 12, labelA, { bold: true, big: true });
       text(cB.x - R * 0.85, cB.y + R * 0.75, labelB, { bold: true, big: true });
       text(cC.x + R * 0.85, cC.y + R * 0.75, labelC, { bold: true, big: true });
-      text(cA.x, cA.y - R * 0.55, v.a);
-      text(cB.x - R * 0.6, cB.y + R * 0.35, v.b);
-      text(cC.x + R * 0.6, cC.y + R * 0.35, v.c);
-      text(cx - R * 0.35, cy - R * 0.1, v.ab);
-      text(cx + R * 0.35, cy - R * 0.1, v.ac);
-      text(cx, cy + R * 0.5, v.bc);
-      text(cx, cy + R * 0.12, v.abc);
-      const total = v.a + v.b + v.c + v.ab + v.ac + v.bc + v.abc;
+      const pA = { x: cA.x, y: cA.y - R * 0.55 };
+      const pB = { x: cB.x - R * 0.6, y: cB.y + R * 0.35 };
+      const pC = { x: cC.x + R * 0.6, y: cC.y + R * 0.35 };
+      const pAB = { x: cx - R * 0.35, y: cy - R * 0.1 };
+      const pAC = { x: cx + R * 0.35, y: cy - R * 0.1 };
+      const pBC = { x: cx, y: cy + R * 0.5 };
+      const pABC = { x: cx, y: cy + R * 0.12 };
+      text(pA.x, pA.y, sum("a"));
+      text(pB.x, pB.y, sum("b"));
+      text(pC.x, pC.y, sum("c"));
+      text(pAB.x, pAB.y, sum("ab"));
+      text(pAC.x, pAC.y, sum("ac"));
+      text(pBC.x, pBC.y, sum("bc"));
+      text(pABC.x, pABC.y, sum("abc"));
+      tokens("a", pA.x, pA.y); tokens("b", pB.x, pB.y); tokens("c", pC.x, pC.y);
+      tokens("ab", pAB.x, pAB.y); tokens("ac", pAC.x, pAC.y); tokens("bc", pBC.x, pBC.y); tokens("abc", pABC.x, pABC.y);
+      const total = sum("a") + sum("b") + sum("c") + sum("ab") + sum("ac") + sum("bc") + sum("abc");
       text(cx, cy + R + 40, `Total: ${total}`, { bold: true });
     }
+
+    this._vennRegionRects = regionRects;
   }
 }
 
@@ -552,4 +703,34 @@ function div(className) {
   const d = document.createElement("div");
   d.className = className;
   return d;
+}
+
+// Charts saved before Venn diagrams became drag-and-drop stored one typed
+// number per region (`values: {a, b, ...}`) instead of a list of items —
+// loading one of those turns each nonzero region into a single item with
+// that value, so an old save still opens with the right totals in place.
+function migrateVennData(venn) {
+  if (Array.isArray(venn.items)) return venn;
+  const keys = ["a", "b", "c", "ab", "ac", "bc", "abc"];
+  const items = [];
+  let id = 1;
+  for (const key of keys) {
+    const value = venn.values?.[key];
+    if (value) items.push({ id: id++, value, color: CURVE_COLORS[(id - 2) % CURVE_COLORS.length], region: key });
+  }
+  return { sets: venn.sets ?? 2, labels: venn.labels ?? ["A", "B", "C"], items, nextItemId: id };
+}
+
+// A real <input type="color"> styled to look like the old decorative
+// swatch dot — clicking it opens the browser's native color picker, so any
+// function/bar/pie color can be changed to literally anything, not just
+// cycled through the CURVE_COLORS presets.
+function colorSwatchInput(value, onChange) {
+  const input = document.createElement("input");
+  input.type = "color";
+  input.className = "math-func-swatch-input";
+  input.value = value;
+  input.title = "Change color";
+  input.addEventListener("input", () => onChange(input.value));
+  return input;
 }

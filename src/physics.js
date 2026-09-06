@@ -51,7 +51,14 @@ export class PhysicsSim {
   constructor(specs, gravity, callbacks) {
     this.specs = specs;
     this.callbacks = callbacks || {};
-    this.engine = Engine.create();
+    // A modest bump from Matter's default (2) — enough for a rope chain to
+    // converge without visibly popping, but NOT pushed further: a much
+    // higher iteration count actually made things worse here, since the
+    // constraint solver's damping term is reapplied every iteration —
+    // more iterations means damping gets compounded harder each frame,
+    // which for a stiff many-segment chain with a mass on the end tipped
+    // it from "settles" into "gains energy and swings wider every cycle."
+    this.engine = Engine.create({ constraintIterations: 6 });
     this.engine.gravity.x = 0;
     this.engine.gravity.y = gravity;
     this.running = false;
@@ -216,8 +223,15 @@ export class PhysicsSim {
         const px = spec.x - w / 2 + r * 1.1 + (cols > 1 ? cx * (w - r * 2.2) / (cols - 1) : 0) + jitterX;
         const py = spec.y + h / 2 - r * 1.1 - ry * r * 2.1 + jitterY;
         const body = Bodies.circle(px, py, r, {
-          friction: 0.02,
-          frictionAir: 0.035,
+          // Water is viscous, not a ball pit — low friction here made
+          // particles slide past each other almost freely, which (combined
+          // with a rigid-circle solver's constant tiny overlap corrections)
+          // reads as a jittery pile of hard beads instead of a calm liquid.
+          // Real inter-particle friction plus more air damping makes it
+          // resist flowing and settle down quietly, like actual water,
+          // while staying dynamic enough to still splash and pour.
+          friction: 0.35,
+          frictionAir: 0.06,
           restitution: 0,
           density: 0.9 * DENSITY_SCALE,
           label: `waterParticle:${spec.id}`,
@@ -251,7 +265,15 @@ export class PhysicsSim {
     const thickness = Math.max(3, spec.thickness ?? 10);
     const segCount = Math.max(3, Math.min(24, Math.round(length / (thickness * 2.2))));
     const segLen = length / segCount;
-    const stiffness = Math.max(0.05, 1 - (spec.elasticity ?? 0.15) * 0.9);
+    // Capped just under 1 even at elasticity 0: Matter's iterative solver
+    // treats stiffness>=1 as "instantly correct the full error every
+    // iteration" with no easing, and for a multi-segment chain (especially
+    // with a heavy object hanging off the end) that overshoots and
+    // overcorrects every step — a visible, sustained vibration that more
+    // solver iterations alone don't fully absorb. 0.96 is visually
+    // indistinguishable from perfectly rigid but leaves the solver enough
+    // give to actually converge.
+    const stiffness = Math.min(0.96, Math.max(0.05, 1 - (spec.elasticity ?? 0.15) * 0.9));
     const angle = Math.atan2(y2 - spec.y, x2 - spec.x);
     const dir = { x: Math.cos(angle), y: Math.sin(angle) };
     // Adjacent segments overlap slightly (the *1.05 below) so there's no
@@ -301,7 +323,10 @@ export class PhysicsSim {
           // pre-rotated segments like these, that silently bakes in the
           // wrong length. Setting it explicitly avoids that entirely.
           length: 0,
-          stiffness, damping: 0.15,
+          // Raised from Matter's typical rope-demo value (~0.15) — a heavy
+          // object hanging off the end needs real energy dissipation or
+          // the chain just keeps swinging/vibrating near-indefinitely.
+          stiffness, damping: 0.35,
         }));
       }
     }
@@ -317,9 +342,9 @@ export class PhysicsSim {
     const startAnchor = host ? this._hostAnchor(host, spec.x, spec.y) : null;
     let anchorConfig;
     if (startAnchor) {
-      anchorConfig = { bodyA: startAnchor.body, pointA: { x: startAnchor.x, y: startAnchor.y }, bodyB: segments[0], pointB: { x: -segLen / 2, y: 0 }, length: 0, stiffness, damping: 0.15 };
+      anchorConfig = { bodyA: startAnchor.body, pointA: { x: startAnchor.x, y: startAnchor.y }, bodyB: segments[0], pointB: { x: -segLen / 2, y: 0 }, length: 0, stiffness, damping: 0.35 };
     } else {
-      anchorConfig = { pointA: { x: spec.x, y: spec.y }, bodyB: segments[0], pointB: { x: -segLen / 2, y: 0 }, length: 0, stiffness, damping: 0.15 };
+      anchorConfig = { pointA: { x: spec.x, y: spec.y }, bodyB: segments[0], pointB: { x: -segLen / 2, y: 0 }, length: 0, stiffness, damping: 0.35 };
     }
     Composite.add(world, Constraint.create(anchorConfig));
 
@@ -336,7 +361,7 @@ export class PhysicsSim {
       Composite.add(world, Constraint.create({
         bodyA: endAnchor.body, pointA: { x: endAnchor.x, y: endAnchor.y },
         bodyB: lastSeg, pointB: { x: segLen / 2, y: 0 },
-        length: 0, stiffness, damping: 0.15,
+        length: 0, stiffness, damping: 0.35,
       }));
     }
   }
@@ -809,6 +834,10 @@ export class PhysicsSim {
     if (phase !== "start") return;
     if (!body.plugin || body.plugin.material !== "glass" || body.plugin.shattered) return;
     if (other.isSensor) return; // water, cannon catch zones, buttons — not a hard impact
+    // Flying shards (or another glass object) hitting this one shouldn't
+    // chain-shatter it — only a non-glass impact, or a bomb blast
+    // (handled directly in _doDetonate), should break glass.
+    if (other.plugin?.material === "glass") return;
     const mat = materialOf("glass");
     const rv = Vector.sub(body.velocity, other.velocity);
     const speed = Vector.magnitude(rv);
@@ -1013,6 +1042,7 @@ export class PhysicsSim {
     const power = spec?.power ?? 26;
     const radiusOfEffect = spec?.radiusOfEffect ?? 260;
 
+    const glassToShatter = [];
     for (const other of Composite.allBodies(world)) {
       if (other === bombBody || other.isStatic || other.isSensor) continue;
       const delta = Vector.sub(other.position, bombBody.position);
@@ -1022,8 +1052,16 @@ export class PhysicsSim {
       const dir = Vector.normalise(delta);
       const mag = power * BOMB_FORCE_SCALE * falloff * other.mass;
       Body.applyForce(other, other.position, { x: dir.x * mag, y: dir.y * mag });
+      // A blast is a direct, player-caused break — unlike _checkGlass's
+      // impact-collision check (which ignores glass-on-glass so shards from
+      // one break don't chain into others), any glass caught in the blast
+      // radius shatters outright.
+      if (other.plugin?.material === "glass" && !other.plugin.shattered) {
+        glassToShatter.push(other);
+      }
     }
     Composite.remove(world, bombBody);
+    for (const glass of glassToShatter) this.pending.push({ type: "shatter", body: glass });
     this.callbacks.onEvent?.({ type: "detonate", bombId });
   }
 

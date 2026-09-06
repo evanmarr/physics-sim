@@ -11,9 +11,11 @@ import { AstronomyMode } from "./astronomy.js";
 import { HistoryMode } from "./history.js";
 import { CybersecurityMode } from "./cybersecurity.js";
 import { MathematicsMode } from "./mathematics.js";
+import { WhiteboardMode } from "./whiteboard.js";
 import { traceLightRays } from "./lightOptics.js";
 import { openQuiz } from "./quiz.js";
 import { initAuthUI, openSavesPanel } from "./auth.js";
+import { initTutorial } from "./tutorial.js";
 import { confirmPopup } from "./popup.js";
 
 const state = {
@@ -36,6 +38,7 @@ let astronomyMode = null;
 let historyMode = null;
 let cybersecurityMode = null;
 let mathematicsMode = null;
+let whiteboardMode = null;
 
 // Old saves stored a rope as x/y + rotation + length; the current model is
 // two independent endpoints (x,y) and (x2,y2). Backfill x2/y2 from the old
@@ -135,6 +138,7 @@ function specToRenderItem(s) {
 function patchObject(id, patch) {
   const spec = state.objects.find((o) => o.id === id);
   if (!spec) return;
+  markUndo();
   Object.assign(spec, patch);
   renderAll();
   scheduleSave();
@@ -145,7 +149,70 @@ function patchObject(id, patch) {
 function patchObjectSilent(id, patch) {
   const spec = state.objects.find((o) => o.id === id);
   if (!spec) return;
+  markUndo();
   Object.assign(spec, patch);
+}
+
+// ---- Undo (physics mode) ----
+// Every edit that mutates state.objects/gravity funnels through here.
+// Continuous bursts (dragging a slider, dragging an object) are coalesced
+// into a single undo step by capturing the "before" snapshot once and only
+// committing it after things go quiet for a moment — same debounce idea as
+// scheduleSave, so an undo reverts a whole drag, not one pixel of it.
+const MAX_UNDO = 50;
+let undoStack = [];
+let pendingUndoSnapshot = null;
+let undoCommitTimer = null;
+
+function snapshotForUndo() {
+  return { objects: JSON.parse(JSON.stringify(state.objects)), gravity: state.gravity };
+}
+
+function commitPendingUndo() {
+  clearTimeout(undoCommitTimer);
+  if (!pendingUndoSnapshot) return;
+  undoStack.push(pendingUndoSnapshot);
+  if (undoStack.length > MAX_UNDO) undoStack.shift();
+  pendingUndoSnapshot = null;
+  updateUndoButton();
+}
+
+function markUndo() {
+  if (!pendingUndoSnapshot) pendingUndoSnapshot = snapshotForUndo();
+  clearTimeout(undoCommitTimer);
+  undoCommitTimer = setTimeout(commitPendingUndo, 400);
+}
+
+// For one-shot actions (delete, paste, clear, load) — commits immediately
+// as its own step, so it doesn't get merged into an unrelated pending drag.
+function pushUndoNow() {
+  commitPendingUndo();
+  undoStack.push(snapshotForUndo());
+  if (undoStack.length > MAX_UNDO) undoStack.shift();
+  updateUndoButton();
+}
+
+function undo() {
+  if (state.playing) return;
+  commitPendingUndo();
+  const snap = undoStack.pop();
+  if (!snap) return;
+  state.objects = snap.objects;
+  state.gravity = snap.gravity;
+  document.getElementById("gravity-slider").value = state.gravity;
+  document.getElementById("gravity-val").textContent = state.gravity.toFixed(1);
+  if (sim) sim.setGravity(state.gravity);
+  state.selectedIds = new Set();
+  state.selectedId = null;
+  renderAll();
+  renderPanelUI();
+  scheduleSave();
+  updateUndoButton();
+}
+
+function updateUndoButton() {
+  const btn = document.getElementById("undo-btn");
+  if (btn) btn.disabled = undoStack.length === 0;
 }
 
 // state.selectedId mirrors state.selectedIds only when it's a single
@@ -192,6 +259,7 @@ function renderMathPanelUI() {
 }
 
 function deleteObject(id) {
+  pushUndoNow();
   state.objects = state.objects.filter((o) => o.id !== id);
   state.objects.forEach((o) => { if (o.targetId === id) o.targetId = null; });
   state.selectedIds.delete(id);
@@ -203,6 +271,7 @@ function deleteObject(id) {
 
 function deleteSelected() {
   if (!state.selectedIds.size) return;
+  pushUndoNow();
   const ids = state.selectedIds;
   state.objects = state.objects.filter((o) => !ids.has(o.id));
   state.objects.forEach((o) => { if (o.targetId && ids.has(o.targetId)) o.targetId = null; });
@@ -341,15 +410,26 @@ function wireTopbar(renderer) {
   const gravitySlider = document.getElementById("gravity-slider");
   const gravityVal = document.getElementById("gravity-val");
   gravitySlider.addEventListener("input", () => {
+    markUndo();
     state.gravity = parseFloat(gravitySlider.value);
     gravityVal.textContent = state.gravity.toFixed(1);
     if (sim) sim.setGravity(state.gravity);
     updateTrajectoryPreview();
   });
 
+  document.getElementById("gravity-reset-btn").addEventListener("click", () => {
+    markUndo();
+    state.gravity = 1;
+    gravitySlider.value = 1;
+    gravityVal.textContent = "1.0";
+    if (sim) sim.setGravity(state.gravity);
+    updateTrajectoryPreview();
+  });
+
   document.getElementById("clear-btn").addEventListener("click", async () => {
     if (state.playing) togglePlay(renderer);
-    if (!(await confirmPopup("Clear the whole workspace? This can't be undone.", { title: "Clear workspace", confirmLabel: "Clear", danger: true }))) return;
+    if (!(await confirmPopup("Clear the whole workspace?", { title: "Clear workspace", confirmLabel: "Clear", danger: true }))) return;
+    pushUndoNow();
     state.objects = starterScene();
     state.selectedIds = new Set();
     state.selectedId = null;
@@ -358,6 +438,8 @@ function wireTopbar(renderer) {
     renderPanelUI();
     scheduleSave();
   });
+
+  document.getElementById("undo-btn").addEventListener("click", () => undo());
 
   document.getElementById("light-mode-btn").addEventListener("click", () => {
     state.lightMode = !state.lightMode;
@@ -375,6 +457,7 @@ function wireTopbar(renderer) {
       serialize: () => ({ objects: state.objects, gravity: state.gravity }),
       apply: (data) => {
         if (state.playing) togglePlay(renderer);
+        pushUndoNow();
         state.objects = dropRemovedTypes(data.objects || []);
         migrateRopeSpecs(state.objects);
         state.gravity = data.gravity ?? 1;
@@ -392,6 +475,7 @@ function wireTopbar(renderer) {
   });
 
   initAuthUI();
+  initTutorial();
 
   wireTheme();
   startParticleLoop();
@@ -416,16 +500,14 @@ function applyTheme(theme) {
     delete document.documentElement.dataset.theme;
     document.getElementById("theme-toggle").textContent = "🌙";
   }
-  // The Particle Physics iframe reads localStorage for its theme once, at
-  // its own load time — that's enough for opening it fresh already
-  // matching, but a toggle while it's already loaded needs pushing in
-  // directly. Same-origin (served from this same app), so its document is
-  // reachable straight through contentDocument, no postMessage needed.
+  // The Particle Physics iframe demos default to a dark palette and only
+  // have a "light" override block (no bare/default light rules), so the
+  // light case needs an explicit data-theme="light" — deleting the
+  // attribute would just fall back to their dark default. Same-origin
+  // (served from this same app), so its document is reachable straight
+  // through contentDocument, no postMessage needed.
   const particlesDoc = document.getElementById("particles-frame")?.contentDocument;
-  if (particlesDoc) {
-    if (theme === "dark") particlesDoc.documentElement.dataset.theme = "dark";
-    else delete particlesDoc.documentElement.dataset.theme;
-  }
+  if (particlesDoc) particlesDoc.documentElement.dataset.theme = theme;
 }
 
 function togglePlay(renderer) {
@@ -520,6 +602,7 @@ function wireChallenges() {
       btn.textContent = "Load";
       btn.addEventListener("click", async () => {
         if (!(await confirmPopup(`Load "${c.name}"? This replaces your current workspace.`, { title: "Load challenge", confirmLabel: "Load" }))) return;
+        pushUndoNow();
         state.objects = c.build();
         state.activeChallengeId = c.id;
         state.selectedIds = new Set();
@@ -536,6 +619,11 @@ function wireChallenges() {
     modal.classList.remove("hidden");
   });
   document.getElementById("challenges-close").addEventListener("click", () => modal.classList.add("hidden"));
+  // Clicking the dimmed backdrop (not the challenge list box itself)
+  // closes it too, same as pressing Close.
+  modal.addEventListener("click", (e) => {
+    if (e.target === modal) modal.classList.add("hidden");
+  });
 }
 
 // The app's front door — a launcher card per section, in the same
@@ -550,6 +638,7 @@ const HOME_SECTIONS = [
   { mode: "cybersecurity", title: "Cybersecurity", blurb: "Search and filter well-documented malware, hackers, hacker groups, and breaches.", kind: "cybersecurity", hues: [0, 340] },
   { mode: "particles", title: "Particle Physics", blurb: "A gallery of real D3 force simulations — drag anything you see.", kind: "particles", hues: [190, 270] },
   { mode: "mathematics", title: "Mathematics", blurb: "A real graphing calculator — plot any expression, pan and zoom the graph.", kind: "mathematics", hues: [230, 350] },
+  { mode: "whiteboard", title: "Whiteboard", blurb: "Sketch out ideas and equations, jot text notes, or paint with real blend/blur brushes.", kind: "whiteboard", hues: [160, 40] },
 ];
 
 function buildHomePage(root, onNavigate) {
@@ -562,10 +651,11 @@ function buildHomePage(root, onNavigate) {
           <ellipse cx="12" cy="12" rx="10" ry="4.2" fill="none" style="stroke: var(--cool-3)" stroke-width="1.3" transform="rotate(120 12 12)" />
           <circle cx="12" cy="12" r="2.1" style="fill: var(--text)" />
         </svg>
-        <div class="home-kicker">seven sandboxes · one app</div>
+        <div class="home-kicker">eight sandboxes · one app</div>
         <h1>Continuum</h1>
         <p class="home-tagline">Real simulations, not animations — physics, chemistry, astronomy,
-          mathematics, and the history and security behind them all. Pick a section to start.</p>
+          mathematics, a whiteboard for your own ideas, and the history and security behind them all.
+          Pick a section to start.</p>
       </div>
       <div class="home-cards"></div>
     </div>
@@ -676,6 +766,19 @@ function buildHomeThumbnail(el, section) {
     }
     svg.append("path").attr("d", d3.line()(pts)).attr("fill", "none").attr("stroke", colorA).attr("stroke-width", 2.5);
     svg.append("circle").attr("cx", originX + Math.PI / 2 * pxPerUnit).attr("cy", originY - 22).attr("r", 3.5).attr("fill", colorB);
+  } else if (section.kind === "whiteboard") {
+    // A loose freehand squiggle plus a couple of sticky-note rectangles —
+    // sketching and note-taking, the two most literal things this mode does.
+    const path = d3.path();
+    path.moveTo(24, 50);
+    path.bezierCurveTo(50, 20, 70, 70, 96, 40);
+    path.bezierCurveTo(112, 20, 122, 45, 138, 30);
+    svg.append("path").attr("d", path.toString()).attr("fill", "none")
+      .attr("stroke", colorA).attr("stroke-width", 3.5).attr("stroke-linecap", "round");
+    svg.append("rect").attr("x", w - 62).attr("y", 18).attr("width", 40).attr("height", 34).attr("rx", 3)
+      .attr("fill", colorB).attr("opacity", 0.85).attr("transform", `rotate(-6 ${w - 42} 35)`);
+    svg.append("rect").attr("x", w - 44).attr("y", 40).attr("width", 34).attr("height", 30).attr("rx", 3)
+      .attr("fill", colorA).attr("opacity", 0.7).attr("transform", `rotate(5 ${w - 27} 55)`);
   } else {
     // Particle Physics: a small frozen force-directed graph, exactly the
     // shape every one of its 8 real demos takes.
@@ -708,7 +811,8 @@ function wireModeTabs() {
   const cybersecurityBtn = document.getElementById("mode-cybersecurity-btn");
   const particlesBtn = document.getElementById("mode-particles-btn");
   const mathematicsBtn = document.getElementById("mode-mathematics-btn");
-  const modeButtons = { home: homeBtn, physics: physicsBtn, chemistry: chemistryBtn, astronomy: astronomyBtn, history: historyBtn, cybersecurity: cybersecurityBtn, particles: particlesBtn, mathematics: mathematicsBtn };
+  const whiteboardBtn = document.getElementById("mode-whiteboard-btn");
+  const modeButtons = { home: homeBtn, physics: physicsBtn, chemistry: chemistryBtn, astronomy: astronomyBtn, history: historyBtn, cybersecurity: cybersecurityBtn, particles: particlesBtn, mathematics: mathematicsBtn, whiteboard: whiteboardBtn };
 
   const homeRoot = document.getElementById("home-root");
   buildHomePage(homeRoot, (mode) => setMode(mode));
@@ -720,7 +824,8 @@ function wireModeTabs() {
   const cybersecurityRoot = document.getElementById("cybersecurity-root");
   const particlesRoot = document.getElementById("particles-root");
   const mathematicsRoot = document.getElementById("mathematics-root");
-  const roots = { home: homeRoot, physics: workspace, chemistry: chemRoot, astronomy: astronomyRoot, history: historyRoot, cybersecurity: cybersecurityRoot, particles: particlesRoot, mathematics: mathematicsRoot };
+  const whiteboardRoot = document.getElementById("whiteboard-root");
+  const roots = { home: homeRoot, physics: workspace, chemistry: chemRoot, astronomy: astronomyRoot, history: historyRoot, cybersecurity: cybersecurityRoot, particles: particlesRoot, mathematics: mathematicsRoot, whiteboard: whiteboardRoot };
 
   const physicsOnlyControls = [
     document.getElementById("run-controls"),
@@ -728,6 +833,7 @@ function wireModeTabs() {
     document.getElementById("light-mode-toggle-wrap"),
     document.getElementById("clear-btn"),
     document.getElementById("my-worlds-btn"),
+    document.getElementById("undo-btn"),
   ];
   const challengeBtn = document.getElementById("challenges-btn");
   const quizBtn = document.getElementById("quiz-btn");
@@ -748,7 +854,7 @@ function wireModeTabs() {
     // Home is just a launcher, and Particle Physics is a gallery of
     // embedded external demos — neither is a knowledge domain with quiz
     // content the way the other modes are.
-    quizBtn.style.display = mode === "particles" || mode === "home" || mode === "mathematics" ? "none" : "";
+    quizBtn.style.display = mode === "particles" || mode === "home" || mode === "mathematics" || mode === "whiteboard" ? "none" : "";
 
     if (mode === "physics") startParticleLoop(); else stopParticleLoop();
 
@@ -786,6 +892,13 @@ function wireModeTabs() {
     } else {
       mathematicsMode?.unmount();
     }
+
+    if (mode === "whiteboard") {
+      if (!whiteboardMode) whiteboardMode = new WhiteboardMode(whiteboardRoot);
+      whiteboardMode.mount();
+    } else {
+      whiteboardMode?.unmount();
+    }
   }
 
   homeBtn.addEventListener("click", () => setMode("home"));
@@ -796,6 +909,7 @@ function wireModeTabs() {
   cybersecurityBtn.addEventListener("click", () => setMode("cybersecurity"));
   particlesBtn.addEventListener("click", () => setMode("particles"));
   mathematicsBtn.addEventListener("click", () => setMode("mathematics"));
+  whiteboardBtn.addEventListener("click", () => setMode("whiteboard"));
 
   // Each individual demo's own top bar was removed (it duplicated this
   // app's nav one level up) — this subnav is the only way left to switch
@@ -808,6 +922,12 @@ function wireModeTabs() {
       for (const t of particlesTabs) t.classList.toggle("active", t === tab);
     });
   }
+  // Switching demos reloads the iframe from scratch, which would otherwise
+  // reset it to its own default (dark) palette regardless of the site's
+  // current theme.
+  particlesFrame.addEventListener("load", () => {
+    applyTheme(document.documentElement.dataset.theme === "dark" ? "dark" : "light");
+  });
 
   state.mode = null;
   setMode("home");
@@ -838,6 +958,9 @@ function wireKeyboard(renderer) {
     } else if (cmd && e.code === "KeyV" && clipboard && !state.playing) {
       e.preventDefault();
       pasteClipboard();
+    } else if (cmd && e.code === "KeyZ" && !state.playing) {
+      e.preventDefault();
+      undo();
     }
   });
 }
@@ -851,6 +974,7 @@ function copySelected() {
 
 function pasteClipboard() {
   if (!clipboard || !clipboard.length) return;
+  pushUndoNow();
   const pasted = clipboard.map((spec) => {
     const s = cloneSpec(spec);
     s.id = makeId(s.type);
@@ -909,6 +1033,7 @@ function beginPaletteDrag(type, pointerEvent) {
     spec.x += dx;
     spec.y += dy;
     if (spec.x2 != null) { spec.x2 += dx; spec.y2 += dy; } // flexible-endpoint objects (rope/track): shift the far end by the same delta
+    pushUndoNow();
     state.objects.push(spec);
     state.selectedIds = new Set([spec.id]);
     syncSelectedId();

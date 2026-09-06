@@ -1,6 +1,22 @@
 import { PLANETS, DWARF_PLANETS, MOONS, planetPosition, moonOffsetFromEarth, moonPhaseAngleRad, dateToJulianDate, julianDateToDate, orbitalPeriodDays, findNextSolarEclipse } from "./astronomyData.js";
 
-const AU_SCALE = 22; // scene units per AU — not to real scale, or Neptune would be a speck 30x farther than Mercury
+// One linear world-units-per-km factor applied to EVERY body — Sun
+// included — so relative sizes are all physically accurate at once:
+// Jupiter really does end up ~11x Earth's radius, and the Sun really is
+// ~10x Jupiter's, not the other way around. The floor below only exists so
+// the smallest dwarf planets stay clickable.
+const RADIUS_SCALE = 0.00019;
+const MIN_BODY_SIZE = 0.12;
+const SUN_RADIUS_KM = 696000;
+// Scene units per AU. Distances are still compressed for visibility (a
+// real-scale Neptune would be unnavigably far away), but this can't be
+// picked independently of RADIUS_SCALE any more — once the Sun is sized
+// accurately (huge), Mercury's orbit has to clear its surface with real
+// clearance or the inner planets end up literally inside/behind it,
+// invisible and unclickable. 850 keeps Mercury's compressed orbit at about
+// 2.5 Sun-radii out — comfortably clear, while still far more compact than
+// true astronomical scale (which would put Neptune ~850,000 units out).
+const AU_SCALE = 850;
 const SPEEDS = [
   { label: "Paused", daysPerSec: 0 },
   { label: "1 sec/sec (real time)", daysPerSec: 1 / 86400 },
@@ -111,7 +127,7 @@ export class AstronomyMode {
 
     const hint = div("chem-hint");
     hint.style.marginTop = "14px";
-    hint.textContent = "Planet positions are computed from real orbital elements for whatever date/time is set above — not a canned animation. Distances are compressed for visibility; sizes are exaggerated so the inner planets aren't invisible specks. Drag to rotate the view, scroll to zoom, and right-click-drag (or hold Shift while dragging) to pan.";
+    hint.textContent = "Planet positions are computed from real orbital elements for whatever date/time is set above — not a canned animation. Every body here — Sun included — is sized on one consistent real-world scale, so the Sun really is this dramatically bigger than Jupiter, and Jupiter really is bigger than Earth. Distances between orbits are still compressed for visibility (true-to-scale would put Neptune far off-screen), so start zoomed in on the inner planets and scroll out to reach the rest. Drag to rotate the view, scroll to zoom, and right-click-drag (or hold Shift while dragging) to pan.";
     this.controlsPanel.appendChild(hint);
 
     const chalBtn = document.createElement("button");
@@ -135,8 +151,14 @@ export class AstronomyMode {
     this.viewerPanel.appendChild(wrap);
 
     this.scene = new THREE.Scene();
-    this.camera = new THREE.PerspectiveCamera(50, 1, 0.01, 3000);
-    this.camera.position.set(0, 160, 220);
+    // Far plane and starting distance are both driven by the Sun's now
+    // real-scale size and AU_SCALE — a real-scale Sun plus real-clearance
+    // orbits makes for a much bigger scene than before. The starting
+    // position frames the Sun through Mars by default (Jupiter onward
+    // needs scrolling out to reach, same as any solar-system model at this
+    // dynamic range).
+    this.camera = new THREE.PerspectiveCamera(50, 1, 0.1, 40000);
+    this.camera.position.set(0, 900, 1600);
     this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     wrap.appendChild(this.renderer.domElement);
     this.controls = new THREE.OrbitControls(this.camera, this.renderer.domElement);
@@ -144,6 +166,15 @@ export class AstronomyMode {
     this.controls.dampingFactor = 0.08;
     this.controls.enablePan = true;
     this.controls.screenSpacePanning = true;
+    // Defaults (minDistance 0, zoomSpeed 1) let OrbitControls dolly the
+    // camera essentially on top of its own target with no meaningful
+    // change in framing once close, which reads as "zoom barely does
+    // anything" — a wider zoom speed plus an explicit near/far range fixes
+    // that and lets you get close enough to inspect a real-scale Mercury
+    // or dwarf planet, or pull back past Neptune's orbit.
+    this.controls.zoomSpeed = 2.2;
+    this.controls.minDistance = 0.3;
+    this.controls.maxDistance = 30000;
     this.controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN };
     // Right-click-drag already pans by default, but that's easy to miss —
     // hold Shift to pan with the primary drag too, so the view doesn't stay
@@ -170,16 +201,17 @@ export class AstronomyMode {
     const sunLight = new THREE.PointLight(0xffffff, 2.2, 0, 0.15);
     this.scene.add(sunLight);
 
-    const sunGeo = new THREE.SphereGeometry(4, 24, 24);
+    const sunRadius = SUN_RADIUS_KM * RADIUS_SCALE;
+    const sunGeo = new THREE.SphereGeometry(sunRadius, 32, 32);
     const sunMat = new THREE.MeshBasicMaterial({ color: 0xffe066 });
-    this.scene.add(new THREE.Mesh(sunGeo, sunMat));
+    this.sunMesh = new THREE.Mesh(sunGeo, sunMat);
+    this.scene.add(this.sunMesh);
 
     this.planetMeshes = {};
     this.orbitLines = {};
     const jdNow = dateToJulianDate(this.date);
     const buildPlanetLike = (planet, { dwarf = false } = {}) => {
-      const rawSize = Math.max(0.7, Math.log10(planet.radiusKm) * 0.9 - 2.2);
-      const size = dwarf ? rawSize * 0.6 : rawSize;
+      const size = Math.max(MIN_BODY_SIZE, planet.radiusKm * RADIUS_SCALE);
       const geo = new THREE.SphereGeometry(size, dwarf ? 10 : 18, dwarf ? 10 : 18);
       const mat = new THREE.MeshStandardMaterial({ color: new THREE.Color(planet.color), roughness: 0.7 });
       const mesh = new THREE.Mesh(geo, mat);
@@ -248,17 +280,17 @@ export class AstronomyMode {
 
     // Other major moons — simple circular orbits around their host planet,
     // spaced outward so multiple moons of the same planet don't overlap.
-    // Both size and orbit distance are deliberately exaggerated relative to
-    // the host planet's own (already-exaggerated) radius — real moon
-    // distances are tiny enough that at true scale they'd render inside
-    // their planet's own sphere, same reasoning as the planets' sizes
-    // already being log-compressed for visibility.
+    // Size uses the same RADIUS_SCALE as planets (so e.g. Ganymede still
+    // reads as ~26x smaller than Jupiter, matching reality), but orbit
+    // distance is deliberately exaggerated relative to the host planet's
+    // own radius — real moon orbits are tiny enough that at true scale
+    // they'd render inside their planet's own sphere.
     this.moonMeshes = [];
     const moonIndexByHost = {};
     for (const moon of MOONS) {
       const idx = moonIndexByHost[moon.host] || 0;
       moonIndexByHost[moon.host] = idx + 1;
-      const size = Math.max(0.5, Math.log10(moon.radiusKm) * 0.55 - 1.1);
+      const size = Math.max(MIN_BODY_SIZE, moon.radiusKm * RADIUS_SCALE);
       const geo = new THREE.SphereGeometry(size, 10, 10);
       const mat = new THREE.MeshStandardMaterial({ color: new THREE.Color(moon.color), roughness: 0.8 });
       const mesh = new THREE.Mesh(geo, mat);

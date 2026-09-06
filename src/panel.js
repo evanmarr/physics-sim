@@ -197,8 +197,13 @@ export function renderPhysicsMathPanel(container, spec, onClose, onEdit) {
       const resetBtn = document.createElement("button");
       resetBtn.className = "math-edit-reset";
       resetBtn.textContent = "↺";
-      resetBtn.title = "Reset to material default";
-      resetBtn.addEventListener("click", () => onEdit(edit.key, undefined));
+      // Density/friction/restitution are material *overrides* — undefined
+      // correctly falls back to the material preset (see effectiveDensity
+      // etc.). Type-specific values like a bomb's power aren't overrides of
+      // anything, so those edit descriptors carry an explicit resetValue
+      // instead of relying on undefined to mean something sensible.
+      resetBtn.title = edit.resetValue !== undefined ? "Reset to default" : "Reset to material default";
+      resetBtn.addEventListener("click", () => onEdit(edit.key, edit.resetValue));
       editRow.appendChild(input);
       editRow.appendChild(valSpan);
       editRow.appendChild(resetBtn);

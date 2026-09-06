@@ -169,8 +169,14 @@ export const OBJECT_DEFS = {
     // midpoint — press Play and the bearing shuttles back and forth along
     // it at Speed, either forever (Cycles = 0) or stopping after that many
     // round trips. Two independent draggable ends, same model as rope.
+    // Material stays fixed (used only for the rail/bearing's color) rather
+    // than an editable field: the riding ball bearing is a kinematic body
+    // moved by explicit position scripting, not physics forces — its
+    // restitution is hardcoded and its friction is never read from
+    // material at all, so a material picker here would change color only,
+    // not behavior.
     defaultSpec: () => ({ type: "track", x: 0, y: 0, x2: 0, y2: 200, speed: 200, cycles: 0, material: "metal" }),
-    fields: ["speed", "cycles", "material"],
+    fields: ["speed", "cycles"],
   },
   motor: {
     label: "Motor",
