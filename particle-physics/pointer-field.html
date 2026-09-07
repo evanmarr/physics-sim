@@ -75,8 +75,9 @@
   <p>Not from Observable &mdash; built for this gallery. 220 particles held apart by
     <code>forceCollide</code> and gently recentered by weak <code>forceX</code>/<code>forceY</code>,
     plus a hand-written custom force that pushes any particle within range of the cursor
-    radially away. Fills the whole window. Move your pointer to repel, click and hold to
-    suck particles in, release to spit them out.</p>
+    radially away. Fills the whole window. Move your pointer to repel — on a touch
+    device, press and drag your finger to suck particles in instead, and lift to spit
+    them out.</p>
 </div>
 
 <div class="stage" id="stage"></div>
@@ -143,7 +144,7 @@ function forceRepelPointer() {
   let nodes;
   function force(alpha) {
     if (!pointer.active) return;
-    const attracting = pointer.mode === "attract";
+    const attracting = pointer.attracting;
     const radius = attracting ? Math.max(width, height) : 200;
     const strength = attracting ? 9 : 8.5;
     const sign = attracting ? -1 : 1;
@@ -161,7 +162,11 @@ function forceRepelPointer() {
   return force;
 }
 
-const pointer = { x: 0, y: 0, active: false, mode: "repel" };
+// Sucking (attract) is a touch-only gesture -- a mouse never triggers it, it
+// only ever repels. On a touch device, pressing and dragging a finger pulls
+// particles in; lifting the finger releases them with an outward burst.
+const isTouchDevice = window.matchMedia("(pointer: coarse)").matches;
+const pointer = { x: 0, y: 0, active: false, attracting: false };
 
 // Release: every particle still in the pull radius gets an outward kick,
 // stronger the closer it sat to the pointer -- the "spit out" burst.
@@ -176,7 +181,7 @@ function spitOut() {
       d.vy += (dy / dist) * f;
     }
   }
-  pointer.mode = "repel";
+  pointer.attracting = false;
 }
 
 const simulation = d3.forceSimulation(nodes)
@@ -201,6 +206,7 @@ function draw() {
   context.fillStyle = bgFade(0.28);
   context.fillRect(0, 0, width, height);
 
+  const outline = getComputedStyle(document.documentElement).getPropertyValue("--bg").trim();
   for (const d of nodes) {
     context.beginPath();
     context.arc(d.x, d.y, d.r, 0, 2 * Math.PI);
@@ -209,12 +215,15 @@ function draw() {
     context.shadowColor = color;
     context.shadowBlur = 6;
     context.fill();
+    context.shadowBlur = 0;
+    context.lineWidth = 1.5;
+    context.strokeStyle = outline;
+    context.stroke();
   }
-  context.shadowBlur = 0;
 }
 
 let idleTimer;
-  canvas.addEventListener("mousemove", (event) => {
+canvas.addEventListener("mousemove", (event) => {
   const rect = canvas.getBoundingClientRect();
   pointer.x = event.clientX - rect.left;
   pointer.y = event.clientY - rect.top;
@@ -224,17 +233,18 @@ let idleTimer;
   idleTimer = setTimeout(() => simulation.alphaTarget(0.08), 250);
 });
 canvas.addEventListener("mouseleave", () => {
-  if (pointer.mode === "attract") spitOut();
   pointer.active = false;
   simulation.alphaTarget(0.08);
 });
-canvas.addEventListener("mousedown", (event) => {
-  pointer.mode = "attract";
+canvas.addEventListener("touchstart", (event) => {
+  const rect = canvas.getBoundingClientRect();
+  const t = event.touches[0];
+  pointer.x = t.clientX - rect.left;
+  pointer.y = t.clientY - rect.top;
+  pointer.active = true;
+  if (isTouchDevice) pointer.attracting = true;
   simulation.alphaTarget(0.7).restart();
-});
-window.addEventListener("mouseup", () => {
-  if (pointer.mode === "attract") spitOut();
-});
+}, { passive: true });
 canvas.addEventListener("touchmove", (event) => {
   const rect = canvas.getBoundingClientRect();
   const t = event.touches[0];
@@ -243,17 +253,8 @@ canvas.addEventListener("touchmove", (event) => {
   pointer.active = true;
   simulation.alphaTarget(0.6).restart();
 }, { passive: true });
-canvas.addEventListener("touchstart", (event) => {
-  const rect = canvas.getBoundingClientRect();
-  const t = event.touches[0];
-  pointer.x = t.clientX - rect.left;
-  pointer.y = t.clientY - rect.top;
-  pointer.active = true;
-  pointer.mode = "attract";
-  simulation.alphaTarget(0.7).restart();
-}, { passive: true });
 canvas.addEventListener("touchend", () => {
-  if (pointer.mode === "attract") spitOut();
+  if (pointer.attracting) spitOut();
   pointer.active = false;
 });
 }

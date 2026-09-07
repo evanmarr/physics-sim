@@ -1,5 +1,6 @@
 import { CYBER_CATEGORIES, CYBER_ENTRIES } from "./cybersecurityData.js";
 import { CYBER_CHALLENGES } from "./cyberChallenges.js";
+import { renderCyberSimulators } from "./cyberSimulators.js";
 
 // A search-and-filter reference, not a timeline like History mode — for
 // "find the one called X" or "show me only malware," free-text search plus
@@ -12,6 +13,7 @@ export class CybersecurityMode {
     this.activeFilters = new Set(CYBER_CATEGORIES.map((c) => c.key));
     this.selectedId = null;
     this.activeChallengeId = null;
+    this.sub = "reference"; // "reference" | "simulators"
     this._build();
   }
 
@@ -48,6 +50,23 @@ export class CybersecurityMode {
     header.appendChild(challengesBtn);
     this.root.appendChild(header);
 
+    const subNav = div("cyber-sub-nav");
+    for (const tab of [["reference", "Reference"], ["simulators", "Simulators"]]) {
+      const btn = document.createElement("button");
+      btn.className = "cyber-sub-tab" + (this.sub === tab[0] ? " active" : "");
+      btn.textContent = tab[1];
+      btn.addEventListener("click", () => { this.sub = tab[0]; this._renderView(); });
+      subNav.appendChild(btn);
+    }
+    this.root.appendChild(subNav);
+
+    if (this.sub === "simulators") {
+      const simRoot = div("cyber-sim-root");
+      this.root.appendChild(simRoot);
+      renderCyberSimulators(simRoot);
+      return;
+    }
+
     const sub = document.createElement("p");
     sub.className = "cyber-sub";
     sub.textContent = "Search or filter well-documented malware, hackers, hacker groups, and breaches.";
@@ -56,7 +75,7 @@ export class CybersecurityMode {
     const activeChallenge = this.activeChallengeId ? CYBER_CHALLENGES.find((c) => c.id === this.activeChallengeId) : null;
     if (activeChallenge) {
       const banner = div("cyber-challenge-banner");
-      banner.textContent = `🎯 ${activeChallenge.hint}`;
+      banner.textContent = activeChallenge.hint;
       this.root.appendChild(banner);
     }
 

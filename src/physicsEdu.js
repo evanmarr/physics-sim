@@ -9,7 +9,10 @@ function areaOf(spec) {
   if (spec.type === "board" || spec.type === "button" || spec.type === "fan" || spec.type === "springPad" || spec.type === "mirror") {
     return spec.width * (spec.height || 24);
   }
-  if (spec.type === "triangle") return (Math.sqrt(3) / 4) * (spec.size ?? 130) ** 2;
+  if (spec.type === "triangle") {
+    const width = spec.width ?? spec.size ?? 130;
+    return (width * (spec.height ?? (width * Math.sqrt(3)) / 2)) / 2;
+  }
   if (spec.type === "wire") return Math.max(4, Math.hypot((spec.x2 ?? spec.x) - spec.x, (spec.y2 ?? spec.y) - spec.y)) * 4;
   return Math.PI * (spec.radius ?? 20) ** 2; // ball, bomb, ballBearing, peg, magnet, portal
 }
@@ -130,8 +133,8 @@ export function physicsMath(spec) {
 
   if (spec.type === "magnet") {
     lines.push({
-      formula: `F(d) = power · (1 − d / range), toward/away from center`,
-      note: `Only pulls on metal objects. Positive power attracts, negative repels — like the field around a real magnet, but simplified to fall off linearly with distance instead of by the inverse square.`,
+      formula: `F(d) = power · (40 / max(d, 40))⁴, toward/away from center`,
+      note: `Only pulls on metal objects. Positive power attracts, negative repels. Real permanent-magnet pull on ferrous metal falls off roughly as the inverse 4th power of distance — steeper than gravity's inverse square — so it's strong up close and drops off fast, exactly like a real magnet.`,
       edit: { key: "power", value: spec.power, min: -50, max: 50, step: 1, resetValue: 20 },
     });
     lines.push({

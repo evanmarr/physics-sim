@@ -33,10 +33,10 @@ export const OBJECT_DEFS = {
     label: "Triangle",
     icon: "▲",
     category: "core",
-    // Always equilateral (all three sides equal length `size`) — simpler to
-    // reason about than independent width/height for a ramp/wedge shape.
-    defaultSpec: () => ({ type: "triangle", x: 0, y: 0, rotation: 0, size: 130, material: "wood", fixed: true, blocksMagnetism: false }),
-    fields: ["size", "material", "fixed", "blocksMagnetism"],
+    // Base = width, apex height = height — independent, so it can be a
+    // shallow wedge or a tall spike, not just an equilateral triangle.
+    defaultSpec: () => ({ type: "triangle", x: 0, y: 0, rotation: 0, width: 130, height: Math.round((130 * Math.sqrt(3)) / 2), material: "wood", fixed: true, blocksMagnetism: false }),
+    fields: ["width", "height", "material", "fixed", "blocksMagnetism"],
   },
   ballBearing: {
     label: "Ball Bearing",

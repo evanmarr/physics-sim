@@ -96,10 +96,12 @@ here than "when." Cybersecurity Challenges work the same way as History's.
 
 ## Particle Physics mode
 
-Eight real D3 force-simulation demos (Disjoint Graph, Force Lattice,
-Pointer Field, Radial Tree, Gravity Wells, Swarm Box, Magnetic Charges,
-Flocking), embedded as-is and switchable from their own sub-nav under the
-main top bar. Drag anything you see.
+Eight real, interactive simulations (Disjoint Graph, Force Lattice,
+Pointer Field, Epidemic Spread, Gravity Wells, Swarm Box, Magnetic Charges,
+Percolation), switchable from their own sub-nav under the main top bar. Drag
+anything you see — Epidemic Spread runs a real SIR model over an actual
+contact network, and Percolation shows the same phase transition that
+governs how fluid seeps through rock.
 
 ## Mathematics mode
 

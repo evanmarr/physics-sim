@@ -120,14 +120,14 @@ export class ChemistryMode {
 
     const waterBtn = document.createElement("button");
     waterBtn.className = "chem-water-btn";
-    waterBtn.textContent = "💧 Add Water (H₂O)";
+    waterBtn.textContent = "Add Water (H₂O)";
     waterBtn.title = "See how a metal reacts when dropped in water";
     waterBtn.addEventListener("click", () => this._addToMix(WATER_SYMBOL));
     this.mixPanel.appendChild(waterBtn);
 
     const reactBtn = document.createElement("button");
     reactBtn.className = "primary chem-react-btn";
-    reactBtn.textContent = "⚗ React!";
+    reactBtn.textContent = "React!";
     reactBtn.addEventListener("click", () => this._react());
     this.mixPanel.appendChild(reactBtn);
 

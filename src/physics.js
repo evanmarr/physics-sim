@@ -1,7 +1,7 @@
 import { materialOf } from "./materials.js";
 import { effectiveDensity, effectiveFriction, effectiveRestitution } from "./physicsEdu.js";
 import { makeId, cannonCatchRadius } from "./objectTypes.js";
-import { equilateralPoints } from "./render.js";
+import { trianglePoints } from "./render.js";
 
 const { Engine, World, Composite, Bodies, Body, Constraint, Events, Vector } = Matter;
 
@@ -460,7 +460,7 @@ export class PhysicsSim {
         body = Bodies.rectangle(spec.x, spec.y, spec.width, spec.height, { ...common, isStatic: true });
         break;
       case "triangle": {
-        body = Bodies.fromVertices(spec.x, spec.y, [equilateralPoints(spec.size)], common, true);
+        body = Bodies.fromVertices(spec.x, spec.y, [trianglePoints(spec.width ?? spec.size ?? 130, spec.height)], common, true);
         break;
       }
       case "cannon":
@@ -533,6 +533,7 @@ export class PhysicsSim {
       this._applyBuoyancy();
       this._applyFans();
       this._applyMagnets();
+      this._applyWaterPressure();
       this._dampPivots();
       this._clampFastBodies();
     });
@@ -683,10 +684,47 @@ export class PhysicsSim {
         const dist = Vector.magnitude(delta);
         if (dist > spec.range || dist < 0.01) continue;
         if (blockers.length && isMagnetismBlocked(magnet.position, body.position, blockers)) continue;
-        const falloff = 1 - dist / spec.range;
+        // A real permanent magnet's pull on ferrous metal falls off as
+        // roughly the inverse 4th power of distance (steeper than gravity's
+        // inverse square, since it's the *gradient* of a dipole field acting
+        // on a field-induced dipole) — not the straight-line taper this used
+        // to have. `range` still caps it at zero so the sim stays bounded;
+        // a real field technically never reaches exactly zero.
+        const refDist = 40;
+        const falloff = Math.min(1, (refDist / Math.max(dist, refDist)) ** 4);
         const dir = Vector.normalise(delta);
         const mag = spec.power * FAN_FORCE_SCALE * falloff * body.mass;
         Body.applyForce(body, body.position, { x: dir.x * mag, y: dir.y * mag });
+      }
+    }
+  }
+
+  // Real water is (near enough) incompressible — squeeze it and it pushes
+  // back rather than packing into less space. Matter's default solver has
+  // some slop, so a settled pile of water particles will otherwise slowly
+  // compact under its own weight until the puddle occupies noticeably less
+  // area than its particle count implies (it visibly "loses volume"). A
+  // short-range repulsion between any two particles closer than their
+  // combined radius counteracts that compaction — the same role pressure
+  // plays in a real fluid — without touching how water interacts with
+  // anything else (that's still ordinary rigid-body collision).
+  _applyWaterPressure() {
+    const n = this.waterParticles.length;
+    if (n < 2) return;
+    const minDist = WATER_PARTICLE_RADIUS * 2;
+    for (let i = 0; i < n; i++) {
+      const a = this.waterParticles[i];
+      for (let j = i + 1; j < n; j++) {
+        const b = this.waterParticles[j];
+        const dx = b.position.x - a.position.x, dy = b.position.y - a.position.y;
+        const distSq = dx * dx + dy * dy;
+        if (distSq >= minDist * minDist || distSq < 1e-6) continue;
+        const dist = Math.sqrt(distSq);
+        const overlap = minDist - dist;
+        const nx = dx / dist, ny = dy / dist;
+        const push = overlap * 0.0005;
+        Body.applyForce(a, a.position, { x: -nx * push, y: -ny * push });
+        Body.applyForce(b, b.position, { x: nx * push, y: ny * push });
       }
     }
   }
@@ -770,6 +808,7 @@ export class PhysicsSim {
     const v = body.velocity;
     Body.setVelocity(body, { x: v.x * cos - v.y * sin, y: v.x * sin + v.y * cos });
     if (body.plugin) body.plugin._portalCooldownUntil = this.simTime + 300;
+    if (body.plugin?.gameId) this.callbacks.onEvent?.({ type: "teleport", bodyId: body.plugin.gameId });
   }
 
   _checkSpring(body, other, phase) {
@@ -1188,8 +1227,9 @@ function areaOf(spec) {
     return Math.PI * spec.radius * spec.radius;
   }
   if (spec.type === "triangle") {
-    const size = spec.size ?? 130;
-    return (Math.sqrt(3) / 4) * size * size;
+    const width = spec.width ?? spec.size ?? 130;
+    const height = spec.height ?? (width * Math.sqrt(3)) / 2;
+    return (width * height) / 2;
   }
   if (spec.type === "wire") return Math.max(4, Math.hypot((spec.x2 ?? spec.x) - spec.x, (spec.y2 ?? spec.y) - spec.y)) * 4;
   return (spec.width || 40) * (spec.height || 40);
@@ -1204,7 +1244,7 @@ function pointInShape(px, py, spec) {
     return Math.abs(lx) <= spec.width / 2 && Math.abs(ly) <= spec.height / 2;
   }
   if (spec.type === "triangle") {
-    const [p0, p1, p2] = equilateralPoints(spec.size);
+    const [p0, p1, p2] = trianglePoints(spec.width ?? spec.size ?? 130, spec.height);
     return sameSide(lx, ly, p0, p1, p2) && sameSide(lx, ly, p1, p2, p0) && sameSide(lx, ly, p2, p0, p1);
   }
   if (spec.type === "ball" || spec.type === "bomb" || spec.type === "ballBearing" || spec.type === "peg" || spec.type === "magnet") {

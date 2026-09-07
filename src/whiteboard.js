@@ -97,7 +97,7 @@ export class WhiteboardMode {
 
     const toolRow = document.createElement("div");
     toolRow.className = "wb-tool-row";
-    const toolLabels = { pen: "✏️ Pen", eraser: "🧹 Eraser" };
+    const toolLabels = { pen: "Pen", eraser: "Eraser" };
     const toolButtons = {};
     for (const t of tools) {
       const btn = document.createElement("button");

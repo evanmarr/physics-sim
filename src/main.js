@@ -18,6 +18,7 @@ import { openQuiz } from "./quiz.js";
 import { initAuthUI, openSavesPanel } from "./auth.js";
 import { initTutorial } from "./tutorial.js";
 import { initDeviceMode, showPrompt as showDeviceModePrompt } from "./deviceMode.js";
+import { toggleUnitSystem, distanceUnitSuffix, weightUnitSuffix, gridSquareInUnits } from "./units.js";
 import { confirmPopup } from "./popup.js";
 
 const state = {
@@ -130,6 +131,21 @@ function boot() {
     },
     onRotate: (id, deg) => { patchObject(id, { rotation: deg }); renderPanelUI(); },
     onEndpointMove: (id, { x, y, x2, y2 }) => { patchObject(id, { x, y, x2, y2 }); },
+    // Hovering to right-click doesn't exist on a touchscreen, so mobile mode
+    // gets its own gesture for the same jobs: double-tap an object for a
+    // Copy menu, double-tap empty space for a Paste menu.
+    onObjectDblClick: (id, clientX, clientY) => {
+      if (state.playing || document.documentElement.dataset.device !== "mobile") return;
+      state.selectedIds = new Set([id]);
+      syncSelectedId();
+      renderAll();
+      renderPanelUI();
+      showTouchMenu(clientX, clientY, [{ label: "Copy", onClick: copySelected }]);
+    },
+    onEmptyDblClick: (worldX, worldY, clientX, clientY) => {
+      if (state.playing || document.documentElement.dataset.device !== "mobile" || !clipboard?.length) return;
+      showTouchMenu(clientX, clientY, [{ label: "Paste", onClick: () => pasteClipboardAt(worldX, worldY) }]);
+    },
   });
   window._renderer = renderer;
 
@@ -452,6 +468,7 @@ function hashSeed(id, i) {
 function wireTopbar(renderer) {
   const playBtn = document.getElementById("play-btn");
   playBtn.addEventListener("click", () => togglePlay(renderer));
+  document.getElementById("reset-btn").addEventListener("click", () => resetPhysics(renderer));
 
   const gravitySlider = document.getElementById("gravity-slider");
   const gravityVal = document.getElementById("gravity-val");
@@ -547,7 +564,25 @@ function wireTopbar(renderer) {
 
   wireTheme();
   document.getElementById("device-mode-btn").addEventListener("click", () => showDeviceModePrompt(true));
+  wireUnitsToggle();
   startParticleLoop();
+}
+
+function wireUnitsToggle() {
+  const btn = document.getElementById("units-toggle-btn");
+  const badge = document.getElementById("grid-scale-badge");
+  function refresh() {
+    btn.textContent = `${distanceUnitSuffix()}/${weightUnitSuffix()}`;
+    const squares = gridSquareInUnits();
+    const shown = Number(squares.toFixed(2));
+    badge.textContent = `1 square = ${shown} ${distanceUnitSuffix()}`;
+  }
+  btn.addEventListener("click", () => {
+    toggleUnitSystem();
+    refresh();
+    renderPanelUI();
+  });
+  refresh();
 }
 
 function wireTheme() {
@@ -619,6 +654,14 @@ function togglePlay(renderer) {
   }
 }
 
+// Restart the simulation from the original blueprint — stop (if running)
+// then play again, same as clicking Stop then Play. Bound to both the
+// Reset button and the R key.
+function resetPhysics(renderer) {
+  if (state.playing) togglePlay(renderer);
+  togglePlay(renderer);
+}
+
 function handleSimEvent(event) {
   if (event.type === "shatter") window._renderer.burst(event.x, event.y, event.radius);
   if (!tracker) return;
@@ -636,6 +679,34 @@ function awardChallenge(challenge) {
     scheduleSave();
   }
   showToast(`Challenge complete: ${challenge.name}`);
+}
+
+// A tiny floating menu at a screen point — the touch equivalent of a
+// desktop right-click menu, used for double-tap copy/paste on mobile.
+let touchMenuEl = null;
+function showTouchMenu(clientX, clientY, items) {
+  touchMenuEl?.remove();
+  const menu = document.createElement("div");
+  menu.className = "touch-menu";
+  for (const item of items) {
+    const btn = document.createElement("button");
+    btn.textContent = item.label;
+    btn.addEventListener("click", () => { item.onClick(); closeTouchMenu(); });
+    menu.appendChild(btn);
+  }
+  menu.style.left = `${clientX}px`;
+  menu.style.top = `${clientY}px`;
+  document.body.appendChild(menu);
+  touchMenuEl = menu;
+  setTimeout(() => document.addEventListener("pointerdown", closeTouchMenuOutside, true), 0);
+}
+function closeTouchMenu() {
+  touchMenuEl?.remove();
+  touchMenuEl = null;
+  document.removeEventListener("pointerdown", closeTouchMenuOutside, true);
+}
+function closeTouchMenuOutside(e) {
+  if (!touchMenuEl?.contains(e.target)) closeTouchMenu();
 }
 
 function showToast(msg) {
@@ -668,6 +739,20 @@ function wireChallenges() {
       info.appendChild(name);
       info.appendChild(concept);
       info.appendChild(desc);
+      if (c.hint) {
+        const hintToggle = document.createElement("button");
+        hintToggle.className = "challenge-hint-toggle";
+        hintToggle.textContent = "Show hint";
+        const hintText = document.createElement("div");
+        hintText.className = "challenge-hint-text hidden";
+        hintText.textContent = c.hint;
+        hintToggle.addEventListener("click", () => {
+          hintText.classList.toggle("hidden");
+          hintToggle.textContent = hintText.classList.contains("hidden") ? "Show hint" : "Hide hint";
+        });
+        info.appendChild(hintToggle);
+        info.appendChild(hintText);
+      }
       const btn = document.createElement("button");
       btn.className = "primary";
       btn.textContent = "Load";
@@ -710,9 +795,9 @@ const HOME_SECTIONS = [
 
 function buildHomePage(root, onNavigate) {
   root.innerHTML = `
+    <canvas class="home-bg" aria-hidden="true"></canvas>
     <div class="home-wrap">
       <div class="home-hero">
-        <canvas class="home-hero-bg" aria-hidden="true"></canvas>
         <svg class="home-logo" viewBox="0 0 24 24" width="48" height="48" aria-hidden="true">
           <ellipse cx="12" cy="12" rx="10" ry="4.2" fill="none" style="stroke: var(--cool-1)" stroke-width="1.3" />
           <ellipse cx="12" cy="12" rx="10" ry="4.2" fill="none" style="stroke: var(--cool-2)" stroke-width="1.3" transform="rotate(60 12 12)" />
@@ -741,17 +826,21 @@ function buildHomePage(root, onNavigate) {
     grid.appendChild(card);
     buildHomeThumbnail(card.querySelector(".home-card-thumb"), section);
   }
-  initHomeBackground(root.querySelector(".home-hero-bg"), root.querySelector(".home-hero"));
+  initHomeBackground(root.querySelector(".home-bg"), root);
 }
 
-// Ambient hero background: a small living D3 force graph, dimmed and
-// untouchable — same simulation shape as the ~/d3-force gallery's own hero.
-function initHomeBackground(canvas, hero) {
+// Ambient background: a living D3 force graph behind the *entire* home
+// page (fixed, so it stays put while the page scrolls), livelier and more
+// prominent than a typical dimmed hero decoration — more nodes, brighter,
+// tinted with the app's own brand colors, and gently pushed around by the
+// pointer, closer to the constantly-alive backgrounds on sites like
+// seeing-theory.brown.edu than a static illustration.
+function initHomeBackground(canvas, root) {
   const ctx = canvas.getContext("2d");
   let width = 0, height = 0;
 
   function resize() {
-    const rect = hero.getBoundingClientRect();
+    const rect = root.getBoundingClientRect();
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     width = rect.width;
     height = rect.height;
@@ -759,39 +848,86 @@ function initHomeBackground(canvas, hero) {
     canvas.height = Math.round(height * dpr);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   }
-  resize();
   window.addEventListener("resize", resize);
 
-  const n = 46;
-  const nodes = Array.from({ length: n }, () => ({ x: Math.random() * width, y: Math.random() * height }));
+  // The container can measure 0×0 for a tick right after the page's own
+  // innerHTML is set, before layout has actually run — seed nothing until
+  // a real size shows up, or the whole simulation starts collapsed at (0,0).
+  resize();
+  if (!(width > 0 && height > 0)) {
+    requestAnimationFrame(() => initHomeBackground(canvas, root));
+    return;
+  }
+
+  const n = 90;
+  const hues = ["125,211,252", "167,139,250", "52,211,153"]; // cool-1/2/3
+  const nodes = Array.from({ length: n }, () => ({
+    x: Math.random() * width,
+    y: Math.random() * height,
+    hue: hues[Math.floor(Math.random() * hues.length)],
+  }));
   const links = [];
-  for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) if (Math.random() < 0.045) links.push({ source: i, target: j });
+  for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) if (Math.random() < 0.03) links.push({ source: i, target: j });
+
+  // The canvas has pointer-events:none (clicks must reach the cards behind
+  // it), so the pointer is tracked from `root` instead — pointermove/leave
+  // both bubble up from whatever's actually under the cursor.
+  const pointer = { x: -9999, y: -9999, active: false };
+  root.addEventListener("pointermove", (e) => {
+    const rect = canvas.getBoundingClientRect();
+    pointer.x = e.clientX - rect.left;
+    pointer.y = e.clientY - rect.top;
+    pointer.active = true;
+  });
+  root.addEventListener("pointerleave", () => { pointer.active = false; });
+
+  function forcePointer() {
+    let list;
+    function force(alpha) {
+      if (!pointer.active) return;
+      const radius = 140;
+      for (const d of list) {
+        const dx = d.x - pointer.x, dy = d.y - pointer.y;
+        const dist = Math.hypot(dx, dy) || 0.001;
+        if (dist >= radius) continue;
+        const f = ((radius - dist) / radius) * 6 * alpha;
+        d.vx += (dx / dist) * f;
+        d.vy += (dy / dist) * f;
+      }
+    }
+    force.initialize = (_nodes) => { list = _nodes; };
+    return force;
+  }
 
   function draw() {
     ctx.clearRect(0, 0, width, height);
-    ctx.strokeStyle = "rgba(125,211,252,0.25)";
     ctx.lineWidth = 1;
     for (const l of links) {
+      ctx.strokeStyle = `rgba(${l.source.hue},0.3)`;
       ctx.beginPath();
       ctx.moveTo(l.source.x, l.source.y);
       ctx.lineTo(l.target.x, l.target.y);
       ctx.stroke();
     }
-    ctx.fillStyle = "rgba(167,139,250,0.85)";
     for (const node of nodes) {
       ctx.beginPath();
-      ctx.arc(node.x, node.y, 2.5, 0, Math.PI * 2);
+      ctx.arc(node.x, node.y, 3, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(${node.hue},0.95)`;
+      ctx.shadowColor = `rgba(${node.hue},0.8)`;
+      ctx.shadowBlur = 8;
       ctx.fill();
     }
+    ctx.shadowBlur = 0;
   }
 
   d3.forceSimulation(nodes)
-    .force("charge", d3.forceManyBody().strength(-40))
-    .force("link", d3.forceLink(links).distance(90).strength(0.35))
-    .force("x", d3.forceX(() => width / 2).strength(0.02))
-    .force("y", d3.forceY(() => height / 2).strength(0.02))
+    .force("charge", d3.forceManyBody().strength(-32))
+    .force("link", d3.forceLink(links).distance(85).strength(0.3))
+    .force("x", d3.forceX(() => width / 2).strength(0.015))
+    .force("y", d3.forceY(() => height / 2).strength(0.015))
+    .force("pointer", forcePointer())
     .alphaDecay(0)
-    .velocityDecay(0.35)
+    .velocityDecay(0.4)
     .on("tick", draw);
 }
 
@@ -933,7 +1069,7 @@ function buildHomeThumbnail(el, section) {
 }
 
 function wireModeTabs() {
-  const homeBtn = document.getElementById("mode-home-btn");
+  const brandHomeBtn = document.getElementById("brand-home-btn");
   const physicsBtn = document.getElementById("mode-physics-btn");
   const chemistryBtn = document.getElementById("mode-chemistry-btn");
   const astronomyBtn = document.getElementById("mode-astronomy-btn");
@@ -943,7 +1079,7 @@ function wireModeTabs() {
   const mathematicsBtn = document.getElementById("mode-mathematics-btn");
   const whiteboardBtn = document.getElementById("mode-whiteboard-btn");
   const economicsBtn = document.getElementById("mode-economics-btn");
-  const modeButtons = { home: homeBtn, physics: physicsBtn, chemistry: chemistryBtn, astronomy: astronomyBtn, history: historyBtn, cybersecurity: cybersecurityBtn, particles: particlesBtn, mathematics: mathematicsBtn, whiteboard: whiteboardBtn, economics: economicsBtn };
+  const modeButtons = { physics: physicsBtn, chemistry: chemistryBtn, astronomy: astronomyBtn, history: historyBtn, cybersecurity: cybersecurityBtn, particles: particlesBtn, mathematics: mathematicsBtn, whiteboard: whiteboardBtn, economics: economicsBtn };
 
   const homeRoot = document.getElementById("home-root");
   buildHomePage(homeRoot, (mode) => setMode(mode));
@@ -978,6 +1114,7 @@ function wireModeTabs() {
     state.mode = mode;
 
     for (const [m, btn] of Object.entries(modeButtons)) btn.classList.toggle("active", mode === m);
+    brandHomeBtn.classList.toggle("active", mode === "home");
     for (const [m, el] of Object.entries(roots)) el.classList.toggle("hidden", mode !== m);
     physicsOnlyControls.forEach((el) => el && (el.style.display = mode === "physics" ? "" : "none"));
     // Chemistry, Astronomy, and History each have their own mode-specific
@@ -1042,8 +1179,7 @@ function wireModeTabs() {
     }
   }
 
-  homeBtn.addEventListener("click", () => setMode("home"));
-  document.getElementById("brand-home-btn").addEventListener("click", () => setMode("home"));
+  brandHomeBtn.addEventListener("click", () => setMode("home"));
   physicsBtn.addEventListener("click", () => setMode("physics"));
   chemistryBtn.addEventListener("click", () => setMode("chemistry"));
   astronomyBtn.addEventListener("click", () => setMode("astronomy"));
@@ -1089,10 +1225,7 @@ function wireKeyboard(renderer) {
       togglePlay(renderer);
     } else if (e.code === "KeyR" && !cmd) {
       e.preventDefault();
-      // Restart the simulation from the original blueprint — stop (if
-      // running) then play again, same as clicking Stop then Play.
-      if (state.playing) togglePlay(renderer);
-      togglePlay(renderer);
+      resetPhysics(renderer);
     } else if ((e.code === "Delete" || e.code === "Backspace") && state.selectedIds.size && !state.playing) {
       e.preventDefault();
       deleteSelected();
@@ -1123,13 +1256,28 @@ function copySelected() {
 
 function pasteClipboard() {
   if (!clipboard || !clipboard.length) return;
+  const pasted = _pasteWithOffset(40, 40);
+  // paste again from the same spot, so repeated ⌘V lays out a diagonal trail
+  clipboard = pasted.map(cloneSpec);
+}
+
+// Touch double-tap paste: same clipboard, but dropped centered on the
+// tapped point instead of the keyboard shortcut's fixed diagonal offset.
+function pasteClipboardAt(x, y) {
+  if (!clipboard || !clipboard.length) return;
+  const cx = clipboard.reduce((s, o) => s + o.x, 0) / clipboard.length;
+  const cy = clipboard.reduce((s, o) => s + o.y, 0) / clipboard.length;
+  _pasteWithOffset(x - cx, y - cy);
+}
+
+function _pasteWithOffset(dx, dy) {
   pushUndoNow();
   const pasted = clipboard.map((spec) => {
     const s = cloneSpec(spec);
     s.id = makeId(s.type);
-    s.x = snap(s.x + 40);
-    s.y = snap(s.y + 40);
-    if (s.x2 != null) { s.x2 = snap(s.x2 + 40); s.y2 = snap(s.y2 + 40); } // flexible-endpoint objects (rope/track): shift both ends together
+    s.x = snap(s.x + dx);
+    s.y = snap(s.y + dy);
+    if (s.x2 != null) { s.x2 = snap(s.x2 + dx); s.y2 = snap(s.y2 + dy); } // flexible-endpoint objects (rope/track): shift both ends together
     if (s.targetId) s.targetId = null; // don't silently share a trigger link with the original
     return s;
   });
@@ -1139,8 +1287,7 @@ function pasteClipboard() {
   renderAll();
   renderPanelUI();
   scheduleSave();
-  // paste again from the same spot, so repeated ⌘V lays out a diagonal trail
-  clipboard = pasted.map(cloneSpec);
+  return pasted;
 }
 
 function beginPaletteDrag(type, pointerEvent) {

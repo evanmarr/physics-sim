@@ -114,11 +114,38 @@ button:disabled { opacity: .4; cursor: default; }
 :root[data-device="mobile"] button {
   padding: 10px 14px; font-size: 14.5px; min-height: 40px;
 }
-:root[data-device="mobile"] .palette-item { padding: 12px 10px; }
+:root[data-device="mobile"] .palette-item { padding: 12px 10px; margin-right: 22px; }
 :root[data-device="mobile"] .mode-tab { padding: 10px 4px; }
 :root[data-device="mobile"] input[type="range"] { height: 24px; }
 :root[data-device="mobile"] .hint { display: none; }
 :root[data-device="mobile"] .rotate-handle circle { r: 12; }
+/* Cybersecurity's search results (fixed 380px) and info panel sit side by
+   side on desktop, but that badly overflows a narrow phone screen -- stack
+   them instead, with the results list capped to a scrollable band up top. */
+:root[data-device="mobile"] .cyber-body { flex-direction: column; }
+:root[data-device="mobile"] .cyber-results { width: 100%; max-height: 38vh; padding-right: 0; }
+:root[data-device="mobile"] .cyber-header { flex-direction: column; align-items: flex-start; gap: 4px; }
+/* Portrait phone: the desktop's 4-column layout (palette + canvas + two
+   side panels, each with a fixed pixel width) doesn't fit a narrow screen
+   at all -- stack everything into full-width bands instead, and turn the
+   palette into a horizontal icon strip along the top so it doesn't eat
+   most of the vertical space a portrait screen actually has. */
+@media (orientation: portrait) {
+  :root[data-device="mobile"] #workspace-body { flex-wrap: wrap; overflow-y: auto; }
+  :root[data-device="mobile"] #palette {
+    flex: 1 1 100%; width: auto; max-height: 92px;
+    display: flex; flex-direction: row; overflow-x: auto; overflow-y: hidden;
+    border-right: none; border-bottom: 1px solid var(--border);
+  }
+  :root[data-device="mobile"] .palette-section-title { display: none; }
+  :root[data-device="mobile"] .palette-item { flex: 0 0 auto; flex-direction: column; text-align: center; font-size: 11px; margin-right: 10px; }
+  :root[data-device="mobile"] #canvas-wrap { flex: 1 1 100%; min-height: 45vh; }
+  :root[data-device="mobile"] #physics-math-panel,
+  :root[data-device="mobile"] #prop-panel {
+    flex: 1 1 100%; width: auto; max-height: 24vh;
+    border-left: none; border-top: 1px solid var(--border);
+  }
+}
 
 /* One shared top bar for every section, styled after the Particle Physics
    gallery's own plain-link nav — a row of text links rather than a
@@ -140,7 +167,8 @@ button:disabled { opacity: .4; cursor: default; }
    sliver (or their text disappearing entirely) on a narrow window instead
    of just letting you scroll to reach them. */
 #topbar > * { flex-shrink: 0; }
-.brand { display: flex; align-items: center; gap: 7px; font-weight: 700; letter-spacing: .03em; color: var(--cool-2); background: none; border: none; padding: 4px 2px; font-size: 14px; cursor: pointer; }
+.brand { display: flex; align-items: center; gap: 7px; font-weight: 700; letter-spacing: .03em; color: var(--cool-2); background: none; border: none; padding: 4px 6px; font-size: 14px; cursor: pointer; border-radius: 8px; }
+.brand.active { background: var(--panel-alt, rgba(125,211,252,0.12)); }
 .brand-logo { flex-shrink: 0; }
 #theme-toggle { margin-left: 8px; padding: 6px 10px; }
 #mode-tabs { display: flex; align-items: center; gap: 22px; }
@@ -199,10 +227,16 @@ button:disabled { opacity: .4; cursor: default; }
   overflow-y: auto;
   background: var(--bg);
 }
-.home-wrap { max-width: 900px; margin: 0 auto; padding: 60px 24px 80px; }
-.home-hero { position: relative; overflow: hidden; text-align: center; margin-bottom: 48px; padding: 24px 0; }
-.home-hero-bg { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0.55; pointer-events: none; }
-.home-hero > *:not(.home-hero-bg) { position: relative; z-index: 1; }
+.home-bg { position: fixed; inset: 0; width: 100%; height: 100%; opacity: 0.8; pointer-events: none; z-index: 0; }
+.home-wrap { position: relative; z-index: 1; max-width: 900px; margin: 0 auto; padding: 60px 24px 80px; }
+.home-hero {
+  text-align: center; margin-bottom: 48px; padding: 24px 0;
+  /* A soft wash behind just the hero text keeps it legible over the much
+     brighter, fuller network animation now running behind the whole page,
+     without hiding that animation everywhere else (especially behind the
+     cards, where it's meant to show through). */
+  background: radial-gradient(ellipse 70% 100% at center, var(--bg) 45%, transparent 100%);
+}
 .home-logo { margin-bottom: 14px; }
 .home-kicker {
   font-size: 12px; letter-spacing: .14em; text-transform: uppercase;
@@ -285,6 +319,18 @@ button:disabled { opacity: .4; cursor: default; }
   pointer-events: none;
 }
 #mode-banner.hidden, .hidden { display: none !important; }
+.touch-menu {
+  position: fixed; z-index: 10001; transform: translate(-50%, -110%);
+  background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.25); padding: 6px; display: flex; gap: 4px;
+}
+.touch-menu button { padding: 10px 16px; font-size: 14px; white-space: nowrap; }
+#grid-scale-badge {
+  position: absolute; bottom: 10px; left: 10px;
+  background: var(--panel); border: 1px solid var(--border);
+  color: var(--text-dim); font-size: 11px; padding: 4px 10px;
+  border-radius: 999px; pointer-events: none; opacity: 0.85;
+}
 
 #prop-panel {
   width: 260px;
@@ -421,6 +467,12 @@ button:disabled { opacity: .4; cursor: default; }
   padding: 1px 8px;
   margin: 3px 0 5px;
 }
+.challenge-hint-toggle {
+  margin-top: 6px; padding: 3px 10px; font-size: 11px; border-radius: 999px;
+  border: 1px solid var(--border); background: var(--panel); color: var(--text-dim); cursor: pointer;
+}
+.challenge-hint-toggle:hover { border-color: var(--accent); color: var(--text); }
+.challenge-hint-text { margin-top: 6px; font-size: 11.5px; color: var(--text-dim); line-height: 1.5; font-style: italic; }
 
 .toast {
   position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
@@ -651,6 +703,7 @@ button:disabled { opacity: .4; cursor: default; }
 .astro-time-slider { width: 100%; margin: 4px 0 2px; }
 .astro-time-slider-readout { font-size: 11px; color: var(--text-dim); text-align: center; margin-bottom: 14px; }
 .astro-speed-row { display: flex; flex-direction: column; gap: 4px; }
+.astro-focus-btn { width: 100%; margin-top: 10px; }
 .astro-speed-btn { text-align: left; }
 .astro-speed-btn.active { background: var(--accent); border-color: var(--accent); color: #0b1220; font-weight: 600; }
 .astro-eclipse-result { margin-top: 10px; background: var(--panel-alt); border: 1px solid var(--border); border-radius: 8px; padding: 12px; text-align: center; }
@@ -776,6 +829,11 @@ button:disabled { opacity: .4; cursor: default; }
   padding: 12px; border-radius: 10px; border: 1px solid var(--border);
   background: var(--panel-alt);
   cursor: pointer;
+  /* .cyber-results is a flex column with a capped height (constrained
+     further still on mobile) — without this, flexbox shrinks every card
+     below its own content's height to force them all to fit, instead of
+     just scrolling, and the overflow text bleeds into the next card. */
+  flex-shrink: 0;
 }
 .cyber-card:hover { border-color: var(--text-dim); }
 .cyber-card.active { border-color: var(--accent); background: rgba(79,140,255,.1); }
@@ -785,6 +843,32 @@ button:disabled { opacity: .4; cursor: default; }
 
 .cyber-info { flex: 1; overflow-y: auto; padding: 24px; min-width: 0; }
 .cyber-info-empty { font-size: 13.5px; color: var(--text-dim); }
+
+.cyber-sub-nav { display: flex; gap: 8px; margin-bottom: 14px; }
+.cyber-sub-tab {
+  padding: 7px 14px; border-radius: 999px; border: 1px solid var(--border);
+  background: var(--panel); color: var(--text-dim); font-size: 13px; cursor: pointer;
+}
+.cyber-sub-tab.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+.cyber-sim-root { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 18px; padding-bottom: 20px; }
+.cyber-sim-card { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 18px 20px; }
+.cyber-sim-title { margin: 0 0 8px; font-size: 17px; }
+.cyber-sim-desc { font-size: 13px; color: var(--text-dim); line-height: 1.5; margin: 0 0 14px; }
+.cyber-sim-input { width: 100%; max-width: 420px; padding: 9px 12px; font-size: 14px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.cyber-sim-meter-track { width: 100%; max-width: 420px; height: 8px; border-radius: 999px; background: var(--border); margin-top: 10px; overflow: hidden; }
+.cyber-sim-meter-fill { height: 100%; width: 0%; transition: width .15s, background .15s; }
+.cyber-sim-stats { margin-top: 10px; font-size: 13.5px; }
+.cyber-sim-hint { font-size: 12.5px; color: var(--text-dim); margin-top: 4px; }
+.cyber-sim-btn { margin-top: 12px; padding: 8px 14px; font-size: 13px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg); color: var(--text); cursor: pointer; }
+.cyber-sim-btn:hover { border-color: var(--accent); }
+
+.phish-email { background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 16px 18px; margin-top: 8px; font-size: 13.5px; line-height: 1.6; }
+.phish-field { margin-bottom: 4px; }
+.phish-body { margin-top: 10px; }
+.phish-clue { cursor: pointer; border-radius: 3px; padding: 0 1px; }
+.phish-clue:hover { background: rgba(248,113,113,0.18); }
+.phish-clue.found { background: rgba(52,211,153,0.28); text-decoration: underline wavy #34d399; cursor: default; }
 
 /* ---------- Particle Physics ---------- */
 /* The demos are a separate, self-contained static site (see

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Flocking</title>
+<title>Percolation</title>
 <style>
   :root{
     --bg: #090b11;
@@ -38,7 +38,7 @@
     border:1px solid var(--border); border-radius:14px; padding:16px 20px 18px;
     pointer-events:none;
   }
-  .demo-head a, .demo-head code{pointer-events:auto;}
+  .demo-head a, .demo-head button, .demo-head input, .demo-head code{pointer-events:auto;}
   .kicker{font-size:12px; letter-spacing:0.14em; text-transform:uppercase;
     color:var(--accent); font-weight:600; margin-bottom:12px;}
   .demo-head h1{font-size:clamp(22px,3.4vw,30px); line-height:1.1; margin:0 0 12px; letter-spacing:-0.02em;}
@@ -46,35 +46,58 @@
   .demo-head a{color:var(--accent); text-decoration:none;}
   .demo-head a:hover{text-decoration:underline;}
   .stage{position:fixed; top:0; left:0; right:0; bottom:0;}
-  .stage canvas{display:block; width:100%; height:100%; cursor:crosshair;}
+  .stage canvas{display:block; width:100%; height:100%; cursor:pointer;}
+  .controls{display:flex; align-items:center; gap:8px; margin-top:14px; font-size:12.5px; color:var(--text-dim);}
+  .controls input{width:140px;}
+  .status{margin-top:10px; font-size:13px; font-weight:600;}
+  .status.percolates{color:#34d399;}
+  .status.blocked{color:#f87171;}
+  button.regen{
+    margin-top:10px; padding:7px 12px; font-size:12.5px; border-radius:8px;
+    border:1px solid var(--border); background:var(--bg-elev); color:var(--text); cursor:pointer;
+  }
+  button.regen:hover{border-color:var(--accent);}
 </style>
 </head>
 <body>
 
 <div class="demo-head">
-  <div class="kicker">custom force · separation · alignment · cohesion</div>
-  <h1>Flocking</h1>
-  <p>Not from Observable &mdash; 150 boids steering by the three classic flocking rules,
-    written as a single custom force: steer away from close neighbors, match their
-    heading, and drift toward the group's center. The flock wraps around the screen
-    edges. Move your pointer in among them to scare the flock away.</p>
+  <div class="kicker">percolation theory · flood fill · critical threshold</div>
+  <h1>Percolation</h1>
+  <p>Each cell in the grid is independently open with probability <em>p</em>. A path
+    "percolates" if open cells connect all the way from the top row to the bottom —
+    exactly the model used for how liquid seeps through porous rock, or how a
+    disease/fire/electrical network spans a random medium. On an infinite square
+    lattice the odds flip from "almost never" to "almost always" astonishingly
+    fast right around <code>p &asymp; 0.593</code>, the critical threshold. Drag the
+    slider to feel that phase transition, or click/drag cells to toggle them by hand.</p>
+  <div class="controls">
+    <span>p</span>
+    <input type="range" id="p-slider" min="0" max="1" step="0.01" value="0.55">
+    <span id="p-value">0.55</span>
+  </div>
+  <div class="status" id="status"></div>
+  <button class="regen" id="regen-btn">Regenerate</button>
 </div>
 
 <div class="stage" id="stage"></div>
 
-<script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
 <script>
 const stage = document.getElementById("stage");
 const canvas = document.createElement("canvas");
 const context = canvas.getContext("2d");
 stage.appendChild(canvas);
 
-// This preview environment can occasionally report 0 (even window.innerWidth)
-// on the very first script tick, before the pane finishes laying out -- so
-// retry via requestAnimationFrame until a real, positive size shows up.
-// Initial boid positions are seeded from width/height below, so this must
-// resolve before anything else runs.
-let width, height;
+const CELL = 14;
+let width, height, cols, rows;
+let open, wet; // open[row][col]: boolean; wet[row][col]: reachable from the top through open cells
+let p = 0.55;
+
+const pSlider = document.getElementById("p-slider");
+const pValue = document.getElementById("p-value");
+const statusEl = document.getElementById("status");
+const regenBtn = document.getElementById("regen-btn");
+
 function start() {
   width = stage.clientWidth;
   height = stage.clientHeight;
@@ -87,6 +110,10 @@ function start() {
   canvas.style.height = height + "px";
   context.setTransform(dpr, 0, 0, dpr, 0, 0);
 
+  cols = Math.floor(width / CELL);
+  rows = Math.floor(height / CELL);
+  regenerate();
+
   window.addEventListener("resize", () => {
     width = stage.clientWidth;
     height = stage.clientHeight;
@@ -95,107 +122,100 @@ function start() {
     canvas.style.width = width + "px";
     canvas.style.height = height + "px";
     context.setTransform(dpr, 0, 0, dpr, 0, 0);
+    cols = Math.floor(width / CELL);
+    rows = Math.floor(height / CELL);
+    regenerate();
   });
-
-  const N = 150;
-  const MAX_SPEED = 2.2;
-  const nodes = Array.from({ length: N }, (_, i) => {
-    const angle = Math.random() * Math.PI * 2;
-    return {
-      hue: 190 + (i / N) * 130,
-      x: Math.random() * width,
-      y: Math.random() * height,
-      vx: Math.cos(angle) * MAX_SPEED * 0.5,
-      vy: Math.sin(angle) * MAX_SPEED * 0.5
-    };
-  });
-
-  const pointer = { x: -9999, y: -9999, active: false };
-  canvas.addEventListener("mousemove", (event) => {
-    const rect = canvas.getBoundingClientRect();
-    pointer.x = event.clientX - rect.left;
-    pointer.y = event.clientY - rect.top;
-    pointer.active = true;
-  });
-  canvas.addEventListener("mouseleave", () => { pointer.active = false; });
-
-  // Custom force implementing the three classic boid rules, plus fleeing
-  // the pointer. O(n^2) neighbor search -- fine at this node count.
-  const NEIGHBOR_R = 160, SEP_R = 30;
-  function forceFlock() {
-    let list;
-    function force(alpha) {
-      for (const a of list) {
-        let sepX = 0, sepY = 0, alignX = 0, alignY = 0, cohX = 0, cohY = 0, count = 0;
-        for (const b of list) {
-          if (a === b) continue;
-          const dx = b.x - a.x, dy = b.y - a.y;
-          const dist = Math.hypot(dx, dy) || 0.001;
-          if (dist < NEIGHBOR_R) {
-            count++;
-            alignX += b.vx; alignY += b.vy;
-            cohX += b.x; cohY += b.y;
-            if (dist < SEP_R) { sepX -= dx / dist; sepY -= dy / dist; }
-          }
-        }
-        if (count > 0) {
-          a.vx += (sepX * 1.1 + (alignX / count - a.vx) * 0.2 + (cohX / count - a.x) * 0.03) * alpha * 2;
-          a.vy += (sepY * 1.1 + (alignY / count - a.vy) * 0.2 + (cohY / count - a.y) * 0.03) * alpha * 2;
-        }
-        if (pointer.active) {
-          const dx = a.x - pointer.x, dy = a.y - pointer.y;
-          const dist = Math.hypot(dx, dy) || 0.001;
-          if (dist < 120) { a.vx += (dx / dist) * 1.5 * alpha; a.vy += (dy / dist) * 1.5 * alpha; }
-        }
-      }
-    }
-    force.initialize = (_nodes) => { list = _nodes; };
-    return force;
-  }
-
-  const simulation = d3.forceSimulation(nodes)
-      .force("flock", forceFlock())
-      .velocityDecay(0)
-      .alphaDecay(0) // perpetual motion -- this is a physical toy, not a settle-once layout
-      .on("tick", ticked);
-
-  function ticked() {
-    for (const d of nodes) {
-      const speed = Math.hypot(d.vx, d.vy) || 0.001;
-      const min = MAX_SPEED * 0.6;
-      if (speed > MAX_SPEED) { d.vx = (d.vx / speed) * MAX_SPEED; d.vy = (d.vy / speed) * MAX_SPEED; }
-      else if (speed < min) { d.vx = (d.vx / speed) * min; d.vy = (d.vy / speed) * min; }
-      // Wrap around the edges, boids-style, instead of bouncing off walls.
-      if (d.x < 0) d.x += width; else if (d.x > width) d.x -= width;
-      if (d.y < 0) d.y += height; else if (d.y > height) d.y -= height;
-    }
-    draw();
-  }
-
-  function draw() {
-    context.clearRect(0, 0, width, height);
-    for (const d of nodes) {
-      const heading = Math.atan2(d.vy, d.vx);
-      const s = 5;
-      context.save();
-      context.translate(d.x, d.y);
-      context.rotate(heading);
-      context.beginPath();
-      context.moveTo(s, 0);
-      context.lineTo(-s * 0.7, s * 0.55);
-      context.lineTo(-s * 0.7, -s * 0.55);
-      context.closePath();
-      const color = `hsl(${d.hue}, 85%, 68%)`;
-      context.fillStyle = color;
-      context.shadowColor = color;
-      context.shadowBlur = 4;
-      context.fill();
-      context.restore();
-    }
-    context.shadowBlur = 0;
-  }
 }
 start();
+
+function regenerate() {
+  open = Array.from({ length: rows }, () => Array.from({ length: cols }, () => Math.random() < p));
+  floodFill();
+  draw();
+}
+
+// BFS from every open cell in row 0 -- `wet` marks every cell reachable
+// from the top through a chain of open, 4-connected neighbors. If any wet
+// cell shows up in the last row, the grid percolates.
+function floodFill() {
+  wet = Array.from({ length: rows }, () => new Array(cols).fill(false));
+  const queue = [];
+  for (let c = 0; c < cols; c++) {
+    if (open[0][c]) { wet[0][c] = true; queue.push([0, c]); }
+  }
+  let head = 0;
+  while (head < queue.length) {
+    const [r, c] = queue[head++];
+    for (const [dr, dc] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const nr = r + dr, nc = c + dc;
+      if (nr < 0 || nr >= rows || nc < 0 || nc >= cols) continue;
+      if (!open[nr][nc] || wet[nr][nc]) continue;
+      wet[nr][nc] = true;
+      queue.push([nr, nc]);
+    }
+  }
+}
+
+function percolates() {
+  return wet[rows - 1]?.some(Boolean);
+}
+
+function draw() {
+  context.clearRect(0, 0, width, height);
+  const percolatesNow = percolates();
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      if (!open[r][c]) {
+        context.fillStyle = "rgba(148,163,184,0.08)";
+      } else if (wet[r][c]) {
+        context.fillStyle = percolatesNow ? "rgba(52,211,153,0.9)" : "rgba(125,211,252,0.75)";
+      } else {
+        context.fillStyle = "rgba(125,211,252,0.28)";
+      }
+      context.fillRect(c * CELL + 1, r * CELL + 1, CELL - 2, CELL - 2);
+    }
+  }
+  statusEl.textContent = percolatesNow ? "Percolates — connected top to bottom" : "Blocked — no path through";
+  statusEl.className = "status " + (percolatesNow ? "percolates" : "blocked");
+}
+
+pSlider.addEventListener("input", () => {
+  p = Number(pSlider.value);
+  pValue.textContent = p.toFixed(2);
+  regenerate();
+});
+regenBtn.addEventListener("click", regenerate);
+
+// Click, or click-and-drag, to toggle cells by hand and watch the
+// connectivity update live.
+let dragging = false, dragValue = null;
+function cellAt(clientX, clientY) {
+  const rect = canvas.getBoundingClientRect();
+  const c = Math.floor((clientX - rect.left) / CELL);
+  const r = Math.floor((clientY - rect.top) / CELL);
+  if (r < 0 || r >= rows || c < 0 || c >= cols) return null;
+  return [r, c];
+}
+function toggleAt(clientX, clientY, forceValue) {
+  const cell = cellAt(clientX, clientY);
+  if (!cell) return;
+  const [r, c] = cell;
+  open[r][c] = forceValue ?? !open[r][c];
+  floodFill();
+  draw();
+}
+canvas.addEventListener("pointerdown", (e) => {
+  dragging = true;
+  const cell = cellAt(e.clientX, e.clientY);
+  if (cell) dragValue = !open[cell[0]][cell[1]];
+  toggleAt(e.clientX, e.clientY, dragValue);
+});
+canvas.addEventListener("pointermove", (e) => {
+  if (!dragging) return;
+  toggleAt(e.clientX, e.clientY, dragValue);
+});
+window.addEventListener("pointerup", () => { dragging = false; });
 </script>
 </body>
 </html>

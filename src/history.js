@@ -100,7 +100,7 @@ export class HistoryMode {
     const activeChallenge = this.activeChallengeId ? HISTORY_CHALLENGES.find((c) => c.id === this.activeChallengeId) : null;
     if (activeChallenge && activeChallenge.categoryKey === this.categoryKey) {
       const banner = div("history-challenge-banner");
-      banner.textContent = `🎯 ${activeChallenge.hint}`;
+      banner.textContent = activeChallenge.hint;
       header.appendChild(banner);
     }
 

@@ -197,6 +197,17 @@ export class AstronomyMode {
     };
     window.addEventListener("keydown", this._onSpaceDown);
 
+    // F focuses/follows the selected planet — same visibility/text-field
+    // guards as Space above.
+    this._onFocusKeyDown = (e) => {
+      if (e.code !== "KeyF" || this.ctx.state?.mode !== "astronomy") return;
+      const tag = document.activeElement?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      e.preventDefault();
+      this._focusSelected();
+    };
+    window.addEventListener("keydown", this._onFocusKeyDown);
+
     this.scene.add(new THREE.AmbientLight(0xffffff, 0.5));
     const sunLight = new THREE.PointLight(0xffffff, 2.2, 0, 0.15);
     this.scene.add(sunLight);
@@ -472,6 +483,31 @@ export class AstronomyMode {
     this.infoCard = div("chem-info-card");
     this.infoPanel.appendChild(this.infoCard);
     this._refreshInfoNumbers();
+
+    const focusBtn = document.createElement("button");
+    focusBtn.className = "astro-focus-btn";
+    focusBtn.textContent = "Focus (F)";
+    focusBtn.title = "Center the view on this planet and follow it as it orbits";
+    focusBtn.addEventListener("click", () => this._focusSelected());
+    this.infoPanel.appendChild(focusBtn);
+  }
+
+  // Re-centers the orbit controls' target on the selected planet and pulls
+  // the camera to a sensible framing distance along whatever direction it
+  // was already looking from — then keeps re-centering every frame in
+  // _animate() so the view actually follows the planet as it orbits,
+  // instead of just snapping to where it was the instant you pressed F.
+  _focusSelected() {
+    if (!this.selectedPlanet) return;
+    const mesh = this.planetMeshes[this.selectedPlanet.name];
+    if (!mesh) return;
+    const size = mesh.userData.size || 1;
+    let offset = this.camera.position.clone().sub(this.controls.target);
+    if (offset.lengthSq() < 1e-6) offset = new THREE.Vector3(0, size * 3, size * 8);
+    offset.setLength(Math.max(size * 8, 4));
+    this.controls.target.copy(mesh.position);
+    this.camera.position.copy(mesh.position).add(offset);
+    this._followingPlanet = this.selectedPlanet.name;
   }
 
   _refreshInfoNumbers() {
@@ -520,6 +556,14 @@ export class AstronomyMode {
       if (this.dateInput) this.dateInput.value = toLocalInputValue(this.date);
       this._updatePositions();
       this._syncTimeSlider();
+    }
+    if (this._followingPlanet && this.selectedPlanet?.name === this._followingPlanet) {
+      const mesh = this.planetMeshes[this._followingPlanet];
+      if (mesh) {
+        const delta = mesh.position.clone().sub(this.controls.target);
+        this.controls.target.copy(mesh.position);
+        this.camera.position.add(delta);
+      }
     }
     this.controls.update();
     this.renderer.render(this.scene, this.camera);

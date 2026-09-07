@@ -1,6 +1,7 @@
 import { MATERIAL_LIST, materialOf } from "./materials.js";
 import { OBJECT_DEFS } from "./objectTypes.js";
 import { physicsMath } from "./physicsEdu.js";
+import { distanceUnitScale, distanceUnitSuffix, weightUnitScale, weightUnitSuffix } from "./units.js";
 
 const ROTATABLE = new Set(["board", "triangle", "cannon", "button", "springPad", "fan", "lens", "lightSource", "mirror", "portal"]);
 
@@ -31,10 +32,16 @@ export function renderPanel(container, spec, state, handlers) {
 
   const set = (patch) => handlers.onChange(spec.id, patch);
 
+  // Read once per render — switching units (see the topbar toggle) just
+  // re-renders whatever panel is showing, so this always reflects the
+  // current choice without the fields needing to watch it themselves.
+  const distScale = distanceUnitScale(), distUnit = distanceUnitSuffix();
+  const weightScale = weightUnitScale(), weightUnit = weightUnitSuffix();
+
   // position
   container.appendChild(fieldRow([
-    numberField("X", spec.x, (v) => set({ x: v })),
-    numberField("Y", spec.y, (v) => set({ y: v })),
+    numberField("X", spec.x, (v) => set({ x: v }), -4000, 4000, 1, distScale, distUnit),
+    numberField("Y", spec.y, (v) => set({ y: v }), -4000, 4000, 1, distScale, distUnit),
   ]));
 
   if (ROTATABLE.has(spec.type)) {
@@ -44,19 +51,22 @@ export function renderPanel(container, spec, state, handlers) {
   const fields = def.fields || [];
 
   if (fields.includes("radius")) {
-    container.appendChild(sliderField("Radius", spec.radius, 6, 90, 1, (v) => set({ radius: v })));
-  }
-  if (fields.includes("size")) {
-    container.appendChild(sliderField("Size", spec.size ?? 130, 30, 400, 5, (v) => set({ size: v })));
+    container.appendChild(sliderField("Radius", spec.radius, 6, 90, 1, (v) => set({ radius: v }), null, distScale, distUnit));
   }
   if (fields.includes("width") || fields.includes("height")) {
     container.appendChild(fieldRow([
-      fields.includes("width") ? sliderField("Width", spec.width, 10, 600, 5, (v) => set({ width: v })) : null,
-      fields.includes("height") ? sliderField("Height", spec.height, 10, 400, 5, (v) => set({ height: v })) : null,
+      fields.includes("width") ? sliderField("Width", spec.width, 10, 600, 5, (v) => set({ width: v }), null, distScale, distUnit) : null,
+      fields.includes("height") ? sliderField("Height", spec.height, 10, 400, 5, (v) => set({ height: v }), null, distScale, distUnit) : null,
     ].filter(Boolean)));
   }
   if (fields.includes("material")) {
     container.appendChild(materialField(spec.material, (v) => set({ material: v })));
+    // Weight is just density with a friendlier name — mass = density × area,
+    // so at a fixed size this is exactly the knob that changes how much
+    // force it takes to move or stop the object. Overrides the material's
+    // own density until a different value is dragged in here again.
+    const mat = materialOf(spec.material);
+    container.appendChild(sliderField("Weight", spec.densityOverride ?? mat.density, 0.05, 15, 0.05, (v) => set({ densityOverride: v }), null, weightScale, weightUnit));
   }
   if (fields.includes("fixed")) {
     container.appendChild(checkboxField("Fixed (ignores gravity/forces)", spec.fixed, (v) => set({ fixed: v })));
@@ -97,7 +107,7 @@ export function renderPanel(container, spec, state, handlers) {
     container.appendChild(helpText("Anything that enters this portal comes out the linked one, and vice versa — you only need to set the link on one of the pair. Rotate a portal to aim which way things exit it."));
   }
   if (fields.includes("length")) {
-    container.appendChild(sliderField("Length", spec.length, 60, 800, 10, (v) => set({ length: v })));
+    container.appendChild(sliderField("Length", spec.length, 60, 800, 10, (v) => set({ length: v }), null, distScale, distUnit));
   }
   if (fields.includes("thickness")) {
     container.appendChild(sliderField("Thickness", spec.thickness, 3, 30, 1, (v) => set({ thickness: v })));
@@ -231,18 +241,20 @@ function fieldRow(fields) {
   return row;
 }
 
-function numberField(label, value, onChange, min = -4000, max = 4000, step = 1) {
+// `unitScale` (raw units per 1 displayed unit — see units.js) and `unitSuffix`
+// (e.g. "m") are optional — omitted, a field behaves exactly as before.
+function numberField(label, value, onChange, min = -4000, max = 4000, step = 1, unitScale = 1, unitSuffix = "") {
   const wrap = document.createElement("div");
   wrap.className = "field";
   const l = document.createElement("label");
-  l.textContent = label;
+  l.textContent = unitSuffix ? `${label} (${unitSuffix})` : label;
   const input = document.createElement("input");
   input.type = "number";
-  input.value = Math.round(value * 100) / 100;
-  input.step = step;
-  input.min = min;
-  input.max = max;
-  input.addEventListener("change", () => onChange(parseFloat(input.value) || 0));
+  input.value = Math.round((value / unitScale) * 100) / 100;
+  input.step = step / unitScale;
+  input.min = min / unitScale;
+  input.max = max / unitScale;
+  input.addEventListener("change", () => onChange((parseFloat(input.value) || 0) * unitScale));
   wrap.appendChild(l);
   wrap.appendChild(input);
   return wrap;
@@ -253,12 +265,16 @@ function numberField(label, value, onChange, min = -4000, max = 4000, step = 1) 
 // panel that depends on this value (e.g. "Convex"/"Concave" text), since
 // patchObject deliberately doesn't re-render the whole panel on every
 // slider tick (that would interrupt an in-progress drag).
-function sliderField(label, value, min, max, step, onChange, onLiveChange) {
+// `unitScale`/`unitSuffix` work like numberField's: the slider itself still
+// drags in raw units (so existing min/max/step tuning is untouched), but the
+// live readout next to the label shows the converted, human-scale number.
+function sliderField(label, value, min, max, step, onChange, onLiveChange, unitScale = 1, unitSuffix = "") {
   const wrap = document.createElement("div");
   wrap.className = "field";
   const l = document.createElement("label");
   const valSpan = document.createElement("span");
-  valSpan.textContent = Math.round(value * 10) / 10;
+  const format = (raw) => Math.round((raw / unitScale) * 10) / 10 + (unitSuffix ? ` ${unitSuffix}` : "");
+  valSpan.textContent = format(value);
   l.textContent = label + " ";
   l.appendChild(valSpan);
   const input = document.createElement("input");
@@ -266,7 +282,7 @@ function sliderField(label, value, min, max, step, onChange, onLiveChange) {
   input.min = min; input.max = max; input.step = step;
   input.value = value;
   input.addEventListener("input", () => {
-    valSpan.textContent = input.value;
+    valSpan.textContent = format(input.value);
     const v = parseFloat(input.value);
     onChange(v);
     onLiveChange?.(v);

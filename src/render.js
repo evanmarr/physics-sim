@@ -160,6 +160,12 @@ export class Renderer {
         this.handlers.onSelect(null);
       }
     });
+    svg.on("dblclick", (event) => {
+      if (event.target !== svg.node() && !event.target.classList?.contains("grid-bg")) return;
+      const [sx, sy] = d3.pointer(event, svg.node());
+      const [wx, wy] = this.zoomTransform.invert([sx, sy]);
+      this.handlers.onEmptyDblClick?.(wx, wy, event.clientX, event.clientY);
+    });
 
     this.zoom = d3.zoom()
       .scaleExtent([0.25, 2.5])
@@ -431,9 +437,13 @@ export class Renderer {
         event.stopPropagation();
         this.handlers.onSelect(d.id, event.shiftKey);
       });
+      merged.on("dblclick", (event, d) => {
+        event.stopPropagation();
+        this.handlers.onObjectDblClick?.(d.id, event.clientX, event.clientY);
+      });
       this.objectLayer.selectAll(".rope-end-handle").call(this._ropeEndDragBehavior());
     } else {
-      merged.on(".drag", null).on("click", null);
+      merged.on(".drag", null).on("click", null).on("dblclick", null);
       this.objectLayer.selectAll(".rope-end-handle").on(".drag", null);
     }
   }
@@ -591,7 +601,7 @@ function speedColor(speed) {
 function handleDistance(d) {
   if (d.type === "board" || d.type === "button" || d.type === "springPad" || d.type === "fan" || d.type === "lens" || d.type === "mirror") return d.height / 2 + 26;
   if (d.type === "lightSource") return 40;
-  if (d.type === "triangle") return ((d.size ?? 130) * Math.sqrt(3)) / 3 + 26;
+  if (d.type === "triangle") return (2 * (d.height ?? ((d.size ?? 130) * Math.sqrt(3)) / 2)) / 3 + 26;
   if (d.type === "cannon") return d.height / 2 + 26;
   return 40;
 }
@@ -709,8 +719,8 @@ function buildShape(g, d) {
     case "portal": {
       g.append("circle").attr("class", "portal-ring");
       g.append("path").attr("class", "portal-spiral");
-      // Points toward this portal's own rotation — the direction anything
-      // exiting it gets launched.
+      // Points toward the ring, in this portal's own rotation — the
+      // direction anything entering it travels.
       g.append("polygon").attr("class", "portal-arrow");
       break;
     }
@@ -767,7 +777,7 @@ function updateShape(g, d, editable) {
       break;
     }
     case "triangle": {
-      const pts = equilateralPoints(d.size).map((p) => `${p.x},${p.y}`).join(" ");
+      const pts = trianglePoints(d.width ?? d.size ?? 130, d.height).map((p) => `${p.x},${p.y}`).join(" ");
       g.select(".shape").attr("points", pts);
       break;
     }
@@ -869,10 +879,11 @@ function updateShape(g, d, editable) {
         spiral.lineTo(Math.cos(angle) * rad, Math.sin(angle) * rad);
       }
       g.select(".portal-spiral").attr("d", spiral.toString());
-      // Points "up" in local space — the group's own rotate() transform
-      // (applied one level up, from d.rotation) carries it to wherever the
-      // portal is actually facing.
-      g.select(".portal-arrow").attr("points", `0,${-r - 12} 7,${-r + 4} -7,${-r + 4}`);
+      // Points "down" (toward the ring) in local space — the group's own
+      // rotate() transform (applied one level up, from d.rotation) carries
+      // it to wherever the portal is actually facing. The tip sits nearest
+      // the ring so the arrow reads as "this way in," not "this way out".
+      g.select(".portal-arrow").attr("points", `0,${-r + 4} 7,${-r - 12} -7,${-r - 12}`);
       break;
     }
   }
@@ -899,12 +910,19 @@ function updateShape(g, d, editable) {
   }
 }
 
-// Equilateral triangle (all sides = size), centroid at the origin, apex up.
-export function equilateralPoints(size = 130) {
-  const h = (size * Math.sqrt(3)) / 2;
+// Isosceles triangle (base = width, apex height = height), centroid at the
+// origin, apex up. The centroid always sits 1/3 of the way up from the base
+// and 2/3 down from the apex, regardless of the base/height ratio.
+export function trianglePoints(width = 130, height) {
+  const h = height ?? (width * Math.sqrt(3)) / 2; // default: equilateral
   return [
     { x: 0, y: (-2 * h) / 3 },
-    { x: size / 2, y: h / 3 },
-    { x: -size / 2, y: h / 3 },
+    { x: width / 2, y: h / 3 },
+    { x: -width / 2, y: h / 3 },
   ];
+}
+
+// Equilateral triangle (all sides = size) — used for the glass-shard marker.
+export function equilateralPoints(size = 130) {
+  return trianglePoints(size, (size * Math.sqrt(3)) / 2);
 }
