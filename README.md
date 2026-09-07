@@ -48,9 +48,10 @@ simulation — stopping reverts to your blueprint, nothing is lost.
 (continuous wind), Cannon (catch-and-refire), Spring Pad (one-shot launch),
 Bomb, Button, Magnet, Rope, Wire (button↔bomb/cannon link, can't be
 collided with), Lens & Light Source & Mirror (real ray-traced Light Mode),
-Track (a ball bearing that shuttles back and forth), and Motor (spins at a
-set RPM). Materials (Wood, Metal, Rubber, Ice, Glass, Water) carry real
-relative density, friction, and restitution.
+and Portal (teleports anything that touches it to its linked partner, exit
+velocity rotated to match the exit portal's facing). Materials (Wood, Metal,
+Rubber, Ice, Glass, Water) carry real relative density, friction, and
+restitution.
 
 Open **Challenges** for preset puzzles, each tagged with the concept it
 teaches and verified solvable by direct simulation. Completing one earns

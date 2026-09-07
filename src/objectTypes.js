@@ -26,8 +26,8 @@ export const OBJECT_DEFS = {
     label: "Board",
     icon: "▭",
     category: "core",
-    defaultSpec: () => ({ type: "board", x: 0, y: 0, rotation: 0, width: 200, height: 30, material: "wood", fixed: true }),
-    fields: ["width", "height", "material", "fixed"],
+    defaultSpec: () => ({ type: "board", x: 0, y: 0, rotation: 0, width: 200, height: 30, material: "wood", fixed: true, blocksMagnetism: false }),
+    fields: ["width", "height", "material", "fixed", "blocksMagnetism"],
   },
   triangle: {
     label: "Triangle",
@@ -35,8 +35,8 @@ export const OBJECT_DEFS = {
     category: "core",
     // Always equilateral (all three sides equal length `size`) — simpler to
     // reason about than independent width/height for a ramp/wedge shape.
-    defaultSpec: () => ({ type: "triangle", x: 0, y: 0, rotation: 0, size: 130, material: "wood", fixed: true }),
-    fields: ["size", "material", "fixed"],
+    defaultSpec: () => ({ type: "triangle", x: 0, y: 0, rotation: 0, size: 130, material: "wood", fixed: true, blocksMagnetism: false }),
+    fields: ["size", "material", "fixed", "blocksMagnetism"],
   },
   ballBearing: {
     label: "Ball Bearing",
@@ -108,6 +108,22 @@ export const OBJECT_DEFS = {
     defaultSpec: () => ({ type: "magnet", x: 0, y: 0, rotation: 0, radius: 20, material: "metal", power: 20, range: 350 }),
     fields: ["power", "range"],
   },
+  portal: {
+    label: "Portal",
+    icon: "🌀",
+    category: "core",
+    // Always built/edited in linked pairs — entering either one teleports
+    // you out the other, exit velocity rotated to match the *exit*
+    // portal's own facing (rotation), so the direction you come out
+    // depends on how that portal is oriented, not just how fast you went in.
+    // Material stays fixed at "metal" (never user-facing — see fields
+    // below) purely to avoid "glass," since a portal's own rendering is
+    // entirely custom CSS, not material-driven, but its material still
+    // feeds physics.js's material-based rules — "glass" would make it
+    // breakable, which a portal should never be.
+    defaultSpec: () => ({ type: "portal", x: 0, y: 0, rotation: 0, radius: 26, material: "metal", linkedId: null }),
+    fields: ["linkedId"],
+  },
   rope: {
     label: "Rope",
     icon: "🪢",
@@ -160,33 +176,6 @@ export const OBJECT_DEFS = {
     // obstacle the rest of the time, like a thin board.
     defaultSpec: () => ({ type: "mirror", x: 0, y: 0, rotation: 0, width: 120, height: 10, material: "metal", fixed: true }),
     fields: ["width", "material", "fixed"],
-  },
-  track: {
-    label: "Track",
-    icon: "🛤️",
-    category: "core",
-    // Looks like a taut string with a ball bearing resting at its
-    // midpoint — press Play and the bearing shuttles back and forth along
-    // it at Speed, either forever (Cycles = 0) or stopping after that many
-    // round trips. Two independent draggable ends, same model as rope.
-    // Material stays fixed (used only for the rail/bearing's color) rather
-    // than an editable field: the riding ball bearing is a kinematic body
-    // moved by explicit position scripting, not physics forces — its
-    // restitution is hardcoded and its friction is never read from
-    // material at all, so a material picker here would change color only,
-    // not behavior.
-    defaultSpec: () => ({ type: "track", x: 0, y: 0, x2: 0, y2: 200, speed: 200, cycles: 0, material: "metal" }),
-    fields: ["speed", "cycles"],
-  },
-  motor: {
-    label: "Motor",
-    icon: "🌀",
-    category: "core",
-    // Spins continuously at a fixed RPM the instant you press Play — a
-    // scripted rotation (like the cannon barrel's procedural angle), not
-    // something driven by torque/forces.
-    defaultSpec: () => ({ type: "motor", x: 0, y: 0, rotation: 0, radius: 24, material: "metal", rpm: 60 }),
-    fields: ["radius", "rpm", "material"],
   },
 };
 

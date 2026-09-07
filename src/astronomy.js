@@ -343,12 +343,30 @@ export class AstronomyMode {
     const rect = this.renderer.domElement.getBoundingClientRect();
     const mouse = new THREE.Vector2(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1);
     const raycaster = new THREE.Raycaster();
+    // A real-scale Mercury (or any dwarf planet) can be just a few pixels
+    // across at any sensible zoom, which makes clicking the body itself
+    // unreliable — a generous line-hit threshold plus falling back to each
+    // planet's own orbit ring means you can always click *somewhere* on its
+    // path to select it, not just the tiny dot.
+    raycaster.params.Line = { threshold: 6 };
     raycaster.setFromCamera(mouse, this.camera);
-    const hits = raycaster.intersectObjects(Object.values(this.planetMeshes));
-    if (hits.length) {
-      this.selectedPlanet = hits[0].object.userData.planet;
+    const planetHits = raycaster.intersectObjects(Object.values(this.planetMeshes));
+    if (planetHits.length) {
+      this.selectedPlanet = planetHits[0].object.userData.planet;
       this._buildInfo();
       this._updateSelectionRing();
+      return;
+    }
+    const orbitEntries = Object.entries(this.orbitLines);
+    const orbitHits = raycaster.intersectObjects(orbitEntries.map(([, line]) => line));
+    if (orbitHits.length) {
+      const name = orbitEntries.find(([, line]) => line === orbitHits[0].object)?.[0];
+      const planet = [...PLANETS, ...DWARF_PLANETS].find((p) => p.name === name);
+      if (planet) {
+        this.selectedPlanet = planet;
+        this._buildInfo();
+        this._updateSelectionRing();
+      }
     }
   }
 

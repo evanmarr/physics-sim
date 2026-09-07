@@ -191,8 +191,14 @@ const simulation = d3.forceSimulation(nodes)
     .alphaTarget(0.08)
     .on("tick", draw);
 
+function bgFade(alpha) {
+  const hex = getComputedStyle(document.documentElement).getPropertyValue("--bg").trim().replace("#", "");
+  const r = parseInt(hex.slice(0, 2), 16), g = parseInt(hex.slice(2, 4), 16), b = parseInt(hex.slice(4, 6), 16);
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
 function draw() {
-  context.fillStyle = "rgba(9,11,17,0.28)";
+  context.fillStyle = bgFade(0.28);
   context.fillRect(0, 0, width, height);
 
   for (const d of nodes) {

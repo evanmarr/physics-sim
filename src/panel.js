@@ -2,7 +2,7 @@ import { MATERIAL_LIST, materialOf } from "./materials.js";
 import { OBJECT_DEFS } from "./objectTypes.js";
 import { physicsMath } from "./physicsEdu.js";
 
-const ROTATABLE = new Set(["board", "triangle", "cannon", "button", "springPad", "fan", "lens", "lightSource", "mirror", "motor"]);
+const ROTATABLE = new Set(["board", "triangle", "cannon", "button", "springPad", "fan", "lens", "lightSource", "mirror", "portal"]);
 
 export function renderPanel(container, spec, state, handlers) {
   container.innerHTML = "";
@@ -61,6 +61,10 @@ export function renderPanel(container, spec, state, handlers) {
   if (fields.includes("fixed")) {
     container.appendChild(checkboxField("Fixed (ignores gravity/forces)", spec.fixed, (v) => set({ fixed: v })));
   }
+  if (fields.includes("blocksMagnetism")) {
+    container.appendChild(checkboxField("Blocks magnetism", spec.blocksMagnetism, (v) => set({ blocksMagnetism: v })));
+    container.appendChild(helpText("Shields anything behind it from every magnet's pull/push — a real magnetic shield works the same way, by redirecting field lines through itself."));
+  }
   if (fields.includes("startRotation")) {
     container.appendChild(sliderField("Rest Angle°", spec.startRotation, -180, 180, 1, (v) => set({ startRotation: v })));
   }
@@ -70,9 +74,13 @@ export function renderPanel(container, spec, state, handlers) {
   if (fields.includes("power")) {
     const powerLabel = { bomb: "Blast Power", fan: "Wind Force", magnet: "Magnet Force" }[spec.type] || "Launch Power";
     const [min, max] = spec.type === "magnet" ? [-50, 50] : [4, 50];
-    container.appendChild(sliderField(powerLabel, spec.power, min, max, 1, (v) => set({ power: v })));
     if (spec.type === "magnet") {
-      container.appendChild(helpText(spec.power >= 0 ? "Positive force attracts metal objects." : "Negative force repels metal objects."));
+      const magnetText = (v) => (v >= 0 ? "Positive force attracts metal objects." : "Negative force repels metal objects.");
+      const magnetHelp = helpText(magnetText(spec.power));
+      container.appendChild(sliderField(powerLabel, spec.power, min, max, 1, (v) => set({ power: v }), (v) => { magnetHelp.textContent = magnetText(v); }));
+      container.appendChild(magnetHelp);
+    } else {
+      container.appendChild(sliderField(powerLabel, spec.power, min, max, 1, (v) => set({ power: v })));
     }
   }
   if (fields.includes("radiusOfEffect")) {
@@ -83,6 +91,10 @@ export function renderPanel(container, spec, state, handlers) {
   }
   if (fields.includes("targetId")) {
     container.appendChild(targetField(spec, state, (v) => set({ targetId: v })));
+  }
+  if (fields.includes("linkedId")) {
+    container.appendChild(portalLinkField(spec, state, (v) => set({ linkedId: v })));
+    container.appendChild(helpText("Anything that enters this portal comes out the linked one, and vice versa — you only need to set the link on one of the pair. Rotate a portal to aim which way things exit it."));
   }
   if (fields.includes("length")) {
     container.appendChild(sliderField("Length", spec.length, 60, 800, 10, (v) => set({ length: v })));
@@ -102,25 +114,16 @@ export function renderPanel(container, spec, state, handlers) {
     container.appendChild(helpText("Pins that end to the chosen object's center — leave as (none) to have it hang or auto-anchor to whatever it's dropped on."));
   }
   if (fields.includes("curvature")) {
-    container.appendChild(sliderField("Curvature", spec.curvature, -1, 1, 0.05, (v) => set({ curvature: v })));
-    container.appendChild(helpText(spec.curvature >= 0 ? "Convex — bends light rays inward to a focus (converging)." : "Concave — spreads light rays outward (diverging)."));
+    const curvatureText = (v) => (v >= 0 ? "Convex — bends light rays inward to a focus (converging)." : "Concave — spreads light rays outward (diverging).");
+    const curvatureHelp = helpText(curvatureText(spec.curvature));
+    container.appendChild(sliderField("Curvature", spec.curvature, -1, 1, 0.05, (v) => set({ curvature: v }), (v) => { curvatureHelp.textContent = curvatureText(v); }));
+    container.appendChild(curvatureHelp);
   }
   if (fields.includes("beamWidth")) {
     container.appendChild(sliderField("Beam Width", spec.beamWidth, 20, 400, 10, (v) => set({ beamWidth: v })));
   }
   if (fields.includes("rayCount")) {
     container.appendChild(sliderField("Ray Count", spec.rayCount, 1, 25, 1, (v) => set({ rayCount: v })));
-  }
-  if (fields.includes("rpm")) {
-    container.appendChild(sliderField("RPM", spec.rpm ?? 60, 1, 300, 1, (v) => set({ rpm: v })));
-    container.appendChild(helpText("Spins continuously at this speed the moment you press Play."));
-  }
-  if (fields.includes("speed")) {
-    container.appendChild(sliderField("Speed", spec.speed ?? 200, 20, 800, 10, (v) => set({ speed: v })));
-  }
-  if (fields.includes("cycles")) {
-    container.appendChild(sliderField("Cycles", spec.cycles ?? 0, 0, 30, 1, (v) => set({ cycles: v })));
-    container.appendChild(helpText("0 = shuttles back and forth forever. Otherwise it stops after this many round trips."));
   }
 
   const mathLines = physicsMath(spec);
@@ -245,7 +248,12 @@ function numberField(label, value, onChange, min = -4000, max = 4000, step = 1) 
   return wrap;
 }
 
-function sliderField(label, value, min, max, step, onChange) {
+// onLiveChange (optional) fires synchronously on every drag tick, same as
+// the value label does — for a help/description line elsewhere in the
+// panel that depends on this value (e.g. "Convex"/"Concave" text), since
+// patchObject deliberately doesn't re-render the whole panel on every
+// slider tick (that would interrupt an in-progress drag).
+function sliderField(label, value, min, max, step, onChange, onLiveChange) {
   const wrap = document.createElement("div");
   wrap.className = "field";
   const l = document.createElement("label");
@@ -259,7 +267,9 @@ function sliderField(label, value, min, max, step, onChange) {
   input.value = value;
   input.addEventListener("input", () => {
     valSpan.textContent = input.value;
-    onChange(parseFloat(input.value));
+    const v = parseFloat(input.value);
+    onChange(v);
+    onLiveChange?.(v);
   });
   wrap.appendChild(l);
   wrap.appendChild(input);
@@ -353,6 +363,30 @@ function targetField(spec, state, onChange) {
       opt.value = o.id;
       opt.textContent = `${OBJECT_DEFS[o.type].label} (${o.id.split("_")[1]})`;
       if (spec.targetId === o.id) opt.selected = true;
+      select.appendChild(opt);
+    });
+  select.addEventListener("change", () => onChange(select.value || null));
+  wrap.appendChild(select);
+  return wrap;
+}
+
+function portalLinkField(spec, state, onChange) {
+  const wrap = document.createElement("div");
+  wrap.className = "field";
+  const l = document.createElement("label");
+  l.textContent = "Linked to";
+  wrap.appendChild(l);
+  const select = document.createElement("select");
+  const none = document.createElement("option");
+  none.value = ""; none.textContent = "(none)";
+  select.appendChild(none);
+  state.objects
+    .filter((o) => o.type === "portal" && o.id !== spec.id)
+    .forEach((o) => {
+      const opt = document.createElement("option");
+      opt.value = o.id;
+      opt.textContent = `Portal (${o.id.split("_")[1]})`;
+      if (spec.linkedId === o.id) opt.selected = true;
       select.appendChild(opt);
     });
   select.addEventListener("change", () => onChange(select.value || null));

@@ -10,8 +10,8 @@ function areaOf(spec) {
     return spec.width * (spec.height || 24);
   }
   if (spec.type === "triangle") return (Math.sqrt(3) / 4) * (spec.size ?? 130) ** 2;
-  if (spec.type === "track" || spec.type === "wire") return Math.max(4, Math.hypot((spec.x2 ?? spec.x) - spec.x, (spec.y2 ?? spec.y) - spec.y)) * 4;
-  return Math.PI * (spec.radius ?? 20) ** 2; // ball, bomb, ballBearing, peg, magnet, motor
+  if (spec.type === "wire") return Math.max(4, Math.hypot((spec.x2 ?? spec.x) - spec.x, (spec.y2 ?? spec.y) - spec.y)) * 4;
+  return Math.PI * (spec.radius ?? 20) ** 2; // ball, bomb, ballBearing, peg, magnet, portal
 }
 
 function fmt(n, digits = 2) {
@@ -149,26 +149,6 @@ export function physicsMath(spec) {
     });
   }
 
-  if (spec.type === "motor") {
-    const omega = ((spec.rpm ?? 60) / 60) * 2 * Math.PI;
-    lines.push({
-      formula: `ω = RPM/60 · 2π = ${fmt(omega, 2)} rad/s`,
-      note: `A scripted rotation, not torque-driven — it spins at exactly this angular speed the moment you press Play, regardless of what's touching it.`,
-      edit: { key: "rpm", value: spec.rpm ?? 60, min: 1, max: 300, step: 1, resetValue: 60 },
-    });
-  }
-
-  if (spec.type === "track") {
-    const dist = Math.max(1, Math.hypot((spec.x2 ?? spec.x) - spec.x, (spec.y2 ?? spec.y) - spec.y));
-    const period = (2 * dist) / Math.max(1, spec.speed ?? 200);
-    lines.push({
-      formula: `T = 2d / speed = ${fmt(period, 2)} s per round trip`,
-      note: (spec.cycles ?? 0) > 0
-        ? `The ball bearing completes ${spec.cycles} round trip${spec.cycles === 1 ? "" : "s"} then parks back at the start.`
-        : `Cycles is set to 0, so the ball bearing shuttles back and forth forever once you press Play.`,
-      edit: { key: "speed", value: spec.speed ?? 200, min: 20, max: 800, step: 10, resetValue: 200 },
-    });
-  }
 
   return lines;
 }

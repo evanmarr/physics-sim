@@ -1,18 +1,17 @@
 import { confirmPopup } from "./popup.js";
 
-// Three lightweight, independent tools sharing one shell: a sketch surface
-// for diagramming ideas/equations, a simple text notebook, and a paint
-// surface with real pixel-level blend/blur brushes. Each persists to its
-// own localStorage slot so switching tabs (or reloading) never loses work.
+// Two lightweight, independent tools sharing one shell: a sketch surface
+// for diagramming ideas/equations, and a simple text notebook. Each
+// persists to its own localStorage slot so switching tabs (or reloading)
+// never loses work.
 const SUB_MODES = [
-  { id: "sketch", label: "Whiteboard" },
-  { id: "note", label: "Note" },
-  { id: "art", label: "Art" },
+  { id: "sketch", label: "Draw" },
+  { id: "note", label: "Write" },
 ];
 
 const STORAGE_KEY = "continuum-whiteboard-v1";
 const SKETCH_COLORS = ["#1c1f26", "#e0473f", "#2f7bde", "#2ecc71", "#f0a83c"];
-const ART_COLORS = ["#e0473f", "#f0a83c", "#f5d547", "#2ecc71", "#2f7bde", "#8b5cf6", "#ffffff", "#1c1f26"];
+const MAX_HISTORY = 40;
 
 function loadStore() {
   try {
@@ -42,6 +41,7 @@ export class WhiteboardMode {
 
   unmount() {
     this._activeResizeObserver?.disconnect();
+    if (this._activeKeyHandler) document.removeEventListener("keydown", this._activeKeyHandler);
   }
 
   _build() {
@@ -73,17 +73,16 @@ export class WhiteboardMode {
   _renderSub() {
     this._activeResizeObserver?.disconnect();
     this._activeResizeObserver = null;
+    if (this._activeKeyHandler) { document.removeEventListener("keydown", this._activeKeyHandler); this._activeKeyHandler = null; }
     this.stage.innerHTML = "";
     if (this.sub === "sketch") {
       this._buildCanvasEditor({ storeKey: "sketchImage", colors: SKETCH_COLORS, defaultSize: 3, tools: ["pen", "eraser"] });
-    } else if (this.sub === "art") {
-      this._buildCanvasEditor({ storeKey: "artImage", colors: ART_COLORS, defaultSize: 18, tools: ["pen", "smudge", "blur", "eraser"] });
     } else {
       this._buildNotes();
     }
   }
 
-  // ---------- Shared canvas engine (Whiteboard sketch + Art) ----------
+  // ---------- Shared canvas engine (Draw) ----------
 
   _buildCanvasEditor({ storeKey, colors, defaultSize, tools }) {
     const wrap = document.createElement("div");
@@ -98,7 +97,7 @@ export class WhiteboardMode {
 
     const toolRow = document.createElement("div");
     toolRow.className = "wb-tool-row";
-    const toolLabels = { pen: "✏️ Pen", eraser: "🧹 Eraser", smudge: "🫧 Blend", blur: "💨 Blur" };
+    const toolLabels = { pen: "✏️ Pen", eraser: "🧹 Eraser" };
     const toolButtons = {};
     for (const t of tools) {
       const btn = document.createElement("button");
@@ -150,6 +149,14 @@ export class WhiteboardMode {
     sizeSlider.value = String(defaultSize);
     sizeSlider.addEventListener("input", () => { size = parseFloat(sizeSlider.value); });
     sizeRow.appendChild(sizeSlider);
+    const undoBtn = document.createElement("button");
+    undoBtn.textContent = "↶ Undo";
+    undoBtn.title = "Ctrl/Cmd+Z";
+    sizeRow.appendChild(undoBtn);
+    const redoBtn = document.createElement("button");
+    redoBtn.textContent = "↷ Redo";
+    redoBtn.title = "Ctrl/Cmd+Shift+Z";
+    sizeRow.appendChild(redoBtn);
     const clearBtn = document.createElement("button");
     clearBtn.textContent = "Clear";
     clearBtn.className = "wb-clear-btn";
@@ -197,30 +204,41 @@ export class WhiteboardMode {
 
     let drawing = false;
     let last = null;
+    let undoStack = [];
+    let redoStack = [];
+
+    const updateHistoryButtons = () => {
+      undoBtn.disabled = undoStack.length === 0;
+      redoBtn.disabled = redoStack.length === 0;
+    };
+    updateHistoryButtons();
+
+    const snapshot = () => ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const pushUndo = () => {
+      undoStack.push(snapshot());
+      if (undoStack.length > MAX_HISTORY) undoStack.shift();
+      redoStack = [];
+      updateHistoryButtons();
+    };
 
     const drawSegment = (x0, y0, x1, y1) => {
-      if (tool === "pen" || tool === "eraser") {
-        ctx.globalCompositeOperation = tool === "eraser" ? "destination-out" : "source-over";
-        ctx.strokeStyle = color;
-        ctx.lineWidth = size;
-        ctx.lineCap = "round";
-        ctx.lineJoin = "round";
-        ctx.beginPath();
-        ctx.moveTo(x0, y0);
-        ctx.lineTo(x1, y1);
-        ctx.stroke();
-        ctx.globalCompositeOperation = "source-over";
-      } else if (tool === "smudge") {
-        smudgeStep(ctx, canvas, x0, y0, x1, y1, Math.max(6, size));
-      } else if (tool === "blur") {
-        blurStep(ctx, canvas, x1, y1, Math.max(6, size));
-      }
+      ctx.globalCompositeOperation = tool === "eraser" ? "destination-out" : "source-over";
+      ctx.strokeStyle = color;
+      ctx.lineWidth = size;
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+      ctx.beginPath();
+      ctx.moveTo(x0, y0);
+      ctx.lineTo(x1, y1);
+      ctx.stroke();
+      ctx.globalCompositeOperation = "source-over";
     };
 
     canvas.addEventListener("pointerdown", (e) => {
       // Capture can fail in edge cases (e.g. a pointer already released) —
       // that's not a reason to skip starting the stroke itself.
       try { canvas.setPointerCapture(e.pointerId); } catch { /* ignore */ }
+      pushUndo();
       const rect = canvas.getBoundingClientRect();
       last = { x: e.clientX - rect.left, y: e.clientY - rect.top };
       drawing = true;
@@ -243,8 +261,37 @@ export class WhiteboardMode {
     canvas.addEventListener("pointerleave", endStroke);
     canvas.addEventListener("pointercancel", endStroke);
 
+    const undo = () => {
+      if (!undoStack.length) return;
+      redoStack.push(snapshot());
+      ctx.putImageData(undoStack.pop(), 0, 0);
+      persist();
+      updateHistoryButtons();
+    };
+    const redo = () => {
+      if (!redoStack.length) return;
+      undoStack.push(snapshot());
+      ctx.putImageData(redoStack.pop(), 0, 0);
+      persist();
+      updateHistoryButtons();
+    };
+    undoBtn.addEventListener("click", undo);
+    redoBtn.addEventListener("click", redo);
+
+    const onKeyDown = (e) => {
+      const cmd = e.metaKey || e.ctrlKey;
+      if (!cmd || e.key.toLowerCase() !== "z") return;
+      const tag = document.activeElement?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA") return;
+      e.preventDefault();
+      if (e.shiftKey) redo(); else undo();
+    };
+    document.addEventListener("keydown", onKeyDown);
+    this._activeKeyHandler = onKeyDown;
+
     clearBtn.addEventListener("click", async () => {
-      if (!(await confirmPopup("Clear this canvas? This can't be undone.", { title: "Clear canvas", confirmLabel: "Clear", danger: true }))) return;
+      if (!(await confirmPopup("Clear this canvas?", { title: "Clear canvas", confirmLabel: "Clear", danger: true }))) return;
+      pushUndo();
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       persist();
     });
@@ -333,45 +380,3 @@ export class WhiteboardMode {
   }
 }
 
-// A drag-based smudge: at each move step, grab a circular patch of pixels
-// from just behind the brush and stamp it (partially transparent) at the
-// new position — dragged repeatedly, colors bleed and mix into each other
-// instead of drawing a flat new stroke on top.
-function smudgeStep(ctx, canvas, x0, y0, x1, y1, radius) {
-  const size = radius * 2;
-  const sx = clamp(x0 - radius, 0, canvas.width - size);
-  const sy = clamp(y0 - radius, 0, canvas.height - size);
-  ctx.save();
-  ctx.beginPath();
-  ctx.arc(x1, y1, radius, 0, Math.PI * 2);
-  ctx.clip();
-  ctx.globalAlpha = 0.35;
-  ctx.drawImage(canvas, sx, sy, size, size, x1 - radius, y1 - radius, size, size);
-  ctx.restore();
-}
-
-// Softens a circular patch under the brush by redrawing it through an
-// offscreen canvas with a CSS blur filter applied, then stamping the
-// blurred result back — real pixel blur, not a cosmetic overlay.
-function blurStep(ctx, canvas, x, y, radius) {
-  const size = radius * 2;
-  const sx = clamp(x - radius, 0, canvas.width - size);
-  const sy = clamp(y - radius, 0, canvas.height - size);
-  const off = document.createElement("canvas");
-  const pad = 8;
-  off.width = size + pad * 2;
-  off.height = size + pad * 2;
-  const octx = off.getContext("2d");
-  octx.filter = `blur(${Math.max(2, radius * 0.2)}px)`;
-  octx.drawImage(canvas, sx - pad, sy - pad, size + pad * 2, size + pad * 2, 0, 0, size + pad * 2, size + pad * 2);
-  ctx.save();
-  ctx.beginPath();
-  ctx.arc(x, y, radius, 0, Math.PI * 2);
-  ctx.clip();
-  ctx.drawImage(off, sx - pad, sy - pad);
-  ctx.restore();
-}
-
-function clamp(v, min, max) {
-  return Math.max(min, Math.min(max, v));
-}

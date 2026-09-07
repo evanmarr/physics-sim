@@ -12,6 +12,7 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import fsSync from "node:fs";
 import path from "node:path";
+import os from "node:os";
 import { fileURLToPath } from "node:url";
 import { unsubscribeToken } from "./unsubscribe.js";
 
@@ -387,4 +388,13 @@ server.on("error", (err) => {
 await loadDb();
 server.listen(PORT, () => {
   console.log(`Continuum server running at http://localhost:${PORT}`);
+  // No host was passed to listen(), so this already accepts connections
+  // from other devices on the same network, not just this machine —
+  // printing the LAN address is just so you don't have to go find it
+  // yourself to try that.
+  for (const iface of Object.values(os.networkInterfaces()).flat()) {
+    if (iface.family === "IPv4" && !iface.internal) {
+      console.log(`  Also reachable on your network at: http://${iface.address}:${PORT}`);
+    }
+  }
 });

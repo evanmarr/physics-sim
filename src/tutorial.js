@@ -123,15 +123,8 @@ function reposition() {
   if (running) showStep(stepIndex, true);
 }
 
-function showStep(i, isReposition = false) {
-  if (!isReposition) {
-    for (const fn of cleanupFns) fn();
-    cleanupFns = [];
-  }
-  stepIndex = i;
-  const step = STEPS[i];
+function positionSpotlight(step) {
   const target = step.target ? document.querySelector(step.target) : null;
-
   if (target) {
     target.scrollIntoView({ block: "center", behavior: "smooth" });
     const rect = target.getBoundingClientRect();
@@ -145,6 +138,22 @@ function showStep(i, isReposition = false) {
     spotEl.style.display = "none";
     positionTooltipCenter();
   }
+}
+
+function showStep(i, isReposition = false) {
+  if (!isReposition) {
+    for (const fn of cleanupFns) fn();
+    cleanupFns = [];
+  }
+  stepIndex = i;
+  const step = STEPS[i];
+  positionSpotlight(step);
+  // A step right after a mode switch (or any other DOM rebuild) can measure
+  // its target mid-layout — the container exists but hasn't settled to its
+  // real size/position yet, so the spotlight lands on the wrong spot or a
+  // sliver of the right one. Re-measuring a couple of frames later corrects
+  // that without needing to guess how long any given rebuild takes.
+  requestAnimationFrame(() => requestAnimationFrame(() => { if (running && stepIndex === i) positionSpotlight(step); }));
 
   tooltipEl.innerHTML = "";
   const progress = document.createElement("div");

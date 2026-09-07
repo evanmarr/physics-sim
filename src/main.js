@@ -12,10 +12,12 @@ import { HistoryMode } from "./history.js";
 import { CybersecurityMode } from "./cybersecurity.js";
 import { MathematicsMode } from "./mathematics.js";
 import { WhiteboardMode } from "./whiteboard.js";
+import { EconomicsMode } from "./economics.js";
 import { traceLightRays } from "./lightOptics.js";
 import { openQuiz } from "./quiz.js";
 import { initAuthUI, openSavesPanel } from "./auth.js";
 import { initTutorial } from "./tutorial.js";
+import { initDeviceMode, showPrompt as showDeviceModePrompt } from "./deviceMode.js";
 import { confirmPopup } from "./popup.js";
 
 const state = {
@@ -28,6 +30,8 @@ const state = {
   activeChallengeId: null,
   mathPanelOpen: true,
   lightMode: false,
+  showMagneticField: false,
+  simSpeed: 1,
 };
 
 let sim = null;
@@ -39,6 +43,7 @@ let historyMode = null;
 let cybersecurityMode = null;
 let mathematicsMode = null;
 let whiteboardMode = null;
+let economicsMode = null;
 
 // Old saves stored a rope as x/y + rotation + length; the current model is
 // two independent endpoints (x,y) and (x2,y2). Backfill x2/y2 from the old
@@ -57,7 +62,7 @@ function migrateRopeSpecs(objects) {
 // The circuitry feature (wire/battery/lightbulb/switch/resistor/transistor,
 // and the old always-static circuit motor) was removed — drop any of those
 // types left over in an older save rather than rendering broken objects.
-const REMOVED_TYPES = new Set(["wire", "battery", "lightbulb", "switchComp", "resistor", "transistor"]);
+const REMOVED_TYPES = new Set(["wire", "battery", "lightbulb", "switchComp", "resistor", "transistor", "motor", "track"]);
 function dropRemovedTypes(objects) {
   return objects.filter((spec) => !REMOVED_TYPES.has(spec.type));
 }
@@ -68,7 +73,20 @@ function starterScene() {
   ];
 }
 
+// Every modal in the app (Quiz, Challenges, Sign in, My Worlds/Saves, the
+// custom confirm/alert popup, and each mode's own "X Challenges" dialog)
+// shares the same .modal (dimmed backdrop) / .modal-box (content) markup —
+// one delegated listener here closes any of them on a backdrop click
+// (clicking the box itself never bubbles a click whose target IS .modal),
+// so newly-added modals get this for free without their own wiring.
+document.addEventListener("click", (e) => {
+  if (e.target.classList?.contains("modal") && !e.target.classList.contains("hidden")) {
+    e.target.classList.add("hidden");
+  }
+});
+
 function boot() {
+  initDeviceMode();
   const saved = loadState();
   if (saved && saved.objects.length) {
     Object.assign(state, saved);
@@ -105,6 +123,11 @@ function boot() {
       renderAll();
       scheduleSave();
     },
+    onRotateMany: (moves) => {
+      moves.forEach(({ id, ...patch }) => patchObjectSilent(id, patch));
+      renderAll();
+      scheduleSave();
+    },
     onRotate: (id, deg) => { patchObject(id, { rotation: deg }); renderPanelUI(); },
     onEndpointMove: (id, { x, y, x2, y2 }) => { patchObject(id, { x, y, x2, y2 }); },
   });
@@ -129,6 +152,7 @@ function renderAll() {
   window._renderer.render(items, { editable: !state.playing, selectedId: state.selectedId, selectedIds: state.selectedIds });
   updateTrajectoryPreview();
   updateLightRays(items);
+  updateMagneticField(items);
 }
 
 function specToRenderItem(s) {
@@ -161,6 +185,7 @@ function patchObjectSilent(id, patch) {
 // scheduleSave, so an undo reverts a whole drag, not one pixel of it.
 const MAX_UNDO = 50;
 let undoStack = [];
+let redoStack = [];
 let pendingUndoSnapshot = null;
 let undoCommitTimer = null;
 
@@ -178,7 +203,7 @@ function commitPendingUndo() {
 }
 
 function markUndo() {
-  if (!pendingUndoSnapshot) pendingUndoSnapshot = snapshotForUndo();
+  if (!pendingUndoSnapshot) { pendingUndoSnapshot = snapshotForUndo(); redoStack = []; }
   clearTimeout(undoCommitTimer);
   undoCommitTimer = setTimeout(commitPendingUndo, 400);
 }
@@ -189,14 +214,11 @@ function pushUndoNow() {
   commitPendingUndo();
   undoStack.push(snapshotForUndo());
   if (undoStack.length > MAX_UNDO) undoStack.shift();
+  redoStack = [];
   updateUndoButton();
 }
 
-function undo() {
-  if (state.playing) return;
-  commitPendingUndo();
-  const snap = undoStack.pop();
-  if (!snap) return;
+function applySnapshot(snap) {
   state.objects = snap.objects;
   state.gravity = snap.gravity;
   document.getElementById("gravity-slider").value = state.gravity;
@@ -210,9 +232,28 @@ function undo() {
   updateUndoButton();
 }
 
+function undo() {
+  if (state.playing) return;
+  commitPendingUndo();
+  const snap = undoStack.pop();
+  if (!snap) return;
+  redoStack.push(snapshotForUndo());
+  applySnapshot(snap);
+}
+
+function redo() {
+  if (state.playing) return;
+  const snap = redoStack.pop();
+  if (!snap) return;
+  undoStack.push(snapshotForUndo());
+  applySnapshot(snap);
+}
+
 function updateUndoButton() {
-  const btn = document.getElementById("undo-btn");
-  if (btn) btn.disabled = undoStack.length === 0;
+  const undoBtn = document.getElementById("undo-btn");
+  if (undoBtn) undoBtn.disabled = undoStack.length === 0;
+  const redoBtn = document.getElementById("redo-btn");
+  if (redoBtn) redoBtn.disabled = redoStack.length === 0;
 }
 
 // state.selectedId mirrors state.selectedIds only when it's a single
@@ -343,6 +384,11 @@ function updateLightRays(items) {
   window._renderer.renderLightRays(rays);
 }
 
+function updateMagneticField(items) {
+  if (!state.showMagneticField) { window._renderer.renderMagneticField([]); return; }
+  window._renderer.renderMagneticField(items.filter((it) => it.type === "magnet"));
+}
+
 // ---- Cosmetic water/wind particles (edit mode preview + during Play) ----
 let particleClock = 0;
 let particleRafId = null;
@@ -417,6 +463,21 @@ function wireTopbar(renderer) {
     updateTrajectoryPreview();
   });
 
+  const speedSlider = document.getElementById("speed-slider");
+  const speedVal = document.getElementById("speed-val");
+  speedSlider.addEventListener("input", () => {
+    state.simSpeed = parseFloat(speedSlider.value);
+    speedVal.textContent = state.simSpeed.toFixed(1);
+    if (sim) sim.setTimeScale(state.simSpeed);
+  });
+
+  document.getElementById("speed-reset-btn").addEventListener("click", () => {
+    state.simSpeed = 1;
+    speedSlider.value = 1;
+    speedVal.textContent = "1.0";
+    if (sim) sim.setTimeScale(1);
+  });
+
   document.getElementById("gravity-reset-btn").addEventListener("click", () => {
     markUndo();
     state.gravity = 1;
@@ -440,10 +501,17 @@ function wireTopbar(renderer) {
   });
 
   document.getElementById("undo-btn").addEventListener("click", () => undo());
+  document.getElementById("redo-btn").addEventListener("click", () => redo());
 
   document.getElementById("light-mode-btn").addEventListener("click", () => {
     state.lightMode = !state.lightMode;
     document.getElementById("light-mode-btn").classList.toggle("active", state.lightMode);
+    renderAll();
+  });
+
+  document.getElementById("field-mode-btn").addEventListener("click", () => {
+    state.showMagneticField = !state.showMagneticField;
+    document.getElementById("field-mode-btn").classList.toggle("active", state.showMagneticField);
     renderAll();
   });
 
@@ -478,6 +546,7 @@ function wireTopbar(renderer) {
   initTutorial();
 
   wireTheme();
+  document.getElementById("device-mode-btn").addEventListener("click", () => showDeviceModePrompt(true));
   startParticleLoop();
 }
 
@@ -526,11 +595,13 @@ function togglePlay(renderer) {
         renderer.render(items, { editable: false });
         checkChallengeFrame(items);
         if (state.lightMode) updateLightRays(items);
+        if (state.showMagneticField) updateMagneticField(items);
         window._renderer.renderParticles(sim.collectParticleItems());
         window._renderer.renderRopeTubes(sim.collectRopePaths());
       },
       onEvent: (event) => handleSimEvent(event),
     });
+    sim.setTimeScale(state.simSpeed);
     sim.start();
     state.playing = true;
     playBtn.textContent = "■ Stop";
@@ -619,11 +690,6 @@ function wireChallenges() {
     modal.classList.remove("hidden");
   });
   document.getElementById("challenges-close").addEventListener("click", () => modal.classList.add("hidden"));
-  // Clicking the dimmed backdrop (not the challenge list box itself)
-  // closes it too, same as pressing Close.
-  modal.addEventListener("click", (e) => {
-    if (e.target === modal) modal.classList.add("hidden");
-  });
 }
 
 // The app's front door — a launcher card per section, in the same
@@ -631,31 +697,33 @@ function wireChallenges() {
 // reusing History's .home-card pattern), so all three read as one family
 // of "pick where to go" screens rather than one being a special case.
 const HOME_SECTIONS = [
-  { mode: "physics", title: "Physics", blurb: "Build contraptions with real 2D physics — ramps, cannons, springs, motors, and more.", kind: "physics", hues: [22, 205] },
+  { mode: "physics", title: "Physics", blurb: "Build contraptions with real 2D physics — ramps, cannons, springs, portals, and more.", kind: "physics", hues: [22, 205] },
   { mode: "chemistry", title: "Chemistry", blurb: "Explore the periodic table, mix real reactions, and watch atoms bond in 3D.", kind: "chemistry", hues: [355, 150] },
   { mode: "astronomy", title: "Astronomy", blurb: "Real orbital mechanics for the whole solar system, at any date you choose.", kind: "astronomy", hues: [45, 285] },
   { mode: "history", title: "History", blurb: "Browse a timeline of landmark moments across physics, chemistry, and more.", kind: "history", hues: [35, 45] },
   { mode: "cybersecurity", title: "Cybersecurity", blurb: "Search and filter well-documented malware, hackers, hacker groups, and breaches.", kind: "cybersecurity", hues: [0, 340] },
   { mode: "particles", title: "Particle Physics", blurb: "A gallery of real D3 force simulations — drag anything you see.", kind: "particles", hues: [190, 270] },
   { mode: "mathematics", title: "Mathematics", blurb: "A real graphing calculator — plot any expression, pan and zoom the graph.", kind: "mathematics", hues: [230, 350] },
-  { mode: "whiteboard", title: "Whiteboard", blurb: "Sketch out ideas and equations, jot text notes, or paint with real blend/blur brushes.", kind: "whiteboard", hues: [160, 40] },
+  { mode: "whiteboard", title: "Whiteboard", blurb: "A draw surface for sketching ideas and equations, plus a simple notebook for text notes.", kind: "whiteboard", hues: [160, 40] },
+  { mode: "economics", title: "Economics", blurb: "A real supply-and-demand market (with taxes and price controls) and a repeated Prisoner's Dilemma sandbox.", kind: "economics", hues: [140, 20] },
 ];
 
 function buildHomePage(root, onNavigate) {
   root.innerHTML = `
     <div class="home-wrap">
       <div class="home-hero">
+        <canvas class="home-hero-bg" aria-hidden="true"></canvas>
         <svg class="home-logo" viewBox="0 0 24 24" width="48" height="48" aria-hidden="true">
           <ellipse cx="12" cy="12" rx="10" ry="4.2" fill="none" style="stroke: var(--cool-1)" stroke-width="1.3" />
           <ellipse cx="12" cy="12" rx="10" ry="4.2" fill="none" style="stroke: var(--cool-2)" stroke-width="1.3" transform="rotate(60 12 12)" />
           <ellipse cx="12" cy="12" rx="10" ry="4.2" fill="none" style="stroke: var(--cool-3)" stroke-width="1.3" transform="rotate(120 12 12)" />
           <circle cx="12" cy="12" r="2.1" style="fill: var(--text)" />
         </svg>
-        <div class="home-kicker">eight sandboxes · one app</div>
+        <div class="home-kicker">nine sandboxes · one app</div>
         <h1>Continuum</h1>
         <p class="home-tagline">Real simulations, not animations — physics, chemistry, astronomy,
-          mathematics, a whiteboard for your own ideas, and the history and security behind them all.
-          Pick a section to start.</p>
+          mathematics, economics, a whiteboard for your own ideas, and the history and security behind
+          them all. Pick a section to start.</p>
       </div>
       <div class="home-cards"></div>
     </div>
@@ -673,6 +741,58 @@ function buildHomePage(root, onNavigate) {
     grid.appendChild(card);
     buildHomeThumbnail(card.querySelector(".home-card-thumb"), section);
   }
+  initHomeBackground(root.querySelector(".home-hero-bg"), root.querySelector(".home-hero"));
+}
+
+// Ambient hero background: a small living D3 force graph, dimmed and
+// untouchable — same simulation shape as the ~/d3-force gallery's own hero.
+function initHomeBackground(canvas, hero) {
+  const ctx = canvas.getContext("2d");
+  let width = 0, height = 0;
+
+  function resize() {
+    const rect = hero.getBoundingClientRect();
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    width = rect.width;
+    height = rect.height;
+    canvas.width = Math.round(width * dpr);
+    canvas.height = Math.round(height * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  resize();
+  window.addEventListener("resize", resize);
+
+  const n = 46;
+  const nodes = Array.from({ length: n }, () => ({ x: Math.random() * width, y: Math.random() * height }));
+  const links = [];
+  for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) if (Math.random() < 0.045) links.push({ source: i, target: j });
+
+  function draw() {
+    ctx.clearRect(0, 0, width, height);
+    ctx.strokeStyle = "rgba(125,211,252,0.25)";
+    ctx.lineWidth = 1;
+    for (const l of links) {
+      ctx.beginPath();
+      ctx.moveTo(l.source.x, l.source.y);
+      ctx.lineTo(l.target.x, l.target.y);
+      ctx.stroke();
+    }
+    ctx.fillStyle = "rgba(167,139,250,0.85)";
+    for (const node of nodes) {
+      ctx.beginPath();
+      ctx.arc(node.x, node.y, 2.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  d3.forceSimulation(nodes)
+    .force("charge", d3.forceManyBody().strength(-40))
+    .force("link", d3.forceLink(links).distance(90).strength(0.35))
+    .force("x", d3.forceX(() => width / 2).strength(0.02))
+    .force("y", d3.forceY(() => height / 2).strength(0.02))
+    .alphaDecay(0)
+    .velocityDecay(0.35)
+    .on("tick", draw);
 }
 
 // A small, genuinely representative illustration per card — a ball on a
@@ -779,6 +899,16 @@ function buildHomeThumbnail(el, section) {
       .attr("fill", colorB).attr("opacity", 0.85).attr("transform", `rotate(-6 ${w - 42} 35)`);
     svg.append("rect").attr("x", w - 44).attr("y", 40).attr("width", 34).attr("height", 30).attr("rx", 3)
       .attr("fill", colorA).attr("opacity", 0.7).attr("transform", `rotate(5 ${w - 27} 55)`);
+  } else if (section.kind === "economics") {
+    // A classic supply/demand X — downward demand line, upward supply
+    // line, crossing at the equilibrium point, genuinely what this mode's
+    // default market chart looks like.
+    const margin = 16;
+    svg.append("line").attr("x1", margin).attr("x2", margin).attr("y1", margin).attr("y2", h - margin).attr("stroke", "rgba(148,163,184,0.5)");
+    svg.append("line").attr("x1", margin).attr("x2", w - margin).attr("y1", h - margin).attr("y2", h - margin).attr("stroke", "rgba(148,163,184,0.5)");
+    svg.append("line").attr("x1", margin).attr("y1", margin).attr("x2", w - margin).attr("y2", h - margin).attr("stroke", colorA).attr("stroke-width", 2.5);
+    svg.append("line").attr("x1", margin).attr("y1", h - margin).attr("x2", w - margin).attr("y2", margin).attr("stroke", colorB).attr("stroke-width", 2.5);
+    svg.append("circle").attr("cx", (margin + w - margin) / 2).attr("cy", h / 2).attr("r", 4.5).attr("fill", "var(--text)");
   } else {
     // Particle Physics: a small frozen force-directed graph, exactly the
     // shape every one of its 8 real demos takes.
@@ -812,7 +942,8 @@ function wireModeTabs() {
   const particlesBtn = document.getElementById("mode-particles-btn");
   const mathematicsBtn = document.getElementById("mode-mathematics-btn");
   const whiteboardBtn = document.getElementById("mode-whiteboard-btn");
-  const modeButtons = { home: homeBtn, physics: physicsBtn, chemistry: chemistryBtn, astronomy: astronomyBtn, history: historyBtn, cybersecurity: cybersecurityBtn, particles: particlesBtn, mathematics: mathematicsBtn, whiteboard: whiteboardBtn };
+  const economicsBtn = document.getElementById("mode-economics-btn");
+  const modeButtons = { home: homeBtn, physics: physicsBtn, chemistry: chemistryBtn, astronomy: astronomyBtn, history: historyBtn, cybersecurity: cybersecurityBtn, particles: particlesBtn, mathematics: mathematicsBtn, whiteboard: whiteboardBtn, economics: economicsBtn };
 
   const homeRoot = document.getElementById("home-root");
   buildHomePage(homeRoot, (mode) => setMode(mode));
@@ -825,15 +956,18 @@ function wireModeTabs() {
   const particlesRoot = document.getElementById("particles-root");
   const mathematicsRoot = document.getElementById("mathematics-root");
   const whiteboardRoot = document.getElementById("whiteboard-root");
-  const roots = { home: homeRoot, physics: workspace, chemistry: chemRoot, astronomy: astronomyRoot, history: historyRoot, cybersecurity: cybersecurityRoot, particles: particlesRoot, mathematics: mathematicsRoot, whiteboard: whiteboardRoot };
+  const economicsRoot = document.getElementById("economics-root");
+  const roots = { home: homeRoot, physics: workspace, chemistry: chemRoot, astronomy: astronomyRoot, history: historyRoot, cybersecurity: cybersecurityRoot, particles: particlesRoot, mathematics: mathematicsRoot, whiteboard: whiteboardRoot, economics: economicsRoot };
 
   const physicsOnlyControls = [
     document.getElementById("run-controls"),
     document.getElementById("gravity-controls"),
+    document.getElementById("speed-controls"),
     document.getElementById("light-mode-toggle-wrap"),
     document.getElementById("clear-btn"),
     document.getElementById("my-worlds-btn"),
     document.getElementById("undo-btn"),
+    document.getElementById("redo-btn"),
   ];
   const challengeBtn = document.getElementById("challenges-btn");
   const quizBtn = document.getElementById("quiz-btn");
@@ -854,7 +988,7 @@ function wireModeTabs() {
     // Home is just a launcher, and Particle Physics is a gallery of
     // embedded external demos — neither is a knowledge domain with quiz
     // content the way the other modes are.
-    quizBtn.style.display = mode === "particles" || mode === "home" || mode === "mathematics" || mode === "whiteboard" ? "none" : "";
+    quizBtn.style.display = mode === "particles" || mode === "home" || mode === "mathematics" || mode === "whiteboard" || mode === "economics" ? "none" : "";
 
     if (mode === "physics") startParticleLoop(); else stopParticleLoop();
 
@@ -899,9 +1033,17 @@ function wireModeTabs() {
     } else {
       whiteboardMode?.unmount();
     }
+
+    if (mode === "economics") {
+      if (!economicsMode) economicsMode = new EconomicsMode(economicsRoot);
+      economicsMode.mount();
+    } else {
+      economicsMode?.unmount();
+    }
   }
 
   homeBtn.addEventListener("click", () => setMode("home"));
+  document.getElementById("brand-home-btn").addEventListener("click", () => setMode("home"));
   physicsBtn.addEventListener("click", () => setMode("physics"));
   chemistryBtn.addEventListener("click", () => setMode("chemistry"));
   astronomyBtn.addEventListener("click", () => setMode("astronomy"));
@@ -910,6 +1052,7 @@ function wireModeTabs() {
   particlesBtn.addEventListener("click", () => setMode("particles"));
   mathematicsBtn.addEventListener("click", () => setMode("mathematics"));
   whiteboardBtn.addEventListener("click", () => setMode("whiteboard"));
+  economicsBtn.addEventListener("click", () => setMode("economics"));
 
   // Each individual demo's own top bar was removed (it duplicated this
   // app's nav one level up) — this subnav is the only way left to switch
@@ -944,6 +1087,12 @@ function wireKeyboard(renderer) {
     if (e.code === "Space") {
       e.preventDefault();
       togglePlay(renderer);
+    } else if (e.code === "KeyR" && !cmd) {
+      e.preventDefault();
+      // Restart the simulation from the original blueprint — stop (if
+      // running) then play again, same as clicking Stop then Play.
+      if (state.playing) togglePlay(renderer);
+      togglePlay(renderer);
     } else if ((e.code === "Delete" || e.code === "Backspace") && state.selectedIds.size && !state.playing) {
       e.preventDefault();
       deleteSelected();
@@ -960,7 +1109,7 @@ function wireKeyboard(renderer) {
       pasteClipboard();
     } else if (cmd && e.code === "KeyZ" && !state.playing) {
       e.preventDefault();
-      undo();
+      if (e.shiftKey) redo(); else undo();
     }
   });
 }

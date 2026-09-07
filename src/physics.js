@@ -30,6 +30,7 @@ const CANNON_LAUNCH_SCALE = 1.0;
 const BUTTON_COOLDOWN_MS = 700;
 const SPRING_COOLDOWN_MS = 350;
 const PIVOT_ANGULAR_DAMPING = 0.25;
+const MAX_BODY_SPEED = 75; // world units/step — see _clampFastBodies
 const WATER_PARTICLE_RADIUS = 5;
 const WATER_PARTICLE_MAX = 600; // a safety ceiling for extreme boards, not the normal count — see _buildWaterParticles
 const WIND_PARTICLE_RADIUS = 3;
@@ -43,7 +44,7 @@ const WIND_PARTICLES_PER_SPAWN = 3; // a fan blows a wide stream, not a thin tri
 // those types are hardcoded isStatic and can't be forced dynamic — a
 // bearing "pivoting" one of them would silently never swing. That search
 // uses the narrower BEARING_HOST_TYPES instead.
-const PIVOTABLE_HOST_TYPES = new Set(["board", "triangle", "ball", "bomb", "ballBearing", "peg", "magnet", "motor", "track"]);
+const PIVOTABLE_HOST_TYPES = new Set(["board", "triangle", "ball", "bomb", "ballBearing", "peg", "magnet"]);
 const WIRE_SNAP_DIST = 22; // world units — how close a wire's end needs to be to a button/bomb/cannon to link them
 const BEARING_HOST_TYPES = new Set(["board", "triangle", "ball", "bomb"]);
 
@@ -58,7 +59,7 @@ export class PhysicsSim {
     // more iterations means damping gets compounded harder each frame,
     // which for a stiff many-segment chain with a mass on the end tipped
     // it from "settles" into "gains energy and swings wider every cycle."
-    this.engine = Engine.create({ constraintIterations: 6 });
+    this.engine = Engine.create({ constraintIterations: 6, positionIterations: 10, velocityIterations: 8 });
     this.engine.gravity.x = 0;
     this.engine.gravity.y = gravity;
     this.running = false;
@@ -71,9 +72,15 @@ export class PhysicsSim {
     this.fanMeta = new Map(); // fanId -> {body, spec}
     this.magnetMeta = new Map(); // magnetId -> {body, spec}
     this.springMeta = new Map(); // springPadId -> {spec, cooldownUntil}
-    this.motorMeta = new Map(); // motorId -> {body, spec}
-    this.trackMeta = new Map(); // trackId -> {body, spec, x1,y1,x2,y2, dist, elapsed, cyclesDone, stopped}
     this._lastDelta = 16; // ms, updated each frame in start() — beforeUpdate handlers need real elapsed time
+    // Simulated clock, not wall-clock — advances by the *scaled* delta each
+    // frame (see start()), so anything timed against it (wind particles,
+    // glass shards) ages at the same rate the physics itself is running at.
+    // Using performance.now() for these was the slow-motion wind bug: the
+    // fan force correctly weakened with a smaller delta, but particles
+    // still despawned on real time, so in 0.3x slow-mo they vanished after
+    // covering barely 30% of their normal distance.
+    this.simTime = 0;
     this.pivotHostBodies = []; // bodies pivoted on a ball bearing, for settling damping
     this.waterParticles = []; // real dynamic bodies that settle/collide like granular liquid
     this.windParticles = []; // real dynamic bodies, pushed by fan force fields, that physically nudge whatever they hit
@@ -146,9 +153,6 @@ export class PhysicsSim {
       if (spec.type === "springPad") {
         this.springMeta.set(spec.id, { spec, cooldownUntil: 0 });
       }
-      if (spec.type === "motor") {
-        this.motorMeta.set(spec.id, { body, spec });
-      }
     }
 
     // ball bearing pivots: attach a frictionless point constraint from the
@@ -172,16 +176,6 @@ export class PhysicsSim {
         damping: 0,
       });
       Composite.add(world, constraint);
-    }
-
-    // tracks: the rail itself already got a static sensor body from
-    // _createBody above (same as everything else in the main loop) — this
-    // adds the separate free-riding ball bearing that actually shuttles
-    // back and forth along it. Built *before* ropes below, since a rope end
-    // can attach to that bearing and needs this.trackMeta already populated
-    // to find its body.
-    for (const spec of this.specs) {
-      if (spec.type === "track") this._buildTrack(spec);
     }
 
     // ropes: a chain of small segment bodies, anchored at the rope's placed
@@ -223,15 +217,12 @@ export class PhysicsSim {
         const px = spec.x - w / 2 + r * 1.1 + (cols > 1 ? cx * (w - r * 2.2) / (cols - 1) : 0) + jitterX;
         const py = spec.y + h / 2 - r * 1.1 - ry * r * 2.1 + jitterY;
         const body = Bodies.circle(px, py, r, {
-          // Water is viscous, not a ball pit — low friction here made
-          // particles slide past each other almost freely, which (combined
-          // with a rigid-circle solver's constant tiny overlap corrections)
-          // reads as a jittery pile of hard beads instead of a calm liquid.
-          // Real inter-particle friction plus more air damping makes it
-          // resist flowing and settle down quietly, like actual water,
-          // while staying dynamic enough to still splash and pour.
-          friction: 0.35,
-          frictionAir: 0.06,
+          // Dialed back down from a stiffer, more-viscous tune — the gooey
+          // render filter (see render.js's #water-goo) now absorbs the
+          // small per-particle jitter that low friction used to expose, so
+          // this can flow much more freely and still read as calm water.
+          friction: 0.08,
+          frictionAir: 0.025,
           restitution: 0,
           density: 0.9 * DENSITY_SCALE,
           label: `waterParticle:${spec.id}`,
@@ -274,6 +265,13 @@ export class PhysicsSim {
     // indistinguishable from perfectly rigid but leaves the solver enough
     // give to actually converge.
     const stiffness = Math.min(0.96, Math.max(0.05, 1 - (spec.elasticity ?? 0.15) * 0.9));
+    // Denser materials (metal is ~13x wood's density) put a lot more mass
+    // and momentum through the exact same joints, which strains the
+    // iterative solver much harder and shows up as visible jerk even at
+    // the same elasticity setting — scaling damping up with density keeps
+    // a metal rope's segments settling as calmly as a wood one, instead of
+    // needing its own separate elasticity retuning per material.
+    const damping = Math.min(0.7, 0.35 * Math.max(1, mat.density / materialOf("wood").density));
     const angle = Math.atan2(y2 - spec.y, x2 - spec.x);
     const dir = { x: Math.cos(angle), y: Math.sin(angle) };
     // Adjacent segments overlap slightly (the *1.05 below) so there's no
@@ -326,7 +324,7 @@ export class PhysicsSim {
           // Raised from Matter's typical rope-demo value (~0.15) — a heavy
           // object hanging off the end needs real energy dissipation or
           // the chain just keeps swinging/vibrating near-indefinitely.
-          stiffness, damping: 0.35,
+          stiffness, damping,
         }));
       }
     }
@@ -342,9 +340,9 @@ export class PhysicsSim {
     const startAnchor = host ? this._hostAnchor(host, spec.x, spec.y) : null;
     let anchorConfig;
     if (startAnchor) {
-      anchorConfig = { bodyA: startAnchor.body, pointA: { x: startAnchor.x, y: startAnchor.y }, bodyB: segments[0], pointB: { x: -segLen / 2, y: 0 }, length: 0, stiffness, damping: 0.35 };
+      anchorConfig = { bodyA: startAnchor.body, pointA: { x: startAnchor.x, y: startAnchor.y }, bodyB: segments[0], pointB: { x: -segLen / 2, y: 0 }, length: 0, stiffness, damping };
     } else {
-      anchorConfig = { pointA: { x: spec.x, y: spec.y }, bodyB: segments[0], pointB: { x: -segLen / 2, y: 0 }, length: 0, stiffness, damping: 0.35 };
+      anchorConfig = { pointA: { x: spec.x, y: spec.y }, bodyB: segments[0], pointB: { x: -segLen / 2, y: 0 }, length: 0, stiffness, damping };
     }
     Composite.add(world, Constraint.create(anchorConfig));
 
@@ -361,71 +359,19 @@ export class PhysicsSim {
       Composite.add(world, Constraint.create({
         bodyA: endAnchor.body, pointA: { x: endAnchor.x, y: endAnchor.y },
         bodyB: lastSeg, pointB: { x: segLen / 2, y: 0 },
-        length: 0, stiffness, damping: 0.35,
+        length: 0, stiffness, damping,
       }));
     }
   }
 
   // Resolves a pivot-host spec + a world attach point into the actual body
   // to constrain onto, plus that point's local-frame offset within it.
-  // A track is special: "the host" a rope end snaps onto there is really
-  // its free-riding ball bearing, a body built separately at runtime (see
-  // _buildTrack) rather than the track's own spec-created (static rail)
-  // body — and since that ball is circular and only ever meaningfully
-  // grabbed at its center, the offset is always (0,0), not a projection of
-  // wherever along the rail the rope happened to land.
   _hostAnchor(host, px, py) {
-    if (host.type === "track") {
-      const body = this.trackMeta.get(host.id)?.body;
-      return body ? { body, x: 0, y: 0 } : null;
-    }
     const body = this.byId.get(host.id);
     if (!body) return null;
     const cos = Math.cos(-host.rotation * RAD), sin = Math.sin(-host.rotation * RAD);
     const dx = px - host.x, dy = py - host.y;
     return { body, x: dx * cos - dy * sin, y: dx * sin + dy * cos };
-  }
-
-  // The ball bearing that rides a track: a real (non-sensor) circle body so
-  // it genuinely pushes whatever it hits, kinematically driven back and
-  // forth along the line between the track's two endpoints — see
-  // _applyTracks, which sets its position/velocity every tick.
-  _buildTrack(spec) {
-    const world = this.engine.world;
-    const mat = materialOf(spec.material);
-    const x2 = spec.x2 ?? spec.x, y2 = spec.y2 ?? spec.y + 200;
-    const dist = Math.max(1, Math.hypot(x2 - spec.x, y2 - spec.y));
-    const radius = 9;
-    // Static, not dynamic: a dynamic body's position is Verlet-integrated
-    // from (position - positionPrev) every step, so gravity/forces keep
-    // accumulating into a "hidden" velocity that Body.setPosition alone
-    // never clears — teleporting it back on-line each tick would still
-    // drift further and further off the rail as that hidden velocity grew
-    // unbounded. A static body skips force/gravity integration entirely
-    // while still colliding normally with anything it's moved into — the
-    // same kinematic-platform pattern as the cannon barrel's Body.setAngle.
-    const body = Bodies.circle(spec.x, spec.y, radius, {
-      isStatic: true,
-      restitution: 0.1,
-      density: Math.max(mat.density * DENSITY_SCALE, 0.0001),
-      label: `trackBall:${spec.id}`,
-    });
-    body.plugin = {
-      gameId: makeId("trackball"),
-      material: spec.material,
-      gameDensity: mat.density,
-      gameArea: Math.PI * radius * radius,
-      transient: true,
-      render: { type: "trackBall", material: spec.material, radius },
-    };
-    Composite.add(world, body);
-    this.trackMeta.set(spec.id, {
-      body, spec,
-      x1: spec.x, y1: spec.y, x2, y2, dist,
-      elapsed: 0,
-      cyclesDone: 0,
-      stopped: false,
-    });
   }
 
   _findPivotHost(bearing, specById, allowedTypes = PIVOTABLE_HOST_TYPES) {
@@ -440,8 +386,8 @@ export class PhysicsSim {
   }
 
   // The nearest button/bomb/cannon within snap distance of a world point —
-  // the same proximity-based "just touch the ends together" wiring rope and
-  // track's endpoints already use for auto-pivoting/attaching.
+  // the same proximity-based "just touch the ends together" wiring rope
+  // endpoints already use for auto-pivoting/attaching.
   _findWireEndpoint(x, y, specById) {
     let best = null, bestDist = WIRE_SNAP_DIST;
     for (const spec of specById.values()) {
@@ -501,6 +447,9 @@ export class PhysicsSim {
       case "lightSource":
         body = Bodies.circle(spec.x, spec.y, spec.radius || 15, { ...common, isStatic: true, isSensor: true });
         break;
+      case "portal":
+        body = Bodies.circle(spec.x, spec.y, spec.radius || 26, { ...common, isStatic: true, isSensor: true });
+        break;
       case "board":
         body = Bodies.rectangle(spec.x, spec.y, spec.width, spec.height, common);
         break;
@@ -522,23 +471,6 @@ export class PhysicsSim {
       case "mirror":
         body = Bodies.rectangle(spec.x, spec.y, spec.width, spec.height, common);
         break;
-      case "motor":
-        // Always static — its spin is a scripted rotation (see
-        // _applyMotors), not something torque/forces drive.
-        body = Bodies.circle(spec.x, spec.y, spec.radius, { ...common, isStatic: true });
-        break;
-      case "track": {
-        // spec.x/y and spec.x2/y2 are its two ends (like rope) — Matter
-        // needs the rectangle's midpoint and angle, not two raw points.
-        // Sensor + static: this body is just the rail for editing/selection,
-        // the actual moving ball bearing is a separate body (_buildTrack).
-        const x2 = spec.x2 ?? spec.x, y2 = spec.y2 ?? spec.y;
-        const len = Math.max(4, Math.hypot(x2 - spec.x, y2 - spec.y));
-        const midX = (spec.x + x2) / 2, midY = (spec.y + y2) / 2;
-        const trackAngle = Math.atan2(y2 - spec.y, x2 - spec.x);
-        body = Bodies.rectangle(midX, midY, len, 4, { ...common, angle: trackAngle, isStatic: true, isSensor: true });
-        break;
-      }
       case "wire": {
         // Same two-endpoint rectangle-body convention as track — sensor so
         // it truly can't be collided with, and the button↔bomb/cannon link
@@ -571,11 +503,12 @@ export class PhysicsSim {
         material: spec.material,
         width: spec.width, height: spec.height, radius: spec.radius,
         fixed: !!spec.fixed,
-        // A track/wire has no explicit length field — like rope, it's the
-        // live distance between its two endpoints, needed here so
+        power: spec.power, range: spec.range,
+        // A wire has no explicit length field — like rope, it's the live
+        // distance between its two endpoints, needed here so
         // collectRenderItems can reconstruct x2/y2 from the body's actual
         // midpoint/angle.
-        length: (spec.type === "track" || spec.type === "wire") ? Math.max(4, Math.hypot((spec.x2 ?? spec.x) - spec.x, (spec.y2 ?? spec.y) - spec.y)) : spec.length,
+        length: spec.type === "wire" ? Math.max(4, Math.hypot((spec.x2 ?? spec.x) - spec.x, (spec.y2 ?? spec.y) - spec.y)) : spec.length,
       },
     };
     return body;
@@ -600,10 +533,27 @@ export class PhysicsSim {
       this._applyBuoyancy();
       this._applyFans();
       this._applyMagnets();
-      this._applyMotors();
-      this._applyTracks();
       this._dampPivots();
+      this._clampFastBodies();
     });
+  }
+
+  // Matter has no continuous collision detection — a body that would cross
+  // more than its own size in a single step can land fully past a thin
+  // wall before any collision is ever detected, tunneling straight
+  // through. A hard speed ceiling (well above anything a cannon/bomb/fan
+  // is tuned to produce normally) keeps that gap smaller than any wall
+  // this sandbox's objects are built at, without visibly capping normal
+  // play.
+  _clampFastBodies() {
+    for (const body of Composite.allBodies(this.engine.world)) {
+      if (body.isStatic || body.isSensor) continue;
+      const speed = Vector.magnitude(body.velocity);
+      if (speed > MAX_BODY_SPEED) {
+        const scale = MAX_BODY_SPEED / speed;
+        Body.setVelocity(body, { x: body.velocity.x * scale, y: body.velocity.y * scale });
+      }
+    }
   }
 
   // Matter's constraint `damping` barely touches angular swing on a
@@ -704,7 +654,7 @@ export class PhysicsSim {
     body.plugin = {
       gameId: makeId("wind"),
       transient: true,
-      spawnedAt: performance.now(),
+      spawnedAt: this.simTime,
       lifespanMs: WIND_PARTICLE_LIFESPAN_MS,
       render: { hidden: true },
     };
@@ -715,6 +665,16 @@ export class PhysicsSim {
   _applyMagnets() {
     if (!this.magnetMeta.size) return;
     const bodies = Composite.allBodies(this.engine.world);
+    // Live position/angle for each blocking object, not its authored spec
+    // position — a blocker that's fallen or been knocked aside should stop
+    // shielding from wherever it actually ended up.
+    const blockers = this.specs
+      .filter((s) => s.blocksMagnetism)
+      .map((s) => {
+        const b = this.byId.get(s.id);
+        return b ? { type: s.type, x: b.position.x, y: b.position.y, rotation: b.angle * DEG, width: s.width, height: s.height, size: s.size } : null;
+      })
+      .filter(Boolean);
     for (const { body: magnet, spec } of this.magnetMeta.values()) {
       for (const body of bodies) {
         if (body === magnet || body.isStatic || body.isSensor) continue;
@@ -722,58 +682,12 @@ export class PhysicsSim {
         const delta = Vector.sub(magnet.position, body.position);
         const dist = Vector.magnitude(delta);
         if (dist > spec.range || dist < 0.01) continue;
+        if (blockers.length && isMagnetismBlocked(magnet.position, body.position, blockers)) continue;
         const falloff = 1 - dist / spec.range;
         const dir = Vector.normalise(delta);
         const mag = spec.power * FAN_FORCE_SCALE * falloff * body.mass;
         Body.applyForce(body, body.position, { x: dir.x * mag, y: dir.y * mag });
       }
-    }
-  }
-
-  // A motor's spin is a scripted rotation, not torque — this just advances
-  // its body's angle by rpm/60 turns per second, every tick, regardless of
-  // what's touching it (matches the cannon barrel's own Body.setAngle
-  // pattern for a static body).
-  _applyMotors() {
-    if (!this.motorMeta.size) return;
-    const dtSec = this._lastDelta / 1000;
-    for (const { body, spec } of this.motorMeta.values()) {
-      const radPerSec = ((spec.rpm ?? 60) / 60) * 2 * Math.PI;
-      Body.setAngle(body, body.angle + radPerSec * dtSec);
-    }
-  }
-
-  // Drives each track's ball bearing kinematically back and forth along the
-  // line between its two endpoints — like the cannon barrel's scripted
-  // Body.setAngle, this only ever teleports position, never touches
-  // velocity: Matter derives velocity from consecutive positions (Verlet
-  // integration), so calling Body.setVelocity on top of Body.setPosition
-  // every tick double-applies the displacement and sends the ball flying.
-  // Position-only driving keeps the motion exact and Cycles-limited, at the
-  // cost of the ball transferring momentum on collision less realistically
-  // than a true force-driven body would.
-  _applyTracks() {
-    if (!this.trackMeta.size) return;
-    const dtSec = this._lastDelta / 1000;
-    for (const t of this.trackMeta.values()) {
-      if (t.stopped) continue;
-      const speed = Math.max(1, t.spec.speed ?? 200); // world units / sec
-      t.elapsed += dtSec * speed;
-      const period = t.dist * 2; // one full back-and-forth trip
-      const phase = t.elapsed % period;
-      const travel = phase <= t.dist ? phase : period - phase;
-
-      const cyclesLimit = t.spec.cycles ?? 0;
-      const doneNow = Math.floor(t.elapsed / period);
-      if (cyclesLimit > 0 && doneNow >= cyclesLimit) {
-        t.stopped = true;
-        Body.setPosition(t.body, { x: t.x1, y: t.y1 });
-        continue;
-      }
-      t.cyclesDone = doneNow;
-
-      const frac = travel / t.dist;
-      Body.setPosition(t.body, { x: t.x1 + (t.x2 - t.x1) * frac, y: t.y1 + (t.y2 - t.y1) * frac });
     }
   }
 
@@ -814,6 +728,48 @@ export class PhysicsSim {
     this._checkBomb(b, a, phase);
     this._checkSpring(a, b, phase);
     this._checkSpring(b, a, phase);
+    this._checkPortal(a, b, phase);
+    this._checkPortal(b, a, phase);
+  }
+
+  // Teleports anything (except another portal) that touches a portal to
+  // wherever its linked partner is, carrying its speed through but rotated
+  // to match the *exit* portal's own facing — so a ball can go in falling
+  // straight down and come out launched sideways, if that's how the exit
+  // is aimed. A per-body cooldown (not per-portal) stops it immediately
+  // re-triggering the exit the instant it arrives there.
+  _checkPortal(body, other, phase) {
+    if (phase !== "start") return;
+    if (!body.plugin || body.plugin.render?.type !== "portal") return;
+    if (other.isSensor || other.plugin?.render?.type === "portal") return;
+    if (other.plugin && this.simTime < (other.plugin._portalCooldownUntil || 0)) return;
+    const spec = this.specs.find((s) => s.id === body.plugin.gameId);
+    if (!spec) return;
+    const partnerSpec = this._findPortalPartner(spec);
+    if (!partnerSpec) return;
+    const exitBody = this.byId.get(partnerSpec.id);
+    if (!exitBody) return;
+    this.pending.push({ type: "teleport", body: other, entryAngle: body.angle, exitBody, exitAngle: exitBody.angle });
+  }
+
+  _findPortalPartner(spec) {
+    if (spec.linkedId) {
+      const linked = this.specs.find((s) => s.id === spec.linkedId);
+      if (linked) return linked;
+    }
+    // No outgoing link set on this one — maybe the *other* portal points
+    // back at it instead (linking only needs to be set on one side).
+    return this.specs.find((s) => s.type === "portal" && s.linkedId === spec.id) || null;
+  }
+
+  _doTeleport(body, entryAngle, exitBody, exitAngle) {
+    if (!Composite.allBodies(this.engine.world).includes(body)) return;
+    Body.setPosition(body, { x: exitBody.position.x, y: exitBody.position.y });
+    const turn = exitAngle - entryAngle;
+    const cos = Math.cos(turn), sin = Math.sin(turn);
+    const v = body.velocity;
+    Body.setVelocity(body, { x: v.x * cos - v.y * sin, y: v.x * sin + v.y * cos });
+    if (body.plugin) body.plugin._portalCooldownUntil = this.simTime + 300;
   }
 
   _checkSpring(body, other, phase) {
@@ -833,6 +789,7 @@ export class PhysicsSim {
   _checkGlass(body, other, phase) {
     if (phase !== "start") return;
     if (!body.plugin || body.plugin.material !== "glass" || body.plugin.shattered) return;
+    if (body.isSensor) return; // a sensor (portal, lightSource, cannon catch zone...) never physically breaks
     if (other.isSensor) return; // water, cannon catch zones, buttons — not a hard impact
     // Flying shards (or another glass object) hitting this one shouldn't
     // chain-shatter it — only a non-glass impact, or a bomb blast
@@ -906,6 +863,7 @@ export class PhysicsSim {
         else if (action.type === "cannonFire") this._doCannonFire(action.cannonId, action.ballBody);
         else if (action.type === "buttonPress") this._doButtonPress(action.buttonId);
         else if (action.type === "detonate") this._doDetonate(action.bombId);
+        else if (action.type === "teleport") this._doTeleport(action.body, action.entryAngle, action.exitBody, action.exitAngle);
       } catch (e) {
         console.warn("pending action failed", action.type, e);
       }
@@ -927,7 +885,7 @@ export class PhysicsSim {
     });
     Composite.remove(world, body);
 
-    const now = performance.now();
+    const now = this.simTime;
     const shardCount = 12;
     for (let i = 0; i < shardCount; i++) {
       const sx = cx + (Math.random() - 0.5) * w * 0.7;
@@ -963,7 +921,7 @@ export class PhysicsSim {
   }
 
   _cullExpiredShards() {
-    const now = performance.now();
+    const now = this.simTime;
     const world = this.engine.world;
     for (const body of Composite.allBodies(world)) {
       const p = body.plugin;
@@ -1035,9 +993,14 @@ export class PhysicsSim {
   }
 
   _doDetonate(bombId) {
-    const bombBody = this.byId.get(bombId) || Composite.allBodies(this.engine.world).find((b) => b.plugin?.gameId === bombId);
-    if (!bombBody) return;
     const world = this.engine.world;
+    const bombBody = this.byId.get(bombId) || Composite.allBodies(world).find((b) => b.plugin?.gameId === bombId);
+    // this.byId isn't cleaned up on removal, so a button wired to an
+    // already-exploded bomb (pressed again, or pressed while the 90ms
+    // detonation delay from a collision is still pending) would otherwise
+    // find that stale reference and detonate it a second time — blast
+    // force and glass-shattering fired again from a bomb that's long gone.
+    if (!bombBody || !Composite.allBodies(world).includes(bombBody)) return;
     const spec = this.specs.find((s) => s.id === bombId);
     const power = spec?.power ?? 26;
     const radiusOfEffect = spec?.radiusOfEffect ?? 260;
@@ -1061,6 +1024,7 @@ export class PhysicsSim {
       }
     }
     Composite.remove(world, bombBody);
+    this.byId.delete(bombId);
     for (const glass of glassToShatter) this.pending.push({ type: "shatter", body: glass });
     this.callbacks.onEvent?.({ type: "detonate", bombId });
   }
@@ -1069,15 +1033,21 @@ export class PhysicsSim {
     this.engine.gravity.y = scale;
   }
 
+  setTimeScale(scale) {
+    this.timeScale = scale;
+  }
+
   start() {
     this.running = true;
     this.lastTime = null;
+    this.timeScale = this.timeScale ?? 1;
     const loop = (time) => {
       if (!this.running) return;
       if (this.lastTime == null) this.lastTime = time;
-      const delta = Math.min(time - this.lastTime, 33);
+      const delta = Math.min(time - this.lastTime, 33) * this.timeScale;
       this.lastTime = time;
       this._lastDelta = delta;
+      this.simTime += delta;
       Engine.update(this.engine, delta);
       this.processPending();
       this._cullExpiredShards();
@@ -1100,7 +1070,7 @@ export class PhysicsSim {
   // straight from the Matter bodies built in _buildWaterParticles /
   // _spawnWindParticle, not from a decorative animation formula.
   collectParticleItems() {
-    const now = performance.now();
+    const now = this.simTime;
     this.windParticles = this.windParticles.filter((b) => now - b.plugin.spawnedAt <= b.plugin.lifespanMs);
     const items = [];
     for (const body of this.waterParticles) {
@@ -1143,7 +1113,7 @@ export class PhysicsSim {
 
   collectRenderItems() {
     const items = [];
-    const now = performance.now();
+    const now = this.simTime;
     for (const body of Composite.allBodies(this.engine.world)) {
       const r = body.plugin?.render;
       if (!r || r.hidden) continue;
@@ -1153,16 +1123,15 @@ export class PhysicsSim {
         const remaining = body.plugin.lifespanMs - age;
         opacity = clamp(remaining / SHARD_FADE_MS, 0, 1);
       }
-      // A track/wire's own body is centered at its midpoint (Matter bodies
-      // are always positioned by their geometric center), but every other
-      // part of the app — the editor, the property panel, the rail/braid
-      // renderer — treats its x/y and x2/y2 as its two fixed ends, matching
-      // rope's convention. Reconstruct both from the body's live
-      // position/angle so Play-mode rendering sees the same convention edit
-      // mode does.
+      // A wire's own body is centered at its midpoint (Matter bodies are
+      // always positioned by their geometric center), but every other part
+      // of the app — the editor, the property panel, the braid renderer —
+      // treats its x/y and x2/y2 as its two fixed ends, matching rope's
+      // convention. Reconstruct both from the body's live position/angle so
+      // Play-mode rendering sees the same convention edit mode does.
       let px = body.position.x, py = body.position.y;
       let x2, y2;
-      const isFlexEndpoint = r.type === "track" || r.type === "wire";
+      const isFlexEndpoint = r.type === "wire";
       if (isFlexEndpoint) {
         const rad = body.angle;
         const half = (r.length || 200) / 2;
@@ -1192,35 +1161,41 @@ export class PhysicsSim {
         transient: !!body.plugin.transient,
         opacity,
         length: r.length,
+        power: r.power, range: r.range,
       });
     }
     return items;
   }
 }
 
+// Samples points along the magnet→target segment and checks each against
+// every blocking object's shape — cheap, and good enough for "is there a
+// wall in the way" without needing real line/polygon intersection math.
+function isMagnetismBlocked(a, b, blockers) {
+  const steps = 8;
+  for (let i = 1; i < steps; i++) {
+    const t = i / steps;
+    const px = a.x + (b.x - a.x) * t, py = a.y + (b.y - a.y) * t;
+    for (const blocker of blockers) {
+      if (pointInShape(px, py, blocker)) return true;
+    }
+  }
+  return false;
+}
+
 function areaOf(spec) {
-  if (spec.type === "ball" || spec.type === "bomb" || spec.type === "ballBearing" || spec.type === "peg" || spec.type === "magnet" || spec.type === "lightSource" || spec.type === "motor") {
+  if (spec.type === "ball" || spec.type === "bomb" || spec.type === "ballBearing" || spec.type === "peg" || spec.type === "magnet" || spec.type === "lightSource") {
     return Math.PI * spec.radius * spec.radius;
   }
   if (spec.type === "triangle") {
     const size = spec.size ?? 130;
     return (Math.sqrt(3) / 4) * size * size;
   }
-  if (spec.type === "track" || spec.type === "wire") return Math.max(4, Math.hypot((spec.x2 ?? spec.x) - spec.x, (spec.y2 ?? spec.y) - spec.y)) * 4;
+  if (spec.type === "wire") return Math.max(4, Math.hypot((spec.x2 ?? spec.x) - spec.x, (spec.y2 ?? spec.y) - spec.y)) * 4;
   return (spec.width || 40) * (spec.height || 40);
 }
 
 function pointInShape(px, py, spec) {
-  // A track has no `rotation` field at all — it's defined by two raw world
-  // points (x,y)-(x2,y2), and the bearing that rides it can be anywhere
-  // along that whole line, not just at one fixed shape — so this checks
-  // distance to the segment directly, in world space, before the
-  // rotation-transform every other type below shares.
-  if (spec.type === "track") {
-    const x2 = spec.x2 ?? spec.x, y2 = spec.y2 ?? spec.y + 200;
-    return distToSegment(px, py, spec.x, spec.y, x2, y2) <= 9 + 12; // bearing radius + slack
-  }
-
   const cos = Math.cos(-spec.rotation * RAD), sin = Math.sin(-spec.rotation * RAD);
   const dx = px - spec.x, dy = py - spec.y;
   const lx = dx * cos - dy * sin;
@@ -1232,21 +1207,13 @@ function pointInShape(px, py, spec) {
     const [p0, p1, p2] = equilateralPoints(spec.size);
     return sameSide(lx, ly, p0, p1, p2) && sameSide(lx, ly, p1, p2, p0) && sameSide(lx, ly, p2, p0, p1);
   }
-  if (spec.type === "ball" || spec.type === "bomb" || spec.type === "ballBearing" || spec.type === "peg" || spec.type === "magnet" || spec.type === "motor") {
+  if (spec.type === "ball" || spec.type === "bomb" || spec.type === "ballBearing" || spec.type === "peg" || spec.type === "magnet") {
     // A little slack past the drawn radius — snapping a rope end onto a
-    // small peg/bearing/motor shouldn't require pixel-perfect placement.
+    // small peg/bearing shouldn't require pixel-perfect placement.
     const r = (spec.radius || 20) + 6;
     return lx * lx + ly * ly <= r * r;
   }
   return false;
-}
-
-function distToSegment(px, py, x1, y1, x2, y2) {
-  const dx = x2 - x1, dy = y2 - y1;
-  const lenSq = dx * dx + dy * dy;
-  const t = lenSq > 0 ? clamp(((px - x1) * dx + (py - y1) * dy) / lenSq, 0, 1) : 0;
-  const cx = x1 + t * dx, cy = y1 + t * dy;
-  return Math.hypot(px - cx, py - cy);
 }
 
 function sameSide(px, py, a, b, c) {

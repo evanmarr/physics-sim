@@ -18,7 +18,7 @@ const SPEED_UNITS = [
 // elements are always fixed, a wire isn't simulated at all, shards are
 // numerous transient debris (the label would just clutter an explosion),
 // and rope/track render at one endpoint rather than a shape center.
-const NO_SPEED_LABEL_TYPES = new Set(["wire", "lightSource", "mirror", "lens", "shard", "rope", "track"]);
+const NO_SPEED_LABEL_TYPES = new Set(["wire", "lightSource", "mirror", "lens", "shard", "rope"]);
 let speedUnitKey = localStorage.getItem("physics-speed-unit") || SPEED_UNITS[0].key;
 
 function currentSpeedUnit() {
@@ -152,6 +152,7 @@ export class Renderer {
     this.streakLayer = this.particleLayer.append("g").attr("class", "streak-layer");
     this.trajectoryLayer = this.viewport.append("g").attr("class", "trajectory-layer").attr("pointer-events", "none");
     this.rayLayer = this.viewport.append("g").attr("class", "ray-layer").attr("pointer-events", "none");
+    this.fieldLayer = this.viewport.append("g").attr("class", "field-layer").attr("pointer-events", "none");
 
     svg.on("click", (event) => {
       if (event.shiftKey) return; // shift+click on background: leave the in-progress selection alone
@@ -233,6 +234,38 @@ export class Renderer {
       .attr("fill", "none").attr("stroke", "#ffd76b").attr("stroke-width", 1.6).attr("stroke-opacity", 0.85)
       .merge(sel)
       .attr("points", (ray) => ray.map((p) => `${p.x},${p.y}`).join(" "));
+  }
+
+  // A magnet's force in this sandbox falls off radially from one point
+  // (not a real two-pole dipole field), so the honest way to draw it is
+  // the same convention as electric field lines around a point charge:
+  // straight lines radiating out to its range, arrowed toward the magnet
+  // for attract (positive power) or away from it for repel (negative).
+  // Call with [] to clear.
+  renderMagneticField(magnets) {
+    this.fieldLayer.selectAll("*").remove();
+    const lineCount = 14;
+    for (const m of magnets) {
+      const attract = m.power >= 0;
+      const inner = (m.radius || 20) + 6;
+      const outer = inner + Math.max(20, (m.range ?? 300) - inner);
+      for (let i = 0; i < lineCount; i++) {
+        const angle = (i / lineCount) * Math.PI * 2;
+        const dir = { x: Math.cos(angle), y: Math.sin(angle) };
+        const x1 = m.x + dir.x * inner, y1 = m.y + dir.y * inner;
+        const x2 = m.x + dir.x * outer, y2 = m.y + dir.y * outer;
+        this.fieldLayer.append("line").attr("x1", x1).attr("y1", y1).attr("x2", x2).attr("y2", y2).attr("class", "field-line");
+        const tip = attract ? { x: x1, y: y1 } : { x: x2, y: y2 };
+        const backX = tip.x - dir.x * 14, backY = tip.y - dir.y * 14;
+        const normal = { x: -dir.y, y: dir.x };
+        const points = [
+          `${tip.x},${tip.y}`,
+          `${backX + normal.x * 5},${backY + normal.y * 5}`,
+          `${backX - normal.x * 5},${backY - normal.y * 5}`,
+        ].join(" ");
+        this.fieldLayer.append("polygon").attr("points", points).attr("class", "field-arrow");
+      }
+    }
   }
 
   // The cannon's predicted-trajectory preview (edit mode, selected cannon
@@ -387,6 +420,9 @@ export class Renderer {
       if (d && !d.transient && ROTATABLE.has(d.type)) {
         this._addRotateHandle(d);
       }
+    } else if (editable && selectedIds.size > 1) {
+      const group = items.filter((it) => selectedIds.has(it.id) && !it.transient && ROTATABLE.has(it.type));
+      if (group.length > 1) this._addGroupRotateHandle(group);
     }
 
     if (editable) {
@@ -450,6 +486,41 @@ export class Renderer {
     }));
   }
 
+  // One shared handle, centered on the selection's centroid, that spins
+  // every selected object around that shared center together — each keeps
+  // its own rotation field turning too, not just its position orbiting.
+  _addGroupRotateHandle(group) {
+    const cx = group.reduce((s, d) => s + d.x, 0) / group.length;
+    const cy = group.reduce((s, d) => s + d.y, 0) / group.length;
+    const dist = Math.max(...group.map((d) => Math.hypot(d.x - cx, d.y - cy) + handleDistance(d))) + 20;
+    const hx = cx, hy = cy - dist;
+
+    const g = this.objectLayer.append("g").attr("class", "rotate-handle");
+    g.append("line").attr("x1", cx).attr("y1", cy).attr("x2", hx).attr("y2", hy);
+    g.append("circle").attr("cx", hx).attr("cy", hy).attr("r", 7);
+
+    const initial = group.map((d) => ({ id: d.id, dx: d.x - cx, dy: d.y - cy, rotation: d.rotation || 0 }));
+    const self = this;
+    let startAngle = 0;
+    g.call(d3.drag()
+      .on("start", (event) => {
+        startAngle = Math.atan2(event.x - cx, -(event.y - cy)) / RAD;
+      })
+      .on("drag", (event) => {
+        const angle = Math.atan2(event.x - cx, -(event.y - cy)) / RAD;
+        const deltaDeg = Math.round((angle - startAngle) / 5) * 5;
+        const rad = deltaDeg * RAD;
+        const cos = Math.cos(rad), sin = Math.sin(rad);
+        const moves = initial.map((o) => ({
+          id: o.id,
+          x: cx + o.dx * cos - o.dy * sin,
+          y: cy + o.dx * sin + o.dy * cos,
+          rotation: o.rotation + deltaDeg,
+        }));
+        self.handlers.onRotateMany(moves);
+      }));
+  }
+
   // Dragging any one selected object moves the whole selection together —
   // if only one object is selected (the common case), that's just it.
   _dragBehavior() {
@@ -494,8 +565,8 @@ export class Renderer {
   }
 }
 
-const ROTATABLE = new Set(["board", "triangle", "cannon", "button", "springPad", "fan", "lens", "lightSource", "mirror", "motor"]);
-const FLEXIBLE_ENDPOINT_TYPES = new Set(["rope", "track", "wire"]); // two independently-draggable ball-bearing ends
+const ROTATABLE = new Set(["board", "triangle", "cannon", "button", "springPad", "fan", "lens", "lightSource", "mirror", "portal"]);
+const FLEXIBLE_ENDPOINT_TYPES = new Set(["rope", "wire"]); // two independently-draggable ball-bearing ends
 
 // Cold→hot 4-stop gradient (blue → cyan → yellow → red), same family as a
 // CFD velocity-field plot — used to color wind streaks by their speed.
@@ -522,7 +593,6 @@ function handleDistance(d) {
   if (d.type === "lightSource") return 40;
   if (d.type === "triangle") return ((d.size ?? 130) * Math.sqrt(3)) / 3 + 26;
   if (d.type === "cannon") return d.height / 2 + 26;
-  if (d.type === "motor") return (d.radius ?? 24) + 26;
   return 40;
 }
 
@@ -555,7 +625,6 @@ function buildShape(g, d) {
       if (d.type === "bomb") g.append("text").attr("class", "icon-label").text("💣").attr("text-anchor", "middle").attr("dy", 5).attr("font-size", d.radius);
       break;
     case "ballBearing":
-    case "trackBall":
       g.append("circle").attr("class", "shape").attr("r", d.radius);
       g.append("circle").attr("r", 2.5).attr("fill", "#1b1e24");
       break;
@@ -609,22 +678,6 @@ function buildShape(g, d) {
       }
       break;
     }
-    case "track": {
-      g.append("line").attr("class", "shape track-rail").attr("x1", 0).attr("y1", 0);
-      for (const end of ["start", "end"]) {
-        const handle = g.append("g").attr("class", `rope-end-handle rope-end-${end}`);
-        handle.append("circle").attr("class", "rope-end-outer");
-        handle.append("circle").attr("class", "rope-end-dot").attr("r", 2.5);
-      }
-      // Decorative preview of the ball bearing resting at the track's
-      // midpoint — hidden once Play starts, when the real moving ball
-      // bearing (a separate render item, see physics.js's _buildTrack)
-      // takes over.
-      const preview = g.append("g").attr("class", "track-ball-preview");
-      preview.append("circle").attr("class", "track-ball-outer");
-      preview.append("circle").attr("class", "track-ball-dot").attr("r", 2.5);
-      break;
-    }
     case "wire": {
       // Three braided strands, not a single line — deliberately not tagged
       // "shape", so the generic material-color block above leaves their
@@ -653,12 +706,12 @@ function buildShape(g, d) {
       g.append("line").attr("class", "mirror-highlight");
       break;
     }
-    case "motor": {
-      g.append("circle").attr("class", "shape motor-body");
-      // A single spoke + hub, not a symmetric marker — the whole point is
-      // that it visibly reads as rotating once Play sets its live angle.
-      g.append("line").attr("class", "motor-spoke");
-      g.append("circle").attr("class", "motor-hub").attr("r", 3);
+    case "portal": {
+      g.append("circle").attr("class", "portal-ring");
+      g.append("path").attr("class", "portal-spiral");
+      // Points toward this portal's own rotation — the direction anything
+      // exiting it gets launched.
+      g.append("polygon").attr("class", "portal-arrow");
       break;
     }
   }
@@ -694,7 +747,6 @@ function updateShape(g, d, editable) {
     case "ball":
     case "bomb":
     case "ballBearing":
-    case "trackBall":
     case "peg":
     case "magnet":
       g.select(".shape").attr("r", d.radius);
@@ -766,27 +818,6 @@ function updateShape(g, d, editable) {
       g.selectAll(".rope-end-outer").attr("r", handleR);
       break;
     }
-    case "track": {
-      const ex = (d.x2 ?? d.x) - d.x, ey = (d.y2 ?? d.y + 200) - d.y;
-      g.select(".shape")
-        .attr("x2", ex).attr("y2", ey)
-        .attr("stroke-width", 3)
-        .attr("stroke-linecap", "round");
-      g.select(".rope-end-start").attr("transform", "translate(0,0)");
-      g.select(".rope-end-end").attr("transform", `translate(${ex},${ey})`);
-      g.selectAll(".rope-end-outer").attr("r", 7);
-      // Both the static end-grips and the resting-ball preview are editor
-      // decorations — hide them once Play starts, when the real moving
-      // ball bearing (a separate render item) takes over. Otherwise the
-      // real ball is easy to mistake for just another motionless handle,
-      // since it starts out sitting right on top of one.
-      g.selectAll(".rope-end-handle").style("display", editable && !d.transient ? null : "none");
-      g.select(".track-ball-preview")
-        .attr("transform", `translate(${ex / 2},${ey / 2})`)
-        .style("display", editable && !d.transient ? null : "none");
-      g.select(".track-ball-outer").attr("r", 9);
-      break;
-    }
     case "wire": {
       const ex = (d.x2 ?? d.x) - d.x, ey = (d.y2 ?? d.y) - d.y;
       g.select(".wire-strand-red").attr("d", braidStrandPath(ex, ey, 0));
@@ -825,9 +856,23 @@ function updateShape(g, d, editable) {
         .attr("y1", -d.height / 2 + 2.5).attr("y2", -d.height / 2 + 2.5);
       break;
     }
-    case "motor": {
-      g.select(".motor-body").attr("r", d.radius).attr("fill", mat.color).attr("stroke", mat.strokeColor);
-      g.select(".motor-spoke").attr("x1", 0).attr("y1", 0).attr("x2", d.radius * 0.85).attr("y2", 0);
+    case "portal": {
+      const r = d.radius;
+      g.select(".portal-ring").attr("r", r);
+      const spiral = d3.path();
+      const turns = 2.2, steps = 40;
+      spiral.moveTo(0, 0);
+      for (let i = 1; i <= steps; i++) {
+        const t = i / steps;
+        const angle = t * turns * Math.PI * 2;
+        const rad = t * r * 0.85;
+        spiral.lineTo(Math.cos(angle) * rad, Math.sin(angle) * rad);
+      }
+      g.select(".portal-spiral").attr("d", spiral.toString());
+      // Points "up" in local space — the group's own rotate() transform
+      // (applied one level up, from d.rotation) carries it to wherever the
+      // portal is actually facing.
+      g.select(".portal-arrow").attr("points", `0,${-r - 12} 7,${-r + 4} -7,${-r + 4}`);
       break;
     }
   }
