@@ -29,6 +29,18 @@
   --grid-major: #383f4c;
 }
 
+#loading-screen {
+  position: fixed; inset: 0; z-index: 9999;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--bg);
+  transition: opacity .6s ease;
+}
+#loading-screen.loading-done { opacity: 0; pointer-events: none; }
+#loading-canvas { position: absolute; transition: opacity .5s ease; }
+#loading-screen.loading-done #loading-canvas { opacity: 0; }
+#loading-logo { opacity: 0; transition: opacity .5s ease .1s; }
+#loading-screen.loading-done #loading-logo { opacity: 1; }
+
 /* The "cool colors" — cyan/lavender/mint — carried over from the Particle
    Physics gallery's original look. Fixed rather than theme-swapped: they're
    meant as a recognizable accent identity for the app's launcher screens
@@ -121,9 +133,19 @@ button:disabled { opacity: .4; cursor: default; }
 :root[data-device="mobile"] .rotate-handle circle { r: 12; }
 /* Cybersecurity's search results (fixed 380px) and info panel sit side by
    side on desktop, but that badly overflows a narrow phone screen -- stack
-   them instead, with the results list capped to a scrollable band up top. */
-:root[data-device="mobile"] .cyber-body { flex-direction: column; }
-:root[data-device="mobile"] .cyber-results { width: 100%; max-height: 38vh; padding-right: 0; }
+   them instead. Both desktop's .cyber-results/.cyber-info are flex:1/fixed-
+   width children of a row that itself scrolls internally; naively keeping
+   that same flex sizing in a column just redistributes the SAME cramped
+   height between two stacked panes instead of one, squeezing the info pane
+   down to a sliver the instant it actually has a description to show. So on
+   mobile the whole body scrolls as one normal column instead: the results
+   list keeps its own internal scroll (still useful once there are dozens of
+   entries), but the info pane gets its natural content height, appearing
+   right below the entry you tapped -- the same relative position (right
+   after the list) that it holds beside the list on desktop. */
+:root[data-device="mobile"] .cyber-body { flex-direction: column; overflow-y: auto; }
+:root[data-device="mobile"] .cyber-results { width: 100%; max-height: 38vh; padding-right: 0; flex-shrink: 0; }
+:root[data-device="mobile"] .cyber-info { flex: none; overflow-y: visible; }
 :root[data-device="mobile"] .cyber-header { flex-direction: column; align-items: flex-start; gap: 4px; }
 /* Portrait phone: the desktop's 4-column layout (palette + canvas + two
    side panels, each with a fixed pixel width) doesn't fit a narrow screen
@@ -159,8 +181,12 @@ button:disabled { opacity: .4; cursor: default; }
   padding: 0 16px;
   background: var(--panel);
   border-bottom: 1px solid var(--border);
-  overflow-x: auto;
-  overflow-y: hidden;
+  /* Deliberately NOT overflow:hidden on either axis — this bar hosts two
+     absolutely-positioned dropdowns (the menu and the account dropdown),
+     and any overflow value but "visible" here would clip them instead of
+     just the button row scrolling. The mode-tab row below handles its own
+     horizontal scroll instead. */
+  overflow: visible;
 }
 /* Every direct child keeps its natural width and the bar scrolls instead —
    without this, flex's default shrink-to-fit squeezes buttons down to a
@@ -170,8 +196,17 @@ button:disabled { opacity: .4; cursor: default; }
 .brand { display: flex; align-items: center; gap: 7px; font-weight: 700; letter-spacing: .03em; color: var(--cool-2); background: none; border: none; padding: 4px 6px; font-size: 14px; cursor: pointer; border-radius: 8px; }
 .brand.active { background: var(--panel-alt, rgba(125,211,252,0.12)); }
 .brand-logo { flex-shrink: 0; }
-#theme-toggle { margin-left: 8px; padding: 6px 10px; }
-#mode-tabs { display: flex; align-items: center; gap: 22px; }
+#menu-wrap { position: relative; margin-left: auto; }
+#menu-btn { font-size: 20px; line-height: 1; padding: 4px 10px; }
+#menu-dropdown {
+  position: absolute; top: 100%; right: 0; margin-top: 4px; z-index: 60;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.2); padding: 4px; min-width: 160px;
+  display: flex; flex-direction: column;
+}
+#menu-dropdown button { width: 100%; text-align: left; padding: 8px 10px; font-size: 13.5px; border: none; background: none; border-radius: 6px; }
+#menu-dropdown button:hover { background: var(--panel-alt); }
+#mode-tabs { display: flex; align-items: center; gap: 22px; overflow-x: auto; max-width: 100%; }
 .mode-tab {
   border: none; background: none; padding: 4px 0; border-radius: 0;
   color: var(--text-dim); font-size: 13.5px; font-weight: 500;
@@ -192,13 +227,29 @@ button:disabled { opacity: .4; cursor: default; }
 #speed-val { color: var(--text); font-weight: 600; }
 
 #light-mode-toggle-wrap { margin-left: auto; }
+#units-controls { display: flex; gap: 6px; }
+#mobile-edit-controls { display: none; gap: 6px; }
+:root[data-device="mobile"] #mobile-edit-controls { display: flex; }
+#mobile-multiselect-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
 #light-mode-btn.active { background: var(--accent-2); border-color: var(--accent-2); color: #2a1a00; font-weight: 600; }
 #field-mode-btn.active { background: #8b5cf6; border-color: #8b5cf6; color: #fff; font-weight: 600; }
 .field-line { stroke: #8b5cf6; stroke-width: 1; stroke-opacity: 0.45; }
 .field-arrow { fill: #8b5cf6; opacity: 0.7; }
 #file-controls { display: flex; gap: 8px; }
 #account-controls { display: flex; align-items: center; gap: 8px; }
-#account-email { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-dim); font-size: 13px; }
+#account-email-wrap { position: relative; }
+#account-email {
+  max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--text-dim); font-size: 13px; background: none; border: none; cursor: pointer;
+  padding: 4px 8px; border-radius: 6px;
+}
+#account-email:hover { background: var(--panel-alt); color: var(--text); }
+#account-dropdown {
+  position: absolute; top: 100%; right: 0; margin-top: 4px; z-index: 50;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.2); padding: 4px; min-width: 110px;
+}
+#account-dropdown button { width: 100%; text-align: left; padding: 7px 10px; font-size: 13px; }
 
 #workspace {
   position: absolute;
@@ -248,10 +299,12 @@ button:disabled { opacity: .4; cursor: default; }
   -webkit-background-clip: text; background-clip: text; color: transparent;
 }
 .home-tagline { font-size: 15px; color: var(--text-dim); max-width: 560px; margin: 0 auto; line-height: 1.6; }
-.home-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; margin-bottom: 56px; }
-/* A lone card left over in the last row (7 sections in a 3-column grid
-   leaves 1) sits in the middle column instead of stranded on the left. */
-.home-cards > .home-card:last-child:nth-child(3n+1) { grid-column: 2; }
+.home-cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; margin-bottom: 56px; }
+/* A lone card left over in the last row of a 4-column grid sits centered
+   instead of stranded on the left. */
+.home-cards > .home-card:last-child:nth-child(4n+1) { grid-column: 2 / span 2; }
+.home-cards > .home-card:nth-last-child(2):nth-child(4n+1) { grid-column: 1 / span 2; }
+.home-cards > .home-card:nth-last-child(1):nth-child(4n+2) { grid-column: 3 / span 2; }
 .home-card {
   background: var(--panel); border: 1px solid var(--border); border-radius: 14px;
   padding: 0 20px 20px; text-align: left; cursor: pointer;
@@ -416,22 +469,77 @@ button:disabled { opacity: .4; cursor: default; }
 .math-edit-reset:hover { color: var(--text); border-color: var(--accent-2); }
 
 .modal { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: flex; align-items: center; justify-content: center; z-index: 50; }
+/* alertPopup/confirmPopup can be triggered from inside another already-open
+   modal (e.g. Donate from inside About) — same z-index as every other
+   .modal would leave it stacking by DOM order, not open-order, so whichever
+   modal happens to come later in the HTML would always paint on top
+   regardless of which was actually opened last. This needs to always win. */
+#popup-modal { z-index: 100; }
 .modal-box { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 20px; width: 360px; max-height: 70vh; overflow-y: auto; }
+.about-box { width: 480px; }
+.about-box p { font-size: 14px; line-height: 1.6; color: var(--text-dim); }
+.about-box h3 { margin-top: 20px; margin-bottom: 6px; }
+.about-placeholder-note { font-size: 12px; font-style: italic; color: var(--danger); margin: 0 0 6px; }
+.about-actions { display: flex; gap: 8px; margin-top: 4px; }
+
+.classroom-box { width: 460px; }
+.classroom-box h3 { margin: 18px 0 8px; font-size: 13px; }
+.classroom-row {
+  display: flex; align-items: center; gap: 10px; padding: 10px;
+  border: 1px solid var(--border); border-radius: 8px; background: var(--panel-alt);
+  margin-bottom: 8px;
+}
+.classroom-row-info { flex: 1; min-width: 0; }
+.classroom-row-name { font-weight: 600; font-size: 13.5px; }
+.classroom-row-meta { font-size: 11.5px; color: var(--text-dim); margin-top: 2px; }
+.classroom-code {
+  font-size: 15px; font-weight: 700; letter-spacing: .08em; padding: 3px 8px;
+  border-radius: 6px; background: var(--panel); border: 1px solid var(--border);
+}
+.classroom-form { display: flex; gap: 8px; margin-top: 4px; }
+.classroom-form input { flex: 1; }
+
+.dashboard-hint { font-size: 12.5px; color: var(--text-dim); margin: 0 0 14px; }
+.dashboard-share-actions { display: flex; gap: 8px; margin-bottom: 18px; flex-wrap: wrap; }
+.dashboard-row {
+  display: flex; align-items: center; gap: 10px; padding: 10px;
+  border: 1px solid var(--border); border-radius: 8px; background: var(--panel-alt);
+  margin-bottom: 8px;
+}
+.dashboard-row-info { flex: 1; min-width: 0; }
+.dashboard-row-name { font-weight: 600; font-size: 13.5px; }
+.dashboard-row-kind { font-weight: 400; font-size: 11px; color: var(--text-dim); border: 1px solid var(--border); border-radius: 999px; padding: 1px 8px; margin-left: 6px; }
+.dashboard-row-meta { font-size: 11.5px; color: var(--text-dim); margin-top: 2px; }
+.dashboard-share-form {
+  margin-top: 12px; padding: 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-alt);
+}
+.dashboard-share-form select { width: 100%; margin-bottom: 10px; padding: 7px 9px; }
 .modal-box h2 { margin-top: 0; }
 .modal-box input[type="text"], .modal-box input[type="email"], .modal-box input[type="password"], .modal-box input[type="number"] {
   width: 100%; box-sizing: border-box; background: var(--panel-alt); color: var(--text);
   border: 1px solid var(--border); border-radius: 6px; padding: 7px 9px; font-size: 13px; margin-bottom: 10px;
 }
 .modal-box label { display: block; font-size: 12px; color: var(--text-dim); margin-bottom: 4px; }
+.modal-box textarea {
+  width: 100%; box-sizing: border-box; background: var(--panel-alt); color: var(--text);
+  border: 1px solid var(--border); border-radius: 6px; padding: 9px; font-size: 13px;
+  margin-bottom: 10px; font-family: inherit; resize: vertical;
+}
+.feedback-hint { font-size: 12.5px; color: var(--text-dim); margin: 0 0 12px; }
 .modal-box #auth-submit, .modal-box #auth-close { width: 100%; margin-top: 4px; }
 
 .auth-tabs { display: flex; gap: 6px; margin-bottom: 14px; }
+.auth-name-row { display: flex; gap: 8px; }
+.auth-name-row > div { flex: 1; }
+#auth-title { width: 100%; box-sizing: border-box; background: var(--panel-alt); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 7px 9px; font-size: 13px; margin-bottom: 4px; }
 .auth-tab { flex: 1; }
 .auth-tab.active { background: var(--accent); border-color: var(--accent); color: #0b1220; font-weight: 600; }
 .auth-hint { font-size: 11.5px; color: var(--text-dim); margin: -4px 0 10px; }
 .auth-checkbox { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text-dim); margin-bottom: 10px; }
 .auth-checkbox input { margin: 0; }
 .auth-error { color: var(--danger); font-size: 12.5px; min-height: 16px; margin-bottom: 4px; }
+.auth-error.auth-notice { color: var(--good); }
+#auth-code { font-size: 22px; letter-spacing: .3em; text-align: center; }
 
 #saves-modal-box { width: 420px; }
 .saves-new-row { display: flex; gap: 8px; align-items: flex-start; }
@@ -870,6 +978,39 @@ button:disabled { opacity: .4; cursor: default; }
 .phish-clue:hover { background: rgba(248,113,113,0.18); }
 .phish-clue.found { background: rgba(52,211,153,0.28); text-decoration: underline wavy #34d399; cursor: default; }
 
+.cyber-hash-out {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px;
+  word-break: break-all; background: var(--bg); border: 1px solid var(--border);
+  border-radius: 8px; padding: 10px 12px; margin-top: 10px; min-height: 18px; color: var(--accent);
+}
+.cyber-totp-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 32px;
+  font-weight: 700; letter-spacing: .12em; margin-top: 8px; color: var(--text);
+}
+
+.cyber-fw-rules { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
+.cyber-fw-rule {
+  display: flex; align-items: center; gap: 10px; font-size: 12.5px; padding: 6px 10px;
+  border-radius: 6px; background: var(--bg); border: 1px solid var(--border);
+}
+.cyber-fw-rule-num { color: var(--text-dim); font-variant-numeric: tabular-nums; width: 16px; }
+.cyber-fw-rule-action { font-weight: 700; width: 52px; }
+.cyber-fw-rule-allow .cyber-fw-rule-action { color: #34d399; }
+.cyber-fw-rule-block .cyber-fw-rule-action { color: #f87171; }
+.cyber-fw-rule button { margin-left: auto; background: none; border: none; color: var(--text-dim); cursor: pointer; padding: 2px 6px; }
+.cyber-fw-rule button:hover { color: #f87171; }
+.cyber-fw-add { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+.cyber-fw-add input, .cyber-fw-add select { padding: 6px 8px; font-size: 12.5px; }
+.cyber-fw-add input[type="text"] { width: 150px; }
+.cyber-fw-feed {
+  display: flex; flex-direction: column; gap: 3px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+  padding: 10px 12px; max-height: 220px; overflow-y: auto;
+}
+.cyber-fw-line { padding: 1px 0; }
+.cyber-fw-allowed { color: #34d399; }
+.cyber-fw-blocked { color: #f87171; }
+
 /* ---------- Particle Physics ---------- */
 /* The demos are a separate, self-contained static site (see
    particle-physics/) rather than ported into this app's own object model,
@@ -1082,6 +1223,79 @@ button:disabled { opacity: .4; cursor: default; }
 .econ-field select { padding: 6px 8px; border-radius: 6px; border: 1px solid var(--border); background: var(--panel-alt); color: var(--text); }
 .econ-help { font-size: 11.5px; color: var(--text-dim); line-height: 1.5; margin-top: 4px; }
 .econ-readout { margin-top: 14px; font-size: 12.5px; line-height: 1.6; color: var(--text); border-top: 1px solid var(--border); padding-top: 10px; }
+
+.econ-title { margin: 0; padding: 14px 20px 0; font-size: 26px; color: var(--accent); flex-shrink: 0; }
+.econ-body { flex: 1; min-height: 0; overflow-y: auto; padding: 18px 24px; }
+.econ-intro { font-size: 13.5px; color: var(--text-dim); line-height: 1.6; max-width: 720px; margin: 0 0 16px; }
+
+/* ---------- Zoology ---------- */
+.zoo-pyramid-slider { width: 100%; max-width: 420px; display: block; margin-bottom: 20px; }
+.zoo-pyramid { display: flex; flex-direction: column-reverse; align-items: center; gap: 4px; margin-bottom: 24px; }
+.zoo-pyramid-level {
+  background: linear-gradient(180deg, var(--accent), var(--cool-2, #8b5cf6));
+  color: #fff; text-align: center; padding: 14px 10px; border-radius: 4px;
+  display: flex; flex-direction: column; gap: 2px; font-size: 12.5px;
+}
+.zoo-pyramid-level strong { font-size: 13.5px; }
+.zoo-level-notes { max-width: 720px; font-size: 12.5px; color: var(--text-dim); line-height: 1.7; }
+.zoo-level-notes p { margin: 0 0 8px; }
+.zoo-organism-palette { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }
+.zoo-organism-chip {
+  padding: 7px 12px; border-radius: 999px; border: 1px solid var(--border);
+  background: var(--panel-alt); color: var(--text-dim); font-size: 13px;
+}
+.zoo-organism-chip.active { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+.zoo-web-stage-wrap { border: 1px solid var(--border); border-radius: 10px; background: var(--panel); overflow: hidden; }
+.zoo-web-stage { width: 100%; min-height: 420px; }
+.zoo-web-stage svg text { user-select: none; }
+
+/* ---------- Sound ---------- */
+.sound-wrap { max-width: 900px; }
+.sound-canvas-wrap { border: 1px solid var(--border); border-radius: 10px; background: var(--bg); padding: 10px; margin: 14px 0; }
+.sound-canvas { width: 100%; height: 180px; display: block; }
+.sound-status { font-size: 12.5px; color: var(--text-dim); margin-top: 8px; min-height: 16px; }
+.sound-record-row { margin-top: 10px; }
+.cyber-sim-btn.recording { background: #f87171; border-color: #f87171; color: #fff; }
+.sound-playback-wrap { margin-top: 14px; display: flex; flex-direction: column; gap: 10px; }
+.sound-playback-wrap audio { width: 100%; }
+.sound-rate-row { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--text-dim); }
+.sound-rate-row input { flex: 1; max-width: 300px; }
+.sound-hint { font-size: 12px; color: var(--text-dim); margin: 0; }
+.sound-make-controls { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; font-size: 13px; color: var(--text-dim); margin-bottom: 6px; }
+.sound-make-controls select { padding: 6px 10px; }
+.sound-make-controls input[type="range"] { width: 220px; }
+
+/* ---------- Sustainability ---------- */
+.sustain-body { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 20px 20px; }
+.sustain-palette { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+.sustain-chip {
+  display: flex; align-items: center; gap: 6px; padding: 8px 12px; border-radius: 8px;
+  border: 1px solid var(--border); background: var(--panel-alt); color: var(--text); font-size: 12.5px;
+}
+.sustain-chip.active { border-color: var(--accent); background: rgba(79,140,255,.15); font-weight: 600; }
+.sustain-chip-cost { color: var(--text-dim); }
+.sustain-layout { display: flex; gap: 20px; flex-wrap: wrap; }
+.sustain-grid {
+  display: grid; gap: 2px; background: var(--border); border: 1px solid var(--border);
+  border-radius: 8px; overflow: hidden; width: min(720px, 100%); aspect-ratio: 12 / 8;
+}
+.sustain-cell {
+  background: var(--panel-alt); border: none; font-size: 18px; display: flex;
+  align-items: center; justify-content: center; cursor: pointer; padding: 0; aspect-ratio: 1;
+}
+.sustain-cell:hover { background: var(--panel); }
+.sustain-dashboard { width: 260px; flex-shrink: 0; display: flex; flex-direction: column; gap: 10px; }
+.sustain-stat {
+  background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+  padding: 8px 12px; display: flex; justify-content: space-between; align-items: baseline;
+  font-size: 12.5px; color: var(--text-dim); flex-wrap: wrap;
+}
+.sustain-stat strong { color: var(--text); font-size: 13.5px; }
+.sustain-stat-bad { border-color: #f87171; }
+.sustain-stat-bad strong { color: #f87171; }
+.sustain-stat-note { font-size: 11px; color: var(--text-dim); width: 100%; margin-top: 2px; }
+.sustain-warning { background: rgba(248,113,113,.15); border: 1px solid #f87171; color: #f87171; border-radius: 8px; padding: 8px 12px; font-size: 12px; }
+.sustain-actions { display: flex; gap: 8px; margin-top: 16px; }
 
 .econ-market-wrap, .econ-game-wrap { display: flex; flex: 1; min-width: 0; }
 .econ-market-stage { flex: 1; min-width: 0; }

@@ -17,6 +17,16 @@
 </head>
 <body>
 
+<div id="loading-screen">
+  <canvas id="loading-canvas"></canvas>
+  <svg id="loading-logo" viewBox="0 0 24 24" width="64" height="64" aria-hidden="true">
+    <ellipse cx="12" cy="12" rx="10" ry="4.2" fill="none" style="stroke: var(--cool-1)" stroke-width="1.5" />
+    <ellipse cx="12" cy="12" rx="10" ry="4.2" fill="none" style="stroke: var(--cool-2)" stroke-width="1.5" transform="rotate(60 12 12)" />
+    <ellipse cx="12" cy="12" rx="10" ry="4.2" fill="none" style="stroke: var(--cool-3)" stroke-width="1.5" transform="rotate(120 12 12)" />
+    <circle cx="12" cy="12" r="2.1" style="fill: var(--text)" />
+  </svg>
+</div>
+
 <header id="topbar">
   <div class="brand" id="brand-home-btn" role="button" title="Home">
     <svg class="brand-logo" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
@@ -37,17 +47,33 @@
     <button id="mode-mathematics-btn" class="mode-tab">Mathematics</button>
     <button id="mode-whiteboard-btn" class="mode-tab">Whiteboard</button>
     <button id="mode-economics-btn" class="mode-tab">Economics</button>
+    <button id="mode-zoology-btn" class="mode-tab">Zoology</button>
+    <button id="mode-sound-btn" class="mode-tab">Sound</button>
+    <button id="mode-sustainability-btn" class="mode-tab">Sustainability</button>
   </div>
-  <button id="quiz-btn">Quiz</button>
-  <button id="tutorial-btn" title="A guided tour of what each section can do">Tutorial</button>
   <div id="account-controls">
-    <span id="account-email" class="hidden"></span>
+    <div id="account-email-wrap" class="hidden">
+      <button id="account-email" title="Account options"></button>
+      <div id="account-dropdown" class="hidden">
+        <button id="title-btn" title="Click to change">Title: Independent</button>
+        <button id="signout-btn">Sign Out</button>
+      </div>
+    </div>
     <button id="account-btn">Sign In</button>
-    <button id="signout-btn" class="hidden">Sign Out</button>
   </div>
-  <button id="units-toggle-btn" title="Switch units of measurement (metric/imperial)">m/kg</button>
-  <button id="device-mode-btn" title="Change device mode (mobile/computer)">📱</button>
-  <button id="theme-toggle" title="Toggle light/dark theme">🌙</button>
+  <div id="menu-wrap">
+    <button id="menu-btn" title="More">⋯</button>
+    <div id="menu-dropdown" class="hidden">
+      <button id="quiz-btn">Quiz</button>
+      <button id="tutorial-btn">Tutorial</button>
+      <button id="about-btn">About</button>
+      <button id="classroom-btn">Classroom</button>
+      <button id="dashboard-btn" class="hidden">Dashboard</button>
+      <button id="feedback-btn">Feedback</button>
+      <button id="device-mode-btn">Device Mode</button>
+      <button id="theme-toggle">Dark Mode</button>
+    </div>
+  </div>
 </header>
 
 <div id="home-root" class="hidden"></div>
@@ -57,7 +83,7 @@
     <div id="run-controls">
       <button id="play-btn" title="Space">▶ Play</button>
       <span class="hint">space</span>
-      <button id="reset-btn" title="Reset the simulation back to your blueprint and run it again">Reset</button>
+      <button id="reset-btn" title="Reset everything back to your blueprint (stays stopped)">Reset</button>
       <span class="hint">R</span>
     </div>
     <div id="gravity-controls">
@@ -74,12 +100,25 @@
       <button id="light-mode-btn" title="Show light rays through glass/lenses">Light Mode</button>
       <button id="field-mode-btn" title="Show every magnet's field lines">Show Field</button>
     </div>
+    <div id="units-controls">
+      <button id="units-toggle-btn" title="Switch distance/weight units (metric/imperial)">m/kg</button>
+      <button id="speed-unit-btn" title="Change what unit a moving object's speed readout is shown in">m/s</button>
+    </div>
     <div id="file-controls">
       <button id="challenges-btn" class="primary">Physics Challenges</button>
       <button id="my-worlds-btn">My Worlds</button>
       <button id="undo-btn" title="Undo (Ctrl/Cmd+Z)" disabled>↶</button>
       <button id="redo-btn" title="Redo (Ctrl/Cmd+Shift+Z)" disabled>↷</button>
       <button id="clear-btn">Clear</button>
+    </div>
+    <!-- No keyboard on a touchscreen, so mobile mode gets its own explicit
+         Copy/Paste buttons and a Multi-select toggle (in place of holding
+         Shift) — hidden entirely on desktop, where Ctrl/Cmd+C/V and
+         Shift+click already do this. -->
+    <div id="mobile-edit-controls">
+      <button id="mobile-copy-btn" title="Copy the selected object(s)">Copy</button>
+      <button id="mobile-paste-btn" title="Paste">Paste</button>
+      <button id="mobile-multiselect-btn" title="Toggle multi-select: tapping objects adds to the selection instead of replacing it">Multi-select</button>
     </div>
   </div>
 
@@ -88,7 +127,7 @@
 
     <main id="canvas-wrap">
       <svg id="canvas"></svg>
-      <div id="mode-banner" class="hidden">SIMULATING — space to stop</div>
+      <div id="mode-banner" class="hidden">SIMULATING — space to pause</div>
       <div id="grid-scale-badge" title="Every grid square is 1 meter — position, size, and weight fields in the panel are in the same units">1 square = 1 m</div>
     </main>
 
@@ -127,6 +166,9 @@
 <div id="whiteboard-root" class="hidden"></div>
 
 <div id="economics-root" class="hidden"></div>
+<div id="zoology-root" class="hidden"></div>
+<div id="sound-root" class="hidden"></div>
+<div id="sustainability-root" class="hidden"></div>
 
 <div id="challenges-modal" class="modal hidden">
   <div class="modal-box">
@@ -148,8 +190,52 @@
   <div class="modal-box" id="saves-modal-box"></div>
 </div>
 
+<div id="classroom-modal" class="modal hidden">
+  <div class="modal-box classroom-box" id="classroom-modal-box"></div>
+</div>
+
+<div id="dashboard-modal" class="modal hidden">
+  <div class="modal-box classroom-box" id="dashboard-modal-box"></div>
+</div>
+
 <div id="popup-modal" class="modal hidden">
   <div class="modal-box" id="popup-modal-box"></div>
+</div>
+
+<div id="about-modal" class="modal hidden">
+  <div class="modal-box about-box">
+    <h2>About Continuum</h2>
+    <p>Continuum exists to make real science feel exciting instead of abstract —
+      not animations of physics, but physics; not a diagram of an atom, but one
+      you can rotate and inspect; not a list of orbital facts, but a solar
+      system you can actually fast-forward through and watch move. Every
+      number behind every simulation here is a real, working formula, not a
+      canned effect — the goal is that playing with something here should
+      teach you at least as much as reading about it would.</p>
+    <h3>Who made this</h3>
+    <p>Continuum is an independent project built by <strong>Evan Marr</strong>, a
+      hobbyist developer and lifelong science enthusiast who kept wishing
+      textbooks let you actually touch the thing they were describing. It's
+      built and maintained as a free, ad-free educational resource. Donations
+      go straight back into the site — about 80% of every donation goes
+      toward upgrading Continuum itself (hosting, tools, new content).</p>
+    <div class="about-actions">
+      <button id="donate-btn" class="primary">Donate</button>
+      <button id="about-close">Close</button>
+    </div>
+  </div>
+</div>
+
+<div id="feedback-modal" class="modal hidden">
+  <div class="modal-box">
+    <h2>Send feedback</h2>
+    <p class="feedback-hint">Bug, idea, confusing explanation — anything. If you're signed in, your email rides along automatically so a reply is possible.</p>
+    <textarea id="feedback-text" rows="6" maxlength="4000" placeholder="What's on your mind?"></textarea>
+    <div class="about-actions">
+      <button id="feedback-submit" class="primary">Send</button>
+      <button id="feedback-cancel">Cancel</button>
+    </div>
+  </div>
 </div>
 
 <div id="challenge-toast" class="toast hidden"></div>

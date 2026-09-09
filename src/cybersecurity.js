@@ -18,7 +18,7 @@ export class CybersecurityMode {
   }
 
   mount() { this._renderView(); }
-  unmount() {}
+  unmount() { this._stopSimulators?.(); }
 
   _build() {
     this.root.innerHTML = "";
@@ -35,6 +35,8 @@ export class CybersecurityMode {
   }
 
   _renderView() {
+    this._stopSimulators?.();
+    this._stopSimulators = null;
     this.root.innerHTML = "";
     this.root.appendChild(this.challengeModal.el);
 
@@ -63,7 +65,7 @@ export class CybersecurityMode {
     if (this.sub === "simulators") {
       const simRoot = div("cyber-sim-root");
       this.root.appendChild(simRoot);
-      renderCyberSimulators(simRoot);
+      this._stopSimulators = renderCyberSimulators(simRoot);
       return;
     }
 
@@ -173,7 +175,8 @@ export class CybersecurityMode {
   _renderInfo(infoEl) {
     const entry = CYBER_ENTRIES.find((e) => e.id === this.selectedId);
     if (!entry) {
-      infoEl.innerHTML = `<div class="cyber-info-empty">Select an entry on the left to read more about it.</div>`;
+      const isMobile = document.documentElement.dataset.device === "mobile";
+      infoEl.innerHTML = `<div class="cyber-info-empty">Select an entry ${isMobile ? "above" : "on the left"} to read more about it.</div>`;
       return;
     }
     const cat = CYBER_CATEGORIES.find((c) => c.key === entry.category);

@@ -42,7 +42,11 @@ function closeSpeedUnitMenu() {
 function onSpeedMenuOutsideClick(e) {
   if (speedUnitMenuEl && !speedUnitMenuEl.contains(e.target)) closeSpeedUnitMenu();
 }
-function openSpeedUnitMenu(clientX, clientY) {
+export function currentSpeedUnitLabel() {
+  return currentSpeedUnit().label;
+}
+
+export function openSpeedUnitMenu(clientX, clientY, onChange) {
   closeSpeedUnitMenu();
   const menu = document.createElement("div");
   menu.className = "speed-unit-menu";
@@ -62,6 +66,7 @@ function openSpeedUnitMenu(clientX, clientY) {
       document.querySelectorAll(".speed-label-text").forEach((node) => {
         node.textContent = formatSpeed(+node.dataset.speed || 0);
       });
+      onChange?.(unit.label);
     });
     menu.appendChild(btn);
   }

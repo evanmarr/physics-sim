@@ -60,7 +60,12 @@ export function renderPanel(container, spec, state, handlers) {
     ].filter(Boolean)));
   }
   if (fields.includes("material")) {
-    container.appendChild(materialField(spec.material, (v) => set({ material: v })));
+    // Unlike every slider/checkbox/number field above, a material swatch is
+    // a plain clicked <div> — nothing native keeps its own "selected" state
+    // in sync, and the Weight slider below needs to pick up the new
+    // material's default density too. So this one field needs a real
+    // re-render after the patch, not just the state write.
+    container.appendChild(materialField(spec.material, (v) => { set({ material: v }); renderPanel(container, spec, state, handlers); }));
     // Weight is just density with a friendlier name — mass = density × area,
     // so at a fixed size this is exactly the knob that changes how much
     // force it takes to move or stop the object. Overrides the material's

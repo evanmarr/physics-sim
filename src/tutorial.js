@@ -75,39 +75,94 @@ const STEPS = [
     advance: { type: "click", selector: "#mode-astronomy-btn" },
   },
   {
-    text: "Try a speed button to fast-forward time and watch the planets move along their real Keplerian orbits, computed live from actual orbital elements for whatever date is set — including a \"find the next eclipse\" challenge.",
+    text: "Click directly on a planet (or its orbit line if it's too small to hit) to select it — every number that shows up next is computed live from that planet's real orbital elements, not looked up from a table.",
+    target: "#astronomy-root canvas",
+    advance: { type: "next" },
+  },
+  {
+    text: "With it selected, press F (or the Focus button that appears) to fly the camera to it — the view will keep following it as it orbits.",
+    target: ".astro-focus-btn",
+    advance: { type: "next" },
+  },
+  {
+    text: "Now try a speed button to fast-forward time and watch it actually move along that orbit. Astronomy Challenges include \"find the next solar eclipse\" using the real geometry of the Moon's node crossings — not a canned date.",
     target: ".astro-speed-btn",
     advance: { type: "next" },
   },
   {
-    text: "History — click any tick on the timeline to read about it. History Challenges send you hunting for a specific one from just a hint.",
-    target: "#mode-history-btn",
-    advance: { type: "click", selector: "#mode-history-btn" },
+    text: "History — click any tick on the timeline to read about it.",
+    target: ".history-tick",
+    advance: { type: "click", selector: ".history-tick" },
   },
   {
-    text: "Cybersecurity works the same way, but as a searchable/filterable reference instead of a timeline — try searching for a name here.",
+    text: "History Challenges send you hunting for a specific entry from just a hint (no date given) — it's a genuinely different kind of test than browsing: you have to know what you're looking for, not just recognize it when you see it.",
+    target: "#mode-history-btn",
+    advance: { type: "next" },
+  },
+  {
+    text: "Cybersecurity works the same way, but as a searchable/filterable reference instead of a timeline — click the tab.",
     target: "#mode-cybersecurity-btn",
     advance: { type: "click", selector: "#mode-cybersecurity-btn" },
   },
   {
-    text: "Particle Physics is a gallery of real D3 force simulations — drag anything you see, and switch demos from the sub-nav.",
+    text: "Try searching for something — a malware name, a year, even a general word like \"ransomware\". Notice it's matching your search against the full write-up, not just the title.",
+    target: ".cyber-search",
+    advance: { type: "input", selector: ".cyber-search" },
+  },
+  {
+    text: "The Simulators tab is a different kind of learning entirely — type a real password into the strength checker and watch the actual estimated crack time change, or try to spot every red flag in the phishing email.",
+    target: ".cyber-sub-tab",
+    advance: { type: "next" },
+  },
+  {
+    text: "Particle Physics is a gallery of real, running simulations, not illustrations — click the tab.",
     target: "#mode-particles-btn",
     advance: { type: "click", selector: "#mode-particles-btn" },
   },
   {
-    text: "Mathematics — type an equation like x^2 into the y = box to graph it live, or switch to Bar Chart, Pie Chart, or Venn Diagram above.",
+    text: "Drag your pointer through the nodes in whatever demo is showing, then switch demos from the sub-nav above the canvas — Percolation and Epidemic Spread in particular are real statistical/epidemiological models with sliders you can push past their critical thresholds.",
+    target: ".particles-tab",
+    advance: { type: "next" },
+  },
+  {
+    text: "Mathematics is a real graphing calculator, not a pre-made chart — click the tab.",
     target: "#mode-mathematics-btn",
     advance: { type: "click", selector: "#mode-mathematics-btn" },
   },
   {
-    text: "Whiteboard is a free draw/write surface for your own sketches and notes — Undo/Redo work here too (Ctrl/Cmd+Z).",
+    text: "Type an equation into the y = box — try x^2, or sin(x), or something of your own. It's a real expression parser (correct operator precedence, implicit multiplication), not a lookup table of preset curves.",
+    target: ".math-func-input-row input",
+    advance: { type: "input", selector: ".math-func-input-row input" },
+  },
+  {
+    text: "Drag the graph to pan and scroll to zoom, then check out Bar Chart, Pie Chart, and Venn Diagram above for the other visualizations this mode covers.",
+    target: ".math-stage",
+    advance: { type: "next" },
+  },
+  {
+    text: "Whiteboard is a free draw/write surface for your own sketches and notes — click the tab.",
     target: "#mode-whiteboard-btn",
     advance: { type: "click", selector: "#mode-whiteboard-btn" },
   },
   {
-    text: "Economics has a real supply-and-demand market (try adding a tax or a price control) and a repeated Prisoner's Dilemma game-theory sandbox with an editable payoff matrix.",
+    text: "Try drawing something — this is the one section with no \"right answer\" to teach, just a place to work through a problem by hand the way you would on paper. Undo/Redo work here too (Ctrl/Cmd+Z).",
+    target: ".wb-canvas-holder",
+    advance: { type: "next" },
+  },
+  {
+    text: "Economics — a real supply-and-demand market, not a diagram of one. Click the tab.",
     target: "#mode-economics-btn",
     advance: { type: "click", selector: "#mode-economics-btn" },
+  },
+  {
+    text: "Drag the tax slider and watch what actually happens: price and quantity both move, and a deadweight-loss region appears — that gap is the real economic cost of the tax, not just the revenue it raises.",
+    target: 'input[data-key="tax"]',
+    advance: { type: "changed", selector: 'input[data-key="tax"]' },
+  },
+  {
+    text: "The other half of this mode is a repeated Prisoner's Dilemma with an editable payoff matrix — change the payoffs and watch how the optimal strategy shifts, the same tension that shows up in real pricing wars, arms races, and climate agreements.",
+    target: ".econ-tab",
+    advance: { type: "next" },
   },
   {
     text: "Quiz tests you on whatever mode you're currently in — look for it in the top bar.",
@@ -167,6 +222,7 @@ function endTutorial() {
   window.removeEventListener("resize", reposition);
   overlayEl?.remove();
   overlayEl = null;
+  document.getElementById("menu-dropdown")?.classList.add("hidden");
 }
 
 function reposition() {
@@ -174,6 +230,16 @@ function reposition() {
 }
 
 function positionSpotlight(step) {
+  // Quiz/Tutorial/Device Mode/etc. all live inside the "⋯" menu now, closed
+  // by default — measuring a closed dropdown's contents gives a zero-size
+  // rect at (0,0), which is why the spotlight used to land in the corner
+  // instead of on the real button. Opening the menu first (for any step
+  // that targets something inside it) keeps this a real, un-cloned
+  // highlight instead of faking the button's position.
+  const menuDropdown = document.getElementById("menu-dropdown");
+  const targetsMenu = step.target && menuDropdown?.querySelector(step.target);
+  if (menuDropdown) menuDropdown.classList.toggle("hidden", !targetsMenu);
+
   const target = step.target ? document.querySelector(step.target) : null;
   if (target) {
     target.scrollIntoView({ block: "center", behavior: "smooth" });
@@ -274,6 +340,32 @@ function wireAdvance(step, i) {
     const baseline = document.querySelectorAll(selector).length;
     const interval = setInterval(() => {
       if (document.querySelectorAll(selector).length > baseline) {
+        clearInterval(interval);
+        if (running) showStep(i + 1);
+      }
+    }, 300);
+    cleanupFns.push(() => clearInterval(interval));
+  } else if (type === "changed") {
+    // Like "input", but for a control (a slider) that already has a
+    // value — waits for it to become something *different*, not just
+    // non-empty.
+    const el = document.querySelector(selector);
+    const baseline = el?.value;
+    const interval = setInterval(() => {
+      const now = document.querySelector(selector)?.value;
+      if (now !== undefined && now !== baseline) {
+        clearInterval(interval);
+        if (running) showStep(i + 1);
+      }
+    }, 300);
+    cleanupFns.push(() => clearInterval(interval));
+  } else if (type === "input") {
+    // Waits for you to actually type something into a field, rather than
+    // just clicking past the step — used where reading isn't the point,
+    // doing the thing is.
+    const interval = setInterval(() => {
+      const el = document.querySelector(selector);
+      if (el && el.value && el.value.trim().length > 0) {
         clearInterval(interval);
         if (running) showStep(i + 1);
       }

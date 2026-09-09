@@ -533,7 +533,6 @@ export class PhysicsSim {
       this._applyBuoyancy();
       this._applyFans();
       this._applyMagnets();
-      this._applyWaterPressure();
       this._dampPivots();
       this._clampFastBodies();
     });
@@ -695,36 +694,6 @@ export class PhysicsSim {
         const dir = Vector.normalise(delta);
         const mag = spec.power * FAN_FORCE_SCALE * falloff * body.mass;
         Body.applyForce(body, body.position, { x: dir.x * mag, y: dir.y * mag });
-      }
-    }
-  }
-
-  // Real water is (near enough) incompressible — squeeze it and it pushes
-  // back rather than packing into less space. Matter's default solver has
-  // some slop, so a settled pile of water particles will otherwise slowly
-  // compact under its own weight until the puddle occupies noticeably less
-  // area than its particle count implies (it visibly "loses volume"). A
-  // short-range repulsion between any two particles closer than their
-  // combined radius counteracts that compaction — the same role pressure
-  // plays in a real fluid — without touching how water interacts with
-  // anything else (that's still ordinary rigid-body collision).
-  _applyWaterPressure() {
-    const n = this.waterParticles.length;
-    if (n < 2) return;
-    const minDist = WATER_PARTICLE_RADIUS * 2;
-    for (let i = 0; i < n; i++) {
-      const a = this.waterParticles[i];
-      for (let j = i + 1; j < n; j++) {
-        const b = this.waterParticles[j];
-        const dx = b.position.x - a.position.x, dy = b.position.y - a.position.y;
-        const distSq = dx * dx + dy * dy;
-        if (distSq >= minDist * minDist || distSq < 1e-6) continue;
-        const dist = Math.sqrt(distSq);
-        const overlap = minDist - dist;
-        const nx = dx / dist, ny = dy / dist;
-        const push = overlap * 0.0005;
-        Body.applyForce(a, a.position, { x: -nx * push, y: -ny * push });
-        Body.applyForce(b, b.position, { x: nx * push, y: ny * push });
       }
     }
   }
@@ -1102,6 +1071,21 @@ export class PhysicsSim {
     Events.off(this.engine);
     World.clear(this.engine.world, false);
     Engine.clear(this.engine);
+  }
+
+  // Freezes the simulation exactly where it is — every body stays at its
+  // current position/velocity, unlike stop() which tears the whole engine
+  // down. Only the rAF loop halts, so nothing moves until resume() restarts
+  // it (with a fresh lastTime, so the frozen gap isn't counted as elapsed
+  // time and the next frame doesn't jump).
+  pause() {
+    this.running = false;
+    if (this.rafId) cancelAnimationFrame(this.rafId);
+  }
+
+  resume() {
+    if (this.running) return;
+    this.start();
   }
 
   // Real physics-driven water/wind particles, in the same {id,kind,x,y,...}

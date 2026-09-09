@@ -219,6 +219,7 @@ export class AstronomyMode {
     this.scene.add(this.sunMesh);
 
     this.planetMeshes = {};
+    this.hitMeshes = {};
     this.orbitLines = {};
     const jdNow = dateToJulianDate(this.date);
     const buildPlanetLike = (planet, { dwarf = false } = {}) => {
@@ -243,6 +244,18 @@ export class AstronomyMode {
       const grid = new THREE.Mesh(gridGeo, gridMat);
       mesh.add(grid);
       mesh.userData.gridMat = gridMat;
+
+      // An invisible, much bigger sibling sphere purely for click/tap
+      // hit-testing — a real-scale Mercury is only a few screen pixels
+      // across at any sensible zoom, and raycasting against the visible
+      // mesh's exact (tiny) geometry makes clicking it directly nearly
+      // impossible. This is what _pickPlanet actually raycasts against.
+      const hitGeo = new THREE.SphereGeometry(Math.max(size * 5, 14), 8, 6);
+      const hitMat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0 });
+      const hitMesh = new THREE.Mesh(hitGeo, hitMat);
+      hitMesh.userData.planet = planet;
+      mesh.add(hitMesh);
+      this.hitMeshes[planet.name] = hitMesh;
 
       const orbitGeo = new THREE.BufferGeometry();
       const points = [];
@@ -335,7 +348,23 @@ export class AstronomyMode {
     this.selectionRing.renderOrder = 10;
     this.scene.add(this.selectionRing);
 
-    this.renderer.domElement.addEventListener("click", (e) => this._pickPlanet(e));
+    // A native "click" only fires reliably when down/up land on the exact
+    // same element with essentially no movement between them — OrbitControls
+    // is constantly listening on this same canvas for drag-to-rotate, and on
+    // touch or a trackpad even a "tap" almost always drifts a couple pixels,
+    // which was silently swallowing the click and making selection feel
+    // broken. Tracking the down/up distance ourselves and treating anything
+    // under a small threshold as a tap/click fixes that for mouse and touch.
+    let pointerDownPos = null;
+    this.renderer.domElement.addEventListener("pointerdown", (e) => {
+      pointerDownPos = { x: e.clientX, y: e.clientY };
+    });
+    this.renderer.domElement.addEventListener("pointerup", (e) => {
+      if (!pointerDownPos) return;
+      const moved = Math.hypot(e.clientX - pointerDownPos.x, e.clientY - pointerDownPos.y);
+      pointerDownPos = null;
+      if (moved < 6) this._pickPlanet(e);
+    });
 
     const resize = () => {
       const w = wrap.clientWidth || 400, h = wrap.clientHeight || 400;
@@ -361,24 +390,30 @@ export class AstronomyMode {
     // path to select it, not just the tiny dot.
     raycaster.params.Line = { threshold: 6 };
     raycaster.setFromCamera(mouse, this.camera);
-    const planetHits = raycaster.intersectObjects(Object.values(this.planetMeshes));
-    if (planetHits.length) {
-      this.selectedPlanet = planetHits[0].object.userData.planet;
-      this._buildInfo();
-      this._updateSelectionRing();
-      return;
-    }
+    // A gas giant's invisible hit-sphere (max(size*5, 14)) is huge, and can
+    // sit in front of or overlap a completely different planet's orbit ring
+    // in screen space — checking hit-spheres first and returning immediately
+    // meant clicking directly on, say, Saturn's ring could actually resolve
+    // to Jupiter's much bigger hit-sphere lurking behind/near it. Comparing
+    // every candidate by actual ray distance and taking the closest one
+    // fixes that, instead of always favoring hit-spheres over rings.
+    const planetHits = raycaster.intersectObjects(Object.values(this.hitMeshes));
     const orbitEntries = Object.entries(this.orbitLines);
     const orbitHits = raycaster.intersectObjects(orbitEntries.map(([, line]) => line));
-    if (orbitHits.length) {
-      const name = orbitEntries.find(([, line]) => line === orbitHits[0].object)?.[0];
-      const planet = [...PLANETS, ...DWARF_PLANETS].find((p) => p.name === name);
-      if (planet) {
-        this.selectedPlanet = planet;
-        this._buildInfo();
-        this._updateSelectionRing();
-      }
-    }
+
+    const candidates = [
+      ...planetHits.map((hit) => ({ distance: hit.distance, planet: hit.object.userData.planet })),
+      ...orbitHits.map((hit) => {
+        const name = orbitEntries.find(([, line]) => line === hit.object)?.[0];
+        const planet = [...PLANETS, ...DWARF_PLANETS].find((p) => p.name === name);
+        return planet ? { distance: hit.distance, planet } : null;
+      }).filter(Boolean),
+    ];
+    if (!candidates.length) return;
+    candidates.sort((a, b) => a.distance - b.distance);
+    this.selectedPlanet = candidates[0].planet;
+    this._buildInfo();
+    this._updateSelectionRing();
   }
 
   _updateSelectionRing() {

@@ -85,6 +85,7 @@ export class EconomicsMode {
       lab.appendChild(valSpan);
       const input = document.createElement("input");
       input.type = "range";
+      input.dataset.key = key;
       input.min = min; input.max = max; input.step = step; input.value = m[key];
       input.addEventListener("input", () => {
         m[key] = parseFloat(input.value);

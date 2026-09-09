@@ -1,4 +1,4 @@
-import { Renderer } from "./render.js";
+import { Renderer, openSpeedUnitMenu, currentSpeedUnitLabel } from "./render.js";
 import { renderPalette } from "./palette.js";
 import { renderPanel, renderPhysicsMathPanel } from "./panel.js";
 import { CHALLENGES, findChallenge, ChallengeTracker } from "./challenges.js";
@@ -13,13 +13,19 @@ import { CybersecurityMode } from "./cybersecurity.js";
 import { MathematicsMode } from "./mathematics.js";
 import { WhiteboardMode } from "./whiteboard.js";
 import { EconomicsMode } from "./economics.js";
+import { ZoologyMode } from "./zoology.js";
+import { SoundMode } from "./sound.js";
+import { SustainabilityMode } from "./sustainability.js";
 import { traceLightRays } from "./lightOptics.js";
 import { openQuiz } from "./quiz.js";
-import { initAuthUI, openSavesPanel } from "./auth.js";
+import { initAuthUI, openSavesPanel, sendFeedback } from "./auth.js";
+import { initClassroomUI } from "./classroom.js";
+import { initDashboardUI, registerShareApplier } from "./dashboard.js";
 import { initTutorial } from "./tutorial.js";
 import { initDeviceMode, showPrompt as showDeviceModePrompt } from "./deviceMode.js";
 import { toggleUnitSystem, distanceUnitSuffix, weightUnitSuffix, gridSquareInUnits } from "./units.js";
-import { confirmPopup } from "./popup.js";
+import { confirmPopup, alertPopup } from "./popup.js";
+import { startLoadingAnimation, finishLoading } from "./loading.js";
 
 const state = {
   objects: [],
@@ -33,6 +39,7 @@ const state = {
   lightMode: false,
   showMagneticField: false,
   simSpeed: 1,
+  multiSelectMode: false, // mobile-only: tapping objects adds to selection instead of replacing it
 };
 
 let sim = null;
@@ -45,6 +52,9 @@ let cybersecurityMode = null;
 let mathematicsMode = null;
 let whiteboardMode = null;
 let economicsMode = null;
+let zoologyMode = null;
+let soundMode = null;
+let sustainabilityMode = null;
 
 // Old saves stored a rope as x/y + rotation + length; the current model is
 // two independent endpoints (x,y) and (x2,y2). Backfill x2/y2 from the old
@@ -102,7 +112,7 @@ function boot() {
     onSelect: (id, shiftKey) => {
       if (state.playing) return;
       if (id == null) state.selectedIds = new Set();
-      else if (shiftKey) {
+      else if (shiftKey || state.multiSelectMode) {
         if (state.selectedIds.has(id)) state.selectedIds.delete(id);
         else state.selectedIds.add(id);
       } else {
@@ -465,6 +475,23 @@ function hashSeed(id, i) {
   return Math.abs(h) % 997;
 }
 
+function applyPhysicsWorldData(renderer, data) {
+  if (state.playing) togglePlay(renderer);
+  pushUndoNow();
+  state.objects = dropRemovedTypes(data.objects || []);
+  migrateRopeSpecs(state.objects);
+  state.gravity = data.gravity ?? 1;
+  document.getElementById("gravity-slider").value = state.gravity;
+  document.getElementById("gravity-val").textContent = state.gravity.toFixed(1);
+  sim?.setGravity(state.gravity);
+  state.selectedIds = new Set();
+  state.selectedId = null;
+  state.activeChallengeId = null;
+  renderAll();
+  renderPanelUI();
+  scheduleSave();
+}
+
 function wireTopbar(renderer) {
   const playBtn = document.getElementById("play-btn");
   playBtn.addEventListener("click", () => togglePlay(renderer));
@@ -540,32 +567,39 @@ function wireTopbar(renderer) {
       title: "My Physics Worlds",
       itemNoun: "world",
       serialize: () => ({ objects: state.objects, gravity: state.gravity }),
-      apply: (data) => {
-        if (state.playing) togglePlay(renderer);
-        pushUndoNow();
-        state.objects = dropRemovedTypes(data.objects || []);
-        migrateRopeSpecs(state.objects);
-        state.gravity = data.gravity ?? 1;
-        document.getElementById("gravity-slider").value = state.gravity;
-        document.getElementById("gravity-val").textContent = state.gravity.toFixed(1);
-        sim?.setGravity(state.gravity);
-        state.selectedIds = new Set();
-        state.selectedId = null;
-        state.activeChallengeId = null;
-        renderAll();
-        renderPanelUI();
-        scheduleSave();
-      },
+      apply: (data) => applyPhysicsWorldData(renderer, data),
     });
   });
+  registerShareApplier("worlds", (data) => { window._setMode("physics"); applyPhysicsWorldData(window._renderer, data); });
+  registerShareApplier("mathItems", (data) => { window._setMode("mathematics"); mathematicsMode.applySavedData(data); });
 
   initAuthUI();
+  initClassroomUI();
+  initDashboardUI();
   initTutorial();
+  document.getElementById("about-btn").addEventListener("click", () => document.getElementById("about-modal").classList.remove("hidden"));
+  document.getElementById("about-close").addEventListener("click", () => document.getElementById("about-modal").classList.add("hidden"));
+  document.getElementById("donate-btn").addEventListener("click", () => {
+    window.open("https://gl.me/u/GSNTMHh9xg5J", "_blank", "noopener");
+  });
+  wireFeedback();
 
+  wireMenu();
   wireTheme();
   document.getElementById("device-mode-btn").addEventListener("click", () => showDeviceModePrompt(true));
   wireUnitsToggle();
+  wireMobileEditControls();
   startParticleLoop();
+}
+
+function wireMobileEditControls() {
+  document.getElementById("mobile-copy-btn").addEventListener("click", copySelected);
+  document.getElementById("mobile-paste-btn").addEventListener("click", pasteClipboard);
+  const multiBtn = document.getElementById("mobile-multiselect-btn");
+  multiBtn.addEventListener("click", () => {
+    state.multiSelectMode = !state.multiSelectMode;
+    multiBtn.classList.toggle("active", state.multiSelectMode);
+  });
 }
 
 function wireUnitsToggle() {
@@ -583,6 +617,54 @@ function wireUnitsToggle() {
     renderPanelUI();
   });
   refresh();
+
+  // A moving object's own speed readout has always had its own unit
+  // choice (double-click the label in the canvas) — this button is just a
+  // second, reliable way into that same menu, since double-clicking a
+  // label that's actively moving is fiddly at best.
+  const speedBtn = document.getElementById("speed-unit-btn");
+  speedBtn.textContent = currentSpeedUnitLabel();
+  speedBtn.addEventListener("click", () => {
+    const rect = speedBtn.getBoundingClientRect();
+    openSpeedUnitMenu(rect.left + rect.width / 2, rect.bottom, (label) => { speedBtn.textContent = label; });
+  });
+}
+
+function wireFeedback() {
+  const modal = document.getElementById("feedback-modal");
+  const text = document.getElementById("feedback-text");
+  const open = () => { text.value = ""; modal.classList.remove("hidden"); text.focus(); };
+  const close = () => modal.classList.add("hidden");
+
+  document.getElementById("feedback-btn").addEventListener("click", open);
+  document.getElementById("feedback-cancel").addEventListener("click", close);
+  document.getElementById("feedback-submit").addEventListener("click", async () => {
+    const message = text.value.trim();
+    if (!message) { text.focus(); return; }
+    const result = await sendFeedback(message);
+    if (result.error) { await alertPopup(result.error, { title: "Couldn't send feedback" }); return; }
+    close();
+    showToast("Thanks — feedback sent.");
+  });
+}
+
+function wireMenu() {
+  const btn = document.getElementById("menu-btn");
+  const dropdown = document.getElementById("menu-dropdown");
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    dropdown.classList.toggle("hidden");
+  });
+  // Any button inside the menu closes it once clicked, same as the account
+  // dropdown — nobody wants it still hanging open over whatever just opened.
+  dropdown.addEventListener("click", (e) => {
+    if (e.target.closest("button")) dropdown.classList.add("hidden");
+  });
+  document.addEventListener("click", (e) => {
+    if (!dropdown.classList.contains("hidden") && !document.getElementById("menu-wrap").contains(e.target)) {
+      dropdown.classList.add("hidden");
+    }
+  });
 }
 
 function wireTheme() {
@@ -599,10 +681,10 @@ function wireTheme() {
 function applyTheme(theme) {
   if (theme === "dark") {
     document.documentElement.dataset.theme = "dark";
-    document.getElementById("theme-toggle").textContent = "☀";
+    document.getElementById("theme-toggle").textContent = "Light Mode";
   } else {
     delete document.documentElement.dataset.theme;
-    document.getElementById("theme-toggle").textContent = "🌙";
+    document.getElementById("theme-toggle").textContent = "Dark Mode";
   }
   // The Particle Physics iframe demos default to a dark palette and only
   // have a "light" override block (no bare/default light rules), so the
@@ -614,11 +696,27 @@ function applyTheme(theme) {
   if (particlesDoc) particlesDoc.documentElement.dataset.theme = theme;
 }
 
+// Play/Pause toggle. Pausing freezes every body exactly where it is (the
+// sim itself stays alive underneath, just not ticking) so Play resumes
+// from that same frozen moment — it does NOT rewind to the blueprint.
+// That's what Reset is for (see resetPhysics below).
 function togglePlay(renderer) {
   const playBtn = document.getElementById("play-btn");
   const banner = document.getElementById("mode-banner");
 
-  if (!state.playing) {
+  if (state.playing) {
+    sim?.pause();
+    state.playing = false;
+    playBtn.textContent = "▶ Play";
+    playBtn.classList.remove("playing");
+    banner.textContent = "PAUSED — space to resume";
+  } else if (sim) {
+    sim.resume();
+    state.playing = true;
+    playBtn.textContent = "❚❚ Pause";
+    playBtn.classList.add("playing");
+    banner.textContent = "SIMULATING — space to pause";
+  } else {
     state.selectedIds = new Set();
     state.selectedId = null;
     renderPanelUI();
@@ -639,27 +737,27 @@ function togglePlay(renderer) {
     sim.setTimeScale(state.simSpeed);
     sim.start();
     state.playing = true;
-    playBtn.textContent = "■ Stop";
+    playBtn.textContent = "❚❚ Pause";
     playBtn.classList.add("playing");
+    banner.textContent = "SIMULATING — space to pause";
     banner.classList.remove("hidden");
-  } else {
-    sim?.stop();
-    sim = null;
-    state.playing = false;
-    playBtn.textContent = "▶ Play";
-    playBtn.classList.remove("playing");
-    banner.classList.add("hidden");
-    window._renderer.renderRopeTubes([]);
-    renderAll();
   }
 }
 
-// Restart the simulation from the original blueprint — stop (if running)
-// then play again, same as clicking Stop then Play. Bound to both the
-// Reset button and the R key.
+// Reset always reverts to the original blueprint and leaves it stopped —
+// unlike Play/Pause, it never resumes running on its own. Bound to both
+// the Reset button and the R key.
 function resetPhysics(renderer) {
-  if (state.playing) togglePlay(renderer);
-  togglePlay(renderer);
+  sim?.stop();
+  sim = null;
+  state.playing = false;
+  const playBtn = document.getElementById("play-btn");
+  playBtn.textContent = "▶ Play";
+  playBtn.classList.remove("playing");
+  document.getElementById("mode-banner").classList.add("hidden");
+  window._renderer.renderRopeTubes([]);
+  window._renderer.renderParticles([]);
+  renderAll();
 }
 
 function handleSimEvent(event) {
@@ -791,6 +889,9 @@ const HOME_SECTIONS = [
   { mode: "mathematics", title: "Mathematics", blurb: "A real graphing calculator — plot any expression, pan and zoom the graph.", kind: "mathematics", hues: [230, 350] },
   { mode: "whiteboard", title: "Whiteboard", blurb: "A draw surface for sketching ideas and equations, plus a simple notebook for text notes.", kind: "whiteboard", hues: [160, 40] },
   { mode: "economics", title: "Economics", blurb: "A real supply-and-demand market (with taxes and price controls) and a repeated Prisoner's Dilemma sandbox.", kind: "economics", hues: [140, 20] },
+  { mode: "zoology", title: "Zoology", blurb: "Explore food chains and energy pyramids, then build your own food web from real predator-prey relationships.", kind: "zoology", hues: [95, 30] },
+  { mode: "sound", title: "Sound", blurb: "Record your voice and watch the real waveform, or build your own tones with a live oscillator.", kind: "sound", hues: [260, 190] },
+  { mode: "sustainability", title: "Sustainability", blurb: "Run a city — route energy, manage pollution, and grow your population without wrecking either.", kind: "sustainability", hues: [150, 210] },
 ];
 
 function buildHomePage(root, onNavigate) {
@@ -804,11 +905,11 @@ function buildHomePage(root, onNavigate) {
           <ellipse cx="12" cy="12" rx="10" ry="4.2" fill="none" style="stroke: var(--cool-3)" stroke-width="1.3" transform="rotate(120 12 12)" />
           <circle cx="12" cy="12" r="2.1" style="fill: var(--text)" />
         </svg>
-        <div class="home-kicker">nine sandboxes · one app</div>
+        <div class="home-kicker">twelve sandboxes · one app</div>
         <h1>Continuum</h1>
         <p class="home-tagline">Real simulations, not animations — physics, chemistry, astronomy,
-          mathematics, economics, a whiteboard for your own ideas, and the history and security behind
-          them all. Pick a section to start.</p>
+          mathematics, economics, zoology, sound, a city to run sustainably, a whiteboard for your own
+          ideas, and the history and security behind them all. Pick a section to start.</p>
       </div>
       <div class="home-cards"></div>
     </div>
@@ -1045,6 +1146,33 @@ function buildHomeThumbnail(el, section) {
     svg.append("line").attr("x1", margin).attr("y1", margin).attr("x2", w - margin).attr("y2", h - margin).attr("stroke", colorA).attr("stroke-width", 2.5);
     svg.append("line").attr("x1", margin).attr("y1", h - margin).attr("x2", w - margin).attr("y2", margin).attr("stroke", colorB).attr("stroke-width", 2.5);
     svg.append("circle").attr("cx", (margin + w - margin) / 2).attr("cy", h / 2).attr("r", 4.5).attr("fill", "var(--text)");
+  } else if (section.kind === "zoology") {
+    // A tiny 3-node food chain: producer -> consumer -> predator.
+    const positions = [[w * 0.22, h * 0.7], [w * 0.5, h * 0.35], [w * 0.78, h * 0.7]];
+    for (let i = 0; i < positions.length - 1; i++) {
+      svg.append("line").attr("x1", positions[i][0]).attr("y1", positions[i][1])
+        .attr("x2", positions[i + 1][0]).attr("y2", positions[i + 1][1]).attr("stroke", "rgba(148,163,184,0.5)").attr("stroke-width", 2);
+    }
+    positions.forEach((p, i) => {
+      svg.append("circle").attr("cx", p[0]).attr("cy", p[1]).attr("r", 9).attr("fill", i === 0 ? colorA : i === 1 ? colorB : colorA).attr("opacity", 0.85);
+    });
+  } else if (section.kind === "sound") {
+    // A little sine-ish waveform, genuinely what the live canvas draws.
+    const pts = [];
+    for (let x = 8; x <= w - 8; x += 4) pts.push([x, h / 2 + Math.sin((x / w) * Math.PI * 4) * (h * 0.28)]);
+    const line = d3.line();
+    svg.append("path").attr("d", line(pts)).attr("fill", "none").attr("stroke", colorA).attr("stroke-width", 2.5).attr("stroke-linecap", "round");
+  } else if (section.kind === "sustainability") {
+    // A tiny 3x2 city grid with a couple of "buildings" filled in.
+    const cols = 4, rows = 3, cell = Math.min((w - 16) / cols, (h - 16) / rows);
+    const ox = (w - cell * cols) / 2, oy = (h - cell * rows) / 2;
+    const filled = new Set([1, 3, 5, 8, 9]);
+    let i = 0;
+    for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+      svg.append("rect").attr("x", ox + c * cell + 1).attr("y", oy + r * cell + 1).attr("width", cell - 2).attr("height", cell - 2)
+        .attr("rx", 2).attr("fill", filled.has(i) ? colorA : "rgba(148,163,184,0.25)").attr("opacity", filled.has(i) ? 0.85 : 1);
+      i++;
+    }
   } else {
     // Particle Physics: a small frozen force-directed graph, exactly the
     // shape every one of its 8 real demos takes.
@@ -1069,6 +1197,7 @@ function buildHomeThumbnail(el, section) {
 }
 
 function wireModeTabs() {
+  window._setMode = (mode) => setMode(mode); // exposed so code outside this closure (the dashboard's "load a shared item" flow) can switch modes too
   const brandHomeBtn = document.getElementById("brand-home-btn");
   const physicsBtn = document.getElementById("mode-physics-btn");
   const chemistryBtn = document.getElementById("mode-chemistry-btn");
@@ -1079,7 +1208,10 @@ function wireModeTabs() {
   const mathematicsBtn = document.getElementById("mode-mathematics-btn");
   const whiteboardBtn = document.getElementById("mode-whiteboard-btn");
   const economicsBtn = document.getElementById("mode-economics-btn");
-  const modeButtons = { physics: physicsBtn, chemistry: chemistryBtn, astronomy: astronomyBtn, history: historyBtn, cybersecurity: cybersecurityBtn, particles: particlesBtn, mathematics: mathematicsBtn, whiteboard: whiteboardBtn, economics: economicsBtn };
+  const zoologyBtn = document.getElementById("mode-zoology-btn");
+  const soundBtn = document.getElementById("mode-sound-btn");
+  const sustainabilityBtn = document.getElementById("mode-sustainability-btn");
+  const modeButtons = { physics: physicsBtn, chemistry: chemistryBtn, astronomy: astronomyBtn, history: historyBtn, cybersecurity: cybersecurityBtn, particles: particlesBtn, mathematics: mathematicsBtn, whiteboard: whiteboardBtn, economics: economicsBtn, zoology: zoologyBtn, sound: soundBtn, sustainability: sustainabilityBtn };
 
   const homeRoot = document.getElementById("home-root");
   buildHomePage(homeRoot, (mode) => setMode(mode));
@@ -1093,7 +1225,10 @@ function wireModeTabs() {
   const mathematicsRoot = document.getElementById("mathematics-root");
   const whiteboardRoot = document.getElementById("whiteboard-root");
   const economicsRoot = document.getElementById("economics-root");
-  const roots = { home: homeRoot, physics: workspace, chemistry: chemRoot, astronomy: astronomyRoot, history: historyRoot, cybersecurity: cybersecurityRoot, particles: particlesRoot, mathematics: mathematicsRoot, whiteboard: whiteboardRoot, economics: economicsRoot };
+  const zoologyRoot = document.getElementById("zoology-root");
+  const soundRoot = document.getElementById("sound-root");
+  const sustainabilityRoot = document.getElementById("sustainability-root");
+  const roots = { home: homeRoot, physics: workspace, chemistry: chemRoot, astronomy: astronomyRoot, history: historyRoot, cybersecurity: cybersecurityRoot, particles: particlesRoot, mathematics: mathematicsRoot, whiteboard: whiteboardRoot, economics: economicsRoot, zoology: zoologyRoot, sound: soundRoot, sustainability: sustainabilityRoot };
 
   const physicsOnlyControls = [
     document.getElementById("run-controls"),
@@ -1125,7 +1260,8 @@ function wireModeTabs() {
     // Home is just a launcher, and Particle Physics is a gallery of
     // embedded external demos — neither is a knowledge domain with quiz
     // content the way the other modes are.
-    quizBtn.style.display = mode === "particles" || mode === "home" || mode === "mathematics" || mode === "whiteboard" || mode === "economics" ? "none" : "";
+    const NO_QUIZ_MODES = new Set(["particles", "home", "mathematics", "whiteboard", "economics", "zoology", "sound", "sustainability"]);
+    quizBtn.style.display = NO_QUIZ_MODES.has(mode) ? "none" : "";
 
     if (mode === "physics") startParticleLoop(); else stopParticleLoop();
 
@@ -1177,6 +1313,27 @@ function wireModeTabs() {
     } else {
       economicsMode?.unmount();
     }
+
+    if (mode === "zoology") {
+      if (!zoologyMode) zoologyMode = new ZoologyMode(zoologyRoot);
+      zoologyMode.mount();
+    } else {
+      zoologyMode?.unmount();
+    }
+
+    if (mode === "sound") {
+      if (!soundMode) soundMode = new SoundMode(soundRoot);
+      soundMode.mount();
+    } else {
+      soundMode?.unmount();
+    }
+
+    if (mode === "sustainability") {
+      if (!sustainabilityMode) sustainabilityMode = new SustainabilityMode(sustainabilityRoot, { state });
+      sustainabilityMode.mount();
+    } else {
+      sustainabilityMode?.unmount();
+    }
   }
 
   brandHomeBtn.addEventListener("click", () => setMode("home"));
@@ -1189,6 +1346,9 @@ function wireModeTabs() {
   mathematicsBtn.addEventListener("click", () => setMode("mathematics"));
   whiteboardBtn.addEventListener("click", () => setMode("whiteboard"));
   economicsBtn.addEventListener("click", () => setMode("economics"));
+  zoologyBtn.addEventListener("click", () => setMode("zoology"));
+  soundBtn.addEventListener("click", () => setMode("sound"));
+  sustainabilityBtn.addEventListener("click", () => setMode("sustainability"));
 
   // Each individual demo's own top bar was removed (it duplicated this
   // app's nav one level up) — this subnav is the only way left to switch
@@ -1342,4 +1502,6 @@ function beginPaletteDrag(type, pointerEvent) {
   window.addEventListener("pointerup", up);
 }
 
+startLoadingAnimation();
 boot();
+finishLoading();

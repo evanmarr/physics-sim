@@ -75,9 +75,8 @@
   <p>Not from Observable &mdash; built for this gallery. 220 particles held apart by
     <code>forceCollide</code> and gently recentered by weak <code>forceX</code>/<code>forceY</code>,
     plus a hand-written custom force that pushes any particle within range of the cursor
-    radially away. Fills the whole window. Move your pointer to repel — on a touch
-    device, press and drag your finger to suck particles in instead, and lift to spit
-    them out.</p>
+    radially away. Fills the whole window. Move your pointer to push particles away
+    — on a touch device, press and drag your finger to do the same thing.</p>
 </div>
 
 <div class="stage" id="stage"></div>
@@ -137,22 +136,20 @@ const nodes = Array.from({length: N}, (_, i) => ({
 }));
 
 // A custom D3 force: any node within `radius` of the pointer gets pushed
-// straight outward (mode "repel"), or pulled straight in (mode "attract",
-// while the pointer is held down), scaled by proximity and simulation alpha.
-// mouse diameter
+// straight outward, scaled by proximity and simulation alpha. Same
+// behavior for mouse and touch -- press/hover and drag to push particles
+// away, nothing else.
 function forceRepelPointer() {
   let nodes;
   function force(alpha) {
     if (!pointer.active) return;
-    const attracting = pointer.attracting;
-    const radius = attracting ? Math.max(width, height) : 200;
-    const strength = attracting ? 9 : 8.5;
-    const sign = attracting ? -1 : 1;
+    const radius = 200;
+    const strength = 8.5;
     for (const d of nodes) {
       const dx = d.x - pointer.x, dy = d.y - pointer.y;
       const dist = Math.hypot(dx, dy) || 0.001;
       if (dist < radius) {
-        const f = ((radius - dist) / radius) * strength * alpha * sign;
+        const f = ((radius - dist) / radius) * strength * alpha;
         d.vx += (dx / dist) * f;
         d.vy += (dy / dist) * f;
       }
@@ -162,27 +159,7 @@ function forceRepelPointer() {
   return force;
 }
 
-// Sucking (attract) is a touch-only gesture -- a mouse never triggers it, it
-// only ever repels. On a touch device, pressing and dragging a finger pulls
-// particles in; lifting the finger releases them with an outward burst.
-const isTouchDevice = window.matchMedia("(pointer: coarse)").matches;
-const pointer = { x: 0, y: 0, active: false, attracting: false };
-
-// Release: every particle still in the pull radius gets an outward kick,
-// stronger the closer it sat to the pointer -- the "spit out" burst.
-function spitOut() {
-  const radius = Math.max(width, height);
-  for (const d of nodes) {
-    const dx = d.x - pointer.x, dy = d.y - pointer.y;
-    const dist = Math.hypot(dx, dy) || 0.001;
-    if (dist < radius) {
-      const f = (1 - dist / radius) * 28;
-      d.vx += (dx / dist) * f;
-      d.vy += (dy / dist) * f;
-    }
-  }
-  pointer.attracting = false;
-}
+const pointer = { x: 0, y: 0, active: false };
 
 const simulation = d3.forceSimulation(nodes)
     .force("charge", d3.forceManyBody().strength(-1.5))
@@ -242,7 +219,6 @@ canvas.addEventListener("touchstart", (event) => {
   pointer.x = t.clientX - rect.left;
   pointer.y = t.clientY - rect.top;
   pointer.active = true;
-  if (isTouchDevice) pointer.attracting = true;
   simulation.alphaTarget(0.7).restart();
 }, { passive: true });
 canvas.addEventListener("touchmove", (event) => {
@@ -254,8 +230,8 @@ canvas.addEventListener("touchmove", (event) => {
   simulation.alphaTarget(0.6).restart();
 }, { passive: true });
 canvas.addEventListener("touchend", () => {
-  if (pointer.attracting) spitOut();
   pointer.active = false;
+  simulation.alphaTarget(0.08);
 });
 }
 </script>

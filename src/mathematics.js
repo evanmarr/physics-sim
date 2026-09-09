@@ -370,26 +370,32 @@ export class MathematicsMode {
       kind: "math-items",
       title: "My Saved Math Items",
       itemNoun: "chart",
-      serialize: () => ({
-        chartType: this.chartType,
-        func: { expr: this.func.expr, color: this.func.color },
-        view: { ...this.view },
-        rows: this.rows.map(({ id, label, value, color }) => ({ id, label, value, color })),
-        nextRowId: this.nextRowId,
-        venn: JSON.parse(JSON.stringify(this.venn)),
-      }),
-      apply: (data) => {
-        this.chartType = data.chartType || "function";
-        if (data.func) this.func = { ...data.func, error: null };
-        if (data.view) this.view = data.view;
-        if (Array.isArray(data.rows) && data.rows.length) this.rows = data.rows;
-        if (data.nextRowId) this.nextRowId = data.nextRowId;
-        if (data.venn) this.venn = migrateVennData(data.venn);
-        for (const [id, btn] of Object.entries(this._typeButtons)) btn.classList.toggle("active", id === this.chartType);
-        this._buildControls();
-        this._draw();
-      },
+      serialize: () => this._serialize(),
+      apply: (data) => this.applySavedData(data),
     });
+  }
+
+  _serialize() {
+    return {
+      chartType: this.chartType,
+      func: { expr: this.func.expr, color: this.func.color },
+      view: { ...this.view },
+      rows: this.rows.map(({ id, label, value, color }) => ({ id, label, value, color })),
+      nextRowId: this.nextRowId,
+      venn: JSON.parse(JSON.stringify(this.venn)),
+    };
+  }
+
+  applySavedData(data) {
+    this.chartType = data.chartType || "function";
+    if (data.func) this.func = { ...data.func, error: null };
+    if (data.view) this.view = data.view;
+    if (Array.isArray(data.rows) && data.rows.length) this.rows = data.rows;
+    if (data.nextRowId) this.nextRowId = data.nextRowId;
+    if (data.venn) this.venn = migrateVennData(data.venn);
+    for (const [id, btn] of Object.entries(this._typeButtons)) btn.classList.toggle("active", id === this.chartType);
+    this._buildControls();
+    this._draw();
   }
 
   _updateErrors() {
