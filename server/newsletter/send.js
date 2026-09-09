@@ -12,40 +12,29 @@ import { fileURLToPath } from "node:url";
 import { unsubscribeToken } from "../unsubscribe.js";
 import { renderNewsletterHtml } from "./template.js";
 import { sendEmail } from "./mailer.js";
+import * as db from "../db.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DATA_FILE = path.join(__dirname, "..", "data.json");
 const CONTENT_FILE = path.join(__dirname, "content.json");
 const NEWS_FILE = path.join(__dirname, "news.txt");
 const ADS_FILE = path.join(__dirname, "ads.txt");
 const SITE_URL = process.env.SITE_URL || "http://localhost:5173";
 const NEWS_PLACEHOLDER_MARKER = "Replace this with this month's science news";
 
-async function readDb() {
-  let raw;
-  try {
-    raw = await fs.readFile(DATA_FILE, "utf8");
-  } catch {
-    throw new Error(`Couldn't read ${DATA_FILE} — run \`node server/server.js\` at least once first (it creates this file).`);
+async function loadNewsletterState() {
+  await db.ensureSchema();
+  let unsubscribeSecret = await db.getMeta("unsubscribeSecret");
+  if (!unsubscribeSecret) {
+    throw new Error("No unsubscribeSecret in the database yet — start the site once (locally or on Vercel) before running this.");
   }
-  const db = JSON.parse(raw);
-  if (!db.unsubscribeSecret) {
-    throw new Error("data.json has no unsubscribeSecret yet — start server.js once (even briefly) before running this.");
-  }
-  return db;
+  const nextContentIndex = Number((await db.getMeta("newsletter:nextContentIndex")) ?? 0);
+  const mailingList = await db.getMailingList();
+  return { unsubscribeSecret, nextContentIndex, mailingList };
 }
 
-// Re-reads the file right before writing so a concurrently-running
-// server.js (a user signing up mid-send, say) isn't clobbered — only the
-// two fields this script owns are merged in, everything else is whatever
-// is on disk at that moment.
-async function updateNewsletterState(patch) {
-  const raw = await fs.readFile(DATA_FILE, "utf8");
-  const db = JSON.parse(raw);
-  db.newsletter = { ...db.newsletter, ...patch };
-  const tmp = DATA_FILE + ".tmp";
-  await fs.writeFile(tmp, JSON.stringify(db, null, 2));
-  await fs.rename(tmp, DATA_FILE);
+async function updateNewsletterState({ nextContentIndex, lastSentAt }) {
+  await db.setMeta("newsletter:nextContentIndex", String(nextContentIndex));
+  await db.setMeta("newsletter:lastSentAt", lastSentAt);
 }
 
 async function readOptionalText(file) {
@@ -60,8 +49,8 @@ const isPreview = process.argv.includes("--preview");
 const previewEmail = process.argv.find((a) => a.includes("@")) || "preview@example.com";
 
 async function main() {
-  const db = await readDb();
-  const recipients = isPreview ? [previewEmail] : db.mailingList || [];
+  const state = await loadNewsletterState();
+  const recipients = isPreview ? [previewEmail] : state.mailingList;
   if (recipients.length === 0) {
     console.log("Mailing list is empty — nothing to send.");
     return;
@@ -69,7 +58,7 @@ async function main() {
 
   const content = JSON.parse(await fs.readFile(CONTENT_FILE, "utf8"));
   if (!content.length) throw new Error("content.json has no entries — add at least one scientist/equation/fact set.");
-  const index = (db.newsletter?.nextContentIndex || 0) % content.length;
+  const index = state.nextContentIndex % content.length;
   const issue = content[index];
 
   const news = await readOptionalText(NEWS_FILE);
@@ -84,7 +73,7 @@ async function main() {
 
   let sent = 0, failed = 0;
   for (const email of recipients) {
-    const token = unsubscribeToken(email, db.unsubscribeSecret);
+    const token = unsubscribeToken(email, state.unsubscribeSecret);
     const unsubscribeUrl = `${SITE_URL}/api/unsubscribe?email=${encodeURIComponent(email)}&token=${token}`;
     const html = renderNewsletterHtml({ monthLabel, scientist: issue.scientist, equation: issue.equation, fact: issue.fact, news, ads, unsubscribeUrl });
     try {
@@ -104,7 +93,9 @@ async function main() {
   console.log(`Newsletter run complete: ${sent} sent, ${failed} failed, content entry #${index} (${issue.scientist.name}).`);
 }
 
-main().catch((err) => {
-  console.error("Newsletter send failed:", err.message);
-  process.exit(1);
-});
+main()
+  .catch((err) => {
+    console.error("Newsletter send failed:", err.message);
+    process.exitCode = 1;
+  })
+  .finally(() => db.closePool());

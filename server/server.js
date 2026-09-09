@@ -1,88 +1,58 @@
-// Dependency-free Node server: serves the static site AND a small JSON API
-// for accounts + saved worlds/math items, all from one origin. Keeping API
-// and static files same-origin means the session cookie never has to cross
-// origins, which sidesteps most CORS/CSRF footguns outright.
+// Serves the static site AND a small JSON API for accounts + saved
+// worlds/math items/cities, all from one origin. Keeping API and static
+// files same-origin means the session cookie never has to cross origins,
+// which sidesteps most CORS/CSRF footguns outright.
 //
-// No npm packages: Node's built-in crypto.scrypt is a real, memory-hard
-// password KDF (the same job bcrypt/argon2 do) so there's no dependency
-// needed to hash passwords properly.
+// Persistence is a real Postgres database (see db.js) — not a local JSON
+// file — specifically so this also works when deployed somewhere
+// serverless (Vercel), where there's no durable local disk and no shared
+// memory between requests. This same handleApi() function is used both by
+// the always-on server below (for local dev / a traditional host) and by
+// api/[...path].js (the Vercel serverless entry point), so there's exactly
+// one copy of the actual business logic.
+//
+// Password hashing uses Node's built-in crypto.scrypt (a real, memory-hard
+// KDF, the same job bcrypt/argon2 do) — no dependency needed for that part.
 
 import http from "node:http";
 import crypto from "node:crypto";
-import fs from "node:fs/promises";
 import fsSync from "node:fs";
+import fs from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
 import { unsubscribeToken } from "./unsubscribe.js";
 import { sendEmail } from "./newsletter/mailer.js";
+import * as db from "./db.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, "..");
-const DATA_FILE = path.join(__dirname, "data.json");
 const PORT = process.env.PORT ? Number(process.env.PORT) : 5173;
 
 const MAX_WORLDS = 6;
 const MAX_MATH_ITEMS = 6;
 const MAX_CITIES = 3;
 const MAX_BODY_BYTES = 2 * 1024 * 1024; // 2MB — generous for a saved scene, small enough to block abuse
+const MAX_SHARED_ITEM_BYTES = 2 * 1024 * 1024;
 const SESSION_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 const MAX_NAME_LEN = 60;
+const MAX_EMAIL_LEN = 254;
+const MAX_PASSWORD_LEN = 200;
 const MAX_CLASSROOMS_PER_TEACHER = 20;
+const VERIFICATION_TTL_MS = 10 * 60 * 1000;
+const LOCKOUT_THRESHOLD = 8;
+const LOCKOUT_WINDOW_MS = 15 * 60 * 1000;
 const VALID_TITLES = new Set(["teacher", "student", "independent"]);
+
 function clampTitle(t) { return VALID_TITLES.has(t) ? t : "independent"; }
 // Unlike clampName (worlds/classrooms, which fall back to "Untitled"), a
 // blank first/last name should just stay blank — nobody's real name is
 // "Untitled".
 function clampPersonName(name) { return String(name ?? "").slice(0, MAX_NAME_LEN).trim(); }
-function publicUser(email) {
-  const u = db.users[email];
-  return { email, subscribed: !!u.subscribed, firstName: u.firstName || "", lastName: u.lastName || "", title: u.title || "independent" };
-}
-const MAX_EMAIL_LEN = 254;
-const MAX_PASSWORD_LEN = 200;
+function clampName(name) { return String(name ?? "").slice(0, MAX_NAME_LEN).trim() || "Untitled"; }
 
-// ---------- persistence ----------
-
-function freshDb() {
-  return { users: {}, sessions: {}, mailingList: [], classrooms: {}, feedback: [], sharedItems: [], unsubscribeSecret: crypto.randomBytes(32).toString("hex"), newsletter: { nextContentIndex: 0, lastSentAt: null } };
-}
-
-let db = freshDb();
-
-async function loadDb() {
-  try {
-    const raw = await fs.readFile(DATA_FILE, "utf8");
-    db = JSON.parse(raw);
-    db.users ||= {};
-    db.sessions ||= {};
-    db.mailingList ||= [];
-    db.classrooms ||= {};
-    db.feedback ||= [];
-    db.sharedItems ||= [];
-    // Generated once and persisted immediately — the monthly newsletter
-    // script reads this same file to mint unsubscribe links, so it must
-    // exist (and never change) before the first newsletter ever sends.
-    const needsSave = !db.unsubscribeSecret || !db.newsletter;
-    db.unsubscribeSecret ||= crypto.randomBytes(32).toString("hex");
-    db.newsletter ||= { nextContentIndex: 0, lastSentAt: null };
-    if (needsSave) await persist();
-  } catch {
-    db = freshDb();
-    await persist();
-  }
-}
-
-let writeQueue = Promise.resolve();
-function persist() {
-  // Serialize writes and go through a temp file + rename so a crash
-  // mid-write can never leave data.json half-written/corrupt.
-  writeQueue = writeQueue.then(async () => {
-    const tmp = DATA_FILE + ".tmp";
-    await fs.writeFile(tmp, JSON.stringify(db, null, 2));
-    await fs.rename(tmp, DATA_FILE);
-  });
-  return writeQueue;
+function publicUser(u) {
+  return { email: u.email, subscribed: !!u.subscribed, firstName: u.first_name || "", lastName: u.last_name || "", title: u.title || "independent" };
 }
 
 // ---------- passwords ----------
@@ -119,39 +89,34 @@ function validatePassword(password) {
   return null;
 }
 
-// ---------- login rate limiting (in-memory, resets on restart — fine, it's a deterrent not a ledger) ----------
+// ---------- login rate limiting ----------
+// Persisted in Postgres (see db.js) rather than an in-memory Map — a
+// serverless instance wouldn't remember previous attempts otherwise,
+// defeating the point of a lockout.
 
-const loginAttempts = new Map(); // email -> { count, first }
-const LOCKOUT_THRESHOLD = 8;
-const LOCKOUT_WINDOW_MS = 15 * 60 * 1000;
-
-function isLockedOut(email) {
-  const rec = loginAttempts.get(email);
+async function isLockedOut(key) {
+  const rec = await db.getLoginAttempts(key);
   if (!rec) return false;
-  if (Date.now() - rec.first > LOCKOUT_WINDOW_MS) { loginAttempts.delete(email); return false; }
+  if (Date.now() - rec.firstAt > LOCKOUT_WINDOW_MS) { await db.clearLoginAttempts(key); return false; }
   return rec.count >= LOCKOUT_THRESHOLD;
 }
-function recordFailedLogin(email) {
-  const rec = loginAttempts.get(email);
-  if (!rec || Date.now() - rec.first > LOCKOUT_WINDOW_MS) loginAttempts.set(email, { count: 1, first: Date.now() });
-  else rec.count++;
+async function recordFailedLogin(key) {
+  const rec = await db.getLoginAttempts(key);
+  if (!rec || Date.now() - rec.firstAt > LOCKOUT_WINDOW_MS) await db.recordLoginAttempt(key, 1, Date.now());
+  else await db.recordLoginAttempt(key, rec.count + 1, rec.firstAt);
 }
-function clearFailedLogins(email) { loginAttempts.delete(email); }
+async function clearFailedLogins(key) { await db.clearLoginAttempts(key); }
 
 // ---------- email verification codes ----------
 // Sign in/up doesn't actually create a session until the emailed 6-digit
 // code comes back correct — this closes the gap where someone guesses or
 // reuses a leaked password, since they'd also need access to the account's
-// actual inbox. Pending attempts live in memory only (not persisted): a
-// server restart mid-verification just means signing in again, which is a
-// fine tradeoff for a code that's meant to expire in 10 minutes anyway.
-const pendingVerifications = new Map(); // token -> { email, kind, code, expiresAt, signupData? }
-const VERIFICATION_TTL_MS = 10 * 60 * 1000;
+// actual inbox.
 
 async function beginVerification(email, { kind, signupData }) {
   const token = crypto.randomBytes(32).toString("hex");
   const code = String(crypto.randomInt(1000000)).padStart(6, "0");
-  pendingVerifications.set(token, { email, kind, code, expiresAt: Date.now() + VERIFICATION_TTL_MS, signupData });
+  await db.insertPendingVerification(token, email, kind, code, Date.now() + VERIFICATION_TTL_MS, signupData);
   await sendVerificationEmail(email, code);
   return token;
 }
@@ -166,19 +131,20 @@ async function sendVerificationEmail(email, code) {
 
 // ---------- sessions ----------
 
-function createSession(email) {
+async function createSession(email) {
   const token = crypto.randomBytes(32).toString("hex");
-  db.sessions[token] = { email, expires: Date.now() + SESSION_MAX_AGE_MS };
+  await db.createSessionRow(token, email, Date.now() + SESSION_MAX_AGE_MS);
   return token;
 }
 
-function sessionUser(req) {
+async function sessionUser(req) {
   const cookies = parseCookies(req.headers.cookie || "");
   const token = cookies.sid;
   if (!token) return null;
-  const session = db.sessions[token];
-  if (!session || session.expires < Date.now()) return null;
-  return db.users[session.email] ? session.email : null;
+  const session = await db.getSession(token);
+  if (!session || Number(session.expires) < Date.now()) return null;
+  const user = await db.getUser(session.email);
+  return user ? session.email : null;
 }
 
 function parseCookies(header) {
@@ -237,43 +203,31 @@ function sameOriginOk(req) {
   } catch { return false; }
 }
 
-function clampName(name) {
-  return String(name ?? "").slice(0, MAX_NAME_LEN).trim() || "Untitled";
+// ---------- saved-item collections (shared logic for worlds/mathItems/cities) ----------
+
+async function listItems(email, kind) {
+  return db.listSavedItems(email, kind);
 }
 
-// ---------- saved-item collections (shared logic for worlds + math items) ----------
-
-function listItems(email, key) {
-  return (db.users[email]?.[key] || []).map(({ id, name, updatedAt, data }) => ({ id, name, updatedAt, data }));
-}
-
-async function createItem(email, key, max, name, data) {
-  // An account created before a given collection (worlds/mathItems/cities)
-  // existed won't have that array yet — lazily add it rather than crashing.
-  const items = db.users[email][key] ||= [];
-  if (items.length >= max) return { error: `You already have ${max} saved — delete one first.` };
+async function createItem(email, kind, max, name, data) {
+  const count = await db.countSavedItems(email, kind);
+  if (count >= max) return { error: `You already have ${max} saved — delete one first.` };
   const item = { id: crypto.randomUUID(), name: clampName(name), data, updatedAt: Date.now() };
-  items.push(item);
-  await persist();
+  await db.insertSavedItem(item.id, email, kind, item.name, item.data, item.updatedAt);
   return { item };
 }
 
-async function updateItem(email, key, id, name, data) {
-  const item = (db.users[email][key] ||= []).find((it) => it.id === id);
-  if (!item) return { error: "Not found" };
-  item.name = clampName(name);
-  item.data = data;
-  item.updatedAt = Date.now();
-  await persist();
-  return { item };
+async function updateItem(email, kind, id, name, data) {
+  const updatedAt = Date.now();
+  const clampedName = clampName(name);
+  const ok = await db.updateSavedItem(email, kind, id, clampedName, data, updatedAt);
+  if (!ok) return { error: "Not found" };
+  return { item: { id, name: clampedName, data, updatedAt } };
 }
 
-async function deleteItem(email, key, id) {
-  const items = db.users[email][key] ||= [];
-  const next = items.filter((it) => it.id !== id);
-  if (next.length === items.length) return { error: "Not found" };
-  db.users[email][key] = next;
-  await persist();
+async function deleteItem(email, kind, id) {
+  const ok = await db.deleteSavedItem(email, kind, id);
+  if (!ok) return { error: "Not found" };
   return { ok: true };
 }
 
@@ -286,82 +240,65 @@ async function deleteItem(email, key, id) {
 // Unambiguous alphabet — no 0/O or 1/I, so a code read aloud or handwritten
 // on a whiteboard doesn't turn into a support request.
 const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-function generateClassCode() {
+async function generateClassCode() {
   let code;
   do {
     code = Array.from({ length: 6 }, () => CODE_ALPHABET[crypto.randomInt(CODE_ALPHABET.length)]).join("");
-  } while (db.classrooms[code]);
+  } while (await db.classCodeExists(code));
   return code;
 }
 
-function classroomsTaughtBy(email) {
-  return Object.values(db.classrooms)
-    .filter((c) => c.teacherEmail === email)
-    .map((c) => ({ code: c.code, name: c.name, createdAt: c.createdAt, students: c.students }));
-}
-
-function classroomsJoinedBy(email) {
-  return Object.values(db.classrooms)
-    .filter((c) => c.students.includes(email))
-    .map((c) => ({ code: c.code, name: c.name, teacherEmail: c.teacherEmail }));
-}
+async function classroomsTaughtBy(email) { return db.classroomsTaughtByDb(email); }
+async function classroomsJoinedBy(email) { return db.classroomsJoinedByDb(email); }
 
 async function createClassroom(email, name) {
-  const teaching = classroomsTaughtBy(email);
-  if (teaching.length >= MAX_CLASSROOMS_PER_TEACHER) return { error: `You already have ${MAX_CLASSROOMS_PER_TEACHER} classrooms — delete one first.` };
-  const code = generateClassCode();
-  db.classrooms[code] = { code, teacherEmail: email, name: clampName(name), students: [], createdAt: Date.now() };
-  await persist();
-  return { classroom: db.classrooms[code] };
+  const teachingCount = await db.countClassroomsTaughtBy(email);
+  if (teachingCount >= MAX_CLASSROOMS_PER_TEACHER) return { error: `You already have ${MAX_CLASSROOMS_PER_TEACHER} classrooms — delete one first.` };
+  const code = await generateClassCode();
+  const createdAt = Date.now();
+  const clampedName = clampName(name);
+  await db.insertClassroom(code, email, clampedName, createdAt);
+  return { classroom: { code, teacherEmail: email, name: clampedName, students: [], createdAt } };
 }
 
 async function joinClassroom(email, rawCode) {
   const code = String(rawCode || "").trim().toUpperCase();
-  const classroom = db.classrooms[code];
+  const classroom = await db.getClassroom(code);
   if (!classroom) return { error: "That class code doesn't match any classroom." };
-  if (classroom.teacherEmail === email) return { error: "You're the teacher of that classroom, not a student in it." };
-  if (!classroom.students.includes(email)) {
-    classroom.students.push(email);
-    await persist();
-  }
-  return { classroom: { code: classroom.code, name: classroom.name, teacherEmail: classroom.teacherEmail } };
+  if (classroom.teacher_email === email) return { error: "You're the teacher of that classroom, not a student in it." };
+  await db.addStudentToClassroom(code, email);
+  return { classroom: { code: classroom.code, name: classroom.name, teacherEmail: classroom.teacher_email } };
 }
 
 async function leaveClassroom(email, code) {
-  const classroom = db.classrooms[code];
-  if (!classroom) return { error: "Not found" };
-  const next = classroom.students.filter((s) => s !== email);
-  if (next.length === classroom.students.length) return { error: "Not found" };
-  classroom.students = next;
-  await persist();
+  const ok = await db.removeStudentFromClassroom(code, email);
+  if (!ok) return { error: "Not found" };
   return { ok: true };
 }
 
 async function deleteClassroom(email, code) {
-  const classroom = db.classrooms[code];
-  if (!classroom || classroom.teacherEmail !== email) return { error: "Not found" };
-  delete db.classrooms[code];
-  await persist();
+  const classroom = await db.getClassroom(code);
+  if (!classroom || classroom.teacher_email !== email) return { error: "Not found" };
+  await db.deleteClassroomRow(code);
   return { ok: true };
 }
 
 // ---------- sharing worlds/math items with a classroom ----------
 // A student shares one saved item up to their teacher; a teacher shares
 // one down to every student in a class they teach. Either direction
-// requires the sharer to actually be in that classroom (checked below) —
-// sharing isn't a general inbox, it only ever flows along an existing
-// teacher/student relationship.
-const MAX_SHARED_ITEM_BYTES = 2 * 1024 * 1024;
+// requires the sharer to actually be in that classroom — sharing isn't a
+// general inbox, it only ever flows along an existing teacher/student
+// relationship.
 
 async function shareItem(email, { kind, name, data, classroomCode, direction }) {
   if (kind !== "worlds" && kind !== "mathItems") return { error: "Can only share Physics worlds or Mathematics items." };
   if (JSON.stringify(data ?? {}).length > MAX_SHARED_ITEM_BYTES) return { error: "That item is too large to share." };
-  const classroom = db.classrooms[String(classroomCode || "").toUpperCase()];
+  const classroom = await db.getClassroom(String(classroomCode || "").toUpperCase());
   if (!classroom) return { error: "That class code doesn't match any classroom." };
   if (direction === "to-teacher") {
-    if (!classroom.students.includes(email)) return { error: "You're not a student in that classroom." };
+    if (!(await db.isStudentInClassroom(classroom.code, email))) return { error: "You're not a student in that classroom." };
   } else if (direction === "to-students") {
-    if (classroom.teacherEmail !== email) return { error: "You're not the teacher of that classroom." };
+    if (classroom.teacher_email !== email) return { error: "You're not the teacher of that classroom." };
   } else {
     return { error: "Invalid share direction." };
   }
@@ -370,8 +307,7 @@ async function shareItem(email, { kind, name, data, classroomCode, direction }) 
     fromEmail: email, classroomCode: classroom.code, classroomName: classroom.name,
     direction, createdAt: Date.now(),
   };
-  db.sharedItems.push(item);
-  await persist();
+  await db.insertSharedItem(item);
   return { item: { ...item, data: undefined } }; // the confirmation doesn't need to echo the payload back
 }
 
@@ -379,27 +315,19 @@ async function shareItem(email, { kind, name, data, classroomCode, direction }) 
 // recipient of, given who they are relative to each classroom (a teacher
 // sees "to-teacher" shares from students in classes they teach; a student
 // sees "to-students" shares from the teacher of classes they're in).
-function sharedItemsFor(email) {
-  const teaching = new Set(classroomsTaughtBy(email).map((c) => c.code));
-  const joined = new Set(classroomsJoinedBy(email).map((c) => c.code));
-  return db.sharedItems
-    .filter((it) => (it.direction === "to-teacher" && teaching.has(it.classroomCode)) || (it.direction === "to-students" && joined.has(it.classroomCode)))
-    .map(({ data, ...meta }) => meta) // list view omits the (possibly large) payload
-    .sort((a, b) => b.createdAt - a.createdAt);
+async function sharedItemsFor(email) {
+  const teaching = (await classroomsTaughtBy(email)).map((c) => c.code);
+  const joined = (await classroomsJoinedBy(email)).map((c) => c.code);
+  return db.sharedItemsReceivedFor(teaching, joined);
 }
 
-function sentItemsBy(email) {
-  return db.sharedItems
-    .filter((it) => it.fromEmail === email)
-    .map(({ data, ...meta }) => meta)
-    .sort((a, b) => b.createdAt - a.createdAt);
-}
+async function sentItemsBy(email) { return db.sharedItemsSentBy(email); }
 
-function getSharedItemData(email, id) {
-  const item = db.sharedItems.find((it) => it.id === id);
+async function getSharedItemData(email, id) {
+  const item = await db.getSharedItemById(id);
   if (!item) return { error: "Not found" };
-  const teaching = new Set(classroomsTaughtBy(email).map((c) => c.code));
-  const joined = new Set(classroomsJoinedBy(email).map((c) => c.code));
+  const teaching = new Set((await classroomsTaughtBy(email)).map((c) => c.code));
+  const joined = new Set((await classroomsJoinedBy(email)).map((c) => c.code));
   const canSee = (item.direction === "to-teacher" && teaching.has(item.classroomCode)) || (item.direction === "to-students" && joined.has(item.classroomCode)) || item.fromEmail === email;
   if (!canSee) return { error: "Not found" };
   return { item };
@@ -407,7 +335,8 @@ function getSharedItemData(email, id) {
 
 // ---------- routes ----------
 
-async function handleApi(req, res, url) {
+export async function handleApi(req, res, url) {
+  await db.ensureSchema();
   const parts = url.pathname.split("/").filter(Boolean); // ["api", ...]
   const mutating = req.method !== "GET" && req.method !== "HEAD";
   if (mutating && !sameOriginOk(req)) return sendJson(res, 403, { error: "Cross-origin request blocked" });
@@ -418,13 +347,15 @@ async function handleApi(req, res, url) {
   if (parts[1] === "unsubscribe" && req.method === "GET") {
     const email = validateEmail(url.searchParams.get("email"));
     const token = url.searchParams.get("token") || "";
-    const expected = email ? unsubscribeToken(email, db.unsubscribeSecret) : "";
+    let secret = await db.getMeta("unsubscribeSecret");
+    if (!secret) { secret = crypto.randomBytes(32).toString("hex"); await db.setMeta("unsubscribeSecret", secret); }
+    const expected = email ? unsubscribeToken(email, secret) : "";
     const valid = email && token.length === expected.length && crypto.timingSafeEqual(Buffer.from(token), Buffer.from(expected));
     res.writeHead(valid ? 200 : 400, { "Content-Type": "text/html; charset=utf-8" });
     if (!valid) return res.end("<p>That unsubscribe link is invalid or has expired.</p>");
-    db.mailingList = db.mailingList.filter((e) => e !== email);
-    if (db.users[email]) db.users[email].subscribed = false;
-    await persist();
+    await db.removeFromMailingList(email);
+    const user = await db.getUser(email);
+    if (user) await db.setUserSubscribed(email, false);
     return res.end("<p>You've been unsubscribed from the Continuum newsletter. Sorry to see you go.</p>");
   }
 
@@ -434,7 +365,7 @@ async function handleApi(req, res, url) {
     if (!email) return sendJson(res, 400, { error: "Enter a valid email address." });
     const pwError = validatePassword(body.password);
     if (pwError) return sendJson(res, 400, { error: pwError });
-    if (db.users[email]) return sendJson(res, 409, { error: "An account with that email already exists." });
+    if (await db.getUser(email)) return sendJson(res, 409, { error: "An account with that email already exists." });
     const pendingToken = await beginVerification(email, {
       kind: "signup",
       signupData: {
@@ -450,13 +381,13 @@ async function handleApi(req, res, url) {
     const email = validateEmail(body.email);
     const genericError = () => sendJson(res, 401, { error: "Invalid email or password." });
     if (!email || typeof body.password !== "string") return genericError();
-    if (isLockedOut(email)) return sendJson(res, 429, { error: "Too many attempts. Try again in a few minutes." });
-    const user = db.users[email];
-    if (!user || !verifyPassword(body.password, user.passwordHash)) {
-      recordFailedLogin(email);
+    if (await isLockedOut(email)) return sendJson(res, 429, { error: "Too many attempts. Try again in a few minutes." });
+    const user = await db.getUser(email);
+    if (!user || !verifyPassword(body.password, user.password_hash)) {
+      await recordFailedLogin(email);
       return genericError();
     }
-    clearFailedLogins(email);
+    await clearFailedLogins(email);
     const pendingToken = await beginVerification(email, { kind: "login" });
     return sendJson(res, 200, { pending: true, token: pendingToken, email });
   }
@@ -465,34 +396,35 @@ async function handleApi(req, res, url) {
     const body = await readJsonBody(req);
     const pendingToken = String(body.token || "");
     const code = String(body.code || "").trim();
-    const pending = pendingVerifications.get(pendingToken);
+    const pending = await db.getPendingVerification(pendingToken);
     if (!pending || pending.expiresAt < Date.now()) {
-      pendingVerifications.delete(pendingToken);
+      if (pending) await db.deletePendingVerification(pendingToken);
       return sendJson(res, 400, { error: "That code has expired — request a new one." });
     }
-    if (isLockedOut(`verify:${pendingToken}`)) return sendJson(res, 429, { error: "Too many attempts. Request a new code." });
+    const verifyKey = `verify:${pendingToken}`;
+    if (await isLockedOut(verifyKey)) return sendJson(res, 429, { error: "Too many attempts. Request a new code." });
     if (code !== pending.code) {
-      recordFailedLogin(`verify:${pendingToken}`);
+      await recordFailedLogin(verifyKey);
       return sendJson(res, 400, { error: "That code isn't right." });
     }
-    pendingVerifications.delete(pendingToken);
-    clearFailedLogins(`verify:${pendingToken}`);
+    await db.deletePendingVerification(pendingToken);
+    await clearFailedLogins(verifyKey);
 
     if (pending.kind === "signup") {
       const { email } = pending;
-      if (db.users[email]) return sendJson(res, 409, { error: "An account with that email already exists." }); // raced with another signup
-      db.users[email] = { ...pending.signupData, worlds: [], mathItems: [], cities: [], createdAt: Date.now() };
-      if (pending.signupData.subscribed && !db.mailingList.includes(email)) db.mailingList.push(email);
-      await persist();
+      if (await db.getUser(email)) return sendJson(res, 409, { error: "An account with that email already exists." }); // raced with another signup
+      const createdAt = Date.now();
+      await db.createUser(email, { ...pending.signupData, createdAt });
+      if (pending.signupData.subscribed) await db.addToMailingList(email);
     }
-    const token = createSession(pending.email);
+    const token = await createSession(pending.email);
     setSessionCookie(res, req, token, SESSION_MAX_AGE_MS / 1000);
-    return sendJson(res, 200, publicUser(pending.email));
+    return sendJson(res, 200, publicUser(await db.getUser(pending.email)));
   }
 
   if (parts[1] === "resend-code" && req.method === "POST") {
     const body = await readJsonBody(req);
-    const pending = pendingVerifications.get(String(body.token || ""));
+    const pending = await db.getPendingVerification(String(body.token || ""));
     if (!pending || pending.expiresAt < Date.now()) return sendJson(res, 400, { error: "That code has expired — sign in again." });
     await sendVerificationEmail(pending.email, pending.code);
     return sendJson(res, 200, { ok: true });
@@ -500,7 +432,7 @@ async function handleApi(req, res, url) {
 
   if (parts[1] === "logout" && req.method === "POST") {
     const cookies = parseCookies(req.headers.cookie || "");
-    if (cookies.sid) { delete db.sessions[cookies.sid]; await persist(); }
+    if (cookies.sid) await db.deleteSession(cookies.sid);
     res.setHeader("Set-Cookie", "sid=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0");
     return sendJson(res, 200, { ok: true });
   }
@@ -512,30 +444,28 @@ async function handleApi(req, res, url) {
     const body = await readJsonBody(req);
     const message = String(body.message || "").trim().slice(0, 4000);
     if (!message) return sendJson(res, 400, { error: "Feedback can't be empty." });
-    const fromEmail = sessionUser(req) || validateEmail(body.email) || null;
-    db.feedback.push({ id: crypto.randomUUID(), message, email: fromEmail, createdAt: Date.now() });
-    await persist();
+    const fromEmail = (await sessionUser(req)) || validateEmail(body.email) || null;
+    await db.insertFeedback(crypto.randomUUID(), message, fromEmail, Date.now());
     return sendJson(res, 200, { ok: true });
   }
 
   // Everything past this point requires a signed-in session.
-  const email = sessionUser(req);
+  const email = await sessionUser(req);
   if (parts[1] === "me") {
     if (!email) return sendJson(res, 401, { error: "Not signed in" });
-    return sendJson(res, 200, publicUser(email));
+    return sendJson(res, 200, publicUser(await db.getUser(email)));
   }
   if (!email) return sendJson(res, 401, { error: "Sign in to save and load your work." });
 
   if (parts[1] === "title" && req.method === "POST") {
     const body = await readJsonBody(req);
-    db.users[email].title = clampTitle(body.title);
-    await persist();
-    return sendJson(res, 200, publicUser(email));
+    await db.setUserTitle(email, clampTitle(body.title));
+    return sendJson(res, 200, publicUser(await db.getUser(email)));
   }
 
   if (parts[1] === "classrooms") {
     if (parts.length === 2 && req.method === "GET") {
-      return sendJson(res, 200, { teaching: classroomsTaughtBy(email), joined: classroomsJoinedBy(email) });
+      return sendJson(res, 200, { teaching: await classroomsTaughtBy(email), joined: await classroomsJoinedBy(email) });
     }
     if (parts.length === 2 && req.method === "POST") {
       const body = await readJsonBody(req);
@@ -559,7 +489,7 @@ async function handleApi(req, res, url) {
 
   if (parts[1] === "shared-items") {
     if (parts.length === 2 && req.method === "GET") {
-      return sendJson(res, 200, { received: sharedItemsFor(email), sent: sentItemsBy(email) });
+      return sendJson(res, 200, { received: await sharedItemsFor(email), sent: await sentItemsBy(email) });
     }
     if (parts.length === 2 && req.method === "POST") {
       const body = await readJsonBody(req);
@@ -567,7 +497,7 @@ async function handleApi(req, res, url) {
       return sendJson(res, result.error ? 400 : 200, result);
     }
     if (parts.length === 3 && req.method === "GET") {
-      const result = getSharedItemData(email, parts[2]);
+      const result = await getSharedItemData(email, parts[2]);
       return sendJson(res, result.error ? 404 : 200, result);
     }
   }
@@ -575,7 +505,7 @@ async function handleApi(req, res, url) {
   const collectionKey = parts[1] === "worlds" ? "worlds" : parts[1] === "math-items" ? "mathItems" : parts[1] === "cities" ? "cities" : null;
   const max = collectionKey === "worlds" ? MAX_WORLDS : collectionKey === "cities" ? MAX_CITIES : MAX_MATH_ITEMS;
   if (collectionKey) {
-    if (parts.length === 2 && req.method === "GET") return sendJson(res, 200, { items: listItems(email, collectionKey) });
+    if (parts.length === 2 && req.method === "GET") return sendJson(res, 200, { items: await listItems(email, collectionKey) });
     if (parts.length === 2 && req.method === "POST") {
       const body = await readJsonBody(req);
       const result = await createItem(email, collectionKey, max, body.name, body.data);
@@ -595,7 +525,8 @@ async function handleApi(req, res, url) {
   sendJson(res, 404, { error: "Not found" });
 }
 
-// ---------- static file serving ----------
+// ---------- static file serving (local dev / traditional hosting only —
+// on Vercel, static files are served directly by the platform instead) ----------
 
 const MIME = {
   ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".mjs": "text/javascript; charset=utf-8",
@@ -624,45 +555,50 @@ async function serveStatic(req, res, pathname) {
   }
 }
 
-// ---------- server ----------
+// ---------- standalone server entry point (local dev / any host that runs
+// a persistent Node process) — skipped entirely when this file is only
+// imported for its handleApi export, e.g. by api/[...path].js on Vercel ----------
 
-const server = http.createServer((req, res) => {
-  const url = new URL(req.url, `http://${req.headers.host}`);
-  if (url.pathname.startsWith("/api/")) {
-    handleApi(req, res, url).catch((err) => {
-      sendJson(res, err.status || 500, { error: err.status ? err.message : "Server error" });
-    });
-  } else {
-    serveStatic(req, res, url.pathname);
-  }
-});
-
-// A bug in one request handler shouldn't take down every other signed-in
-// user's session — log it and keep serving instead of crashing the process.
-process.on("uncaughtException", (err) => console.error("Unhandled error (server still running):", err));
-process.on("unhandledRejection", (err) => console.error("Unhandled rejection (server still running):", err));
-
-server.on("error", (err) => {
-  if (err.code === "EADDRINUSE") {
-    console.error(`\nPort ${PORT} is already in use — something else (maybe an earlier run of this` +
-      ` server, or the python/php static server) is still listening on it.\n` +
-      `Find it with \`lsof -i :${PORT}\` and stop that process, or run this one on a different port:` +
-      ` \`PORT=5174 node server/server.js\`.\n`);
-    process.exit(1);
-  }
-  throw err;
-});
-
-await loadDb();
-server.listen(PORT, () => {
-  console.log(`Continuum server running at http://localhost:${PORT}`);
-  // No host was passed to listen(), so this already accepts connections
-  // from other devices on the same network, not just this machine —
-  // printing the LAN address is just so you don't have to go find it
-  // yourself to try that.
-  for (const iface of Object.values(os.networkInterfaces()).flat()) {
-    if (iface.family === "IPv4" && !iface.internal) {
-      console.log(`  Also reachable on your network at: http://${iface.address}:${PORT}`);
+const isMainModule = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+if (isMainModule) {
+  const server = http.createServer((req, res) => {
+    const url = new URL(req.url, `http://${req.headers.host}`);
+    if (url.pathname.startsWith("/api/")) {
+      handleApi(req, res, url).catch((err) => {
+        sendJson(res, err.status || 500, { error: err.status ? err.message : "Server error" });
+      });
+    } else {
+      serveStatic(req, res, url.pathname);
     }
-  }
-});
+  });
+
+  // A bug in one request handler shouldn't take down every other signed-in
+  // user's session — log it and keep serving instead of crashing the process.
+  process.on("uncaughtException", (err) => console.error("Unhandled error (server still running):", err));
+  process.on("unhandledRejection", (err) => console.error("Unhandled rejection (server still running):", err));
+
+  server.on("error", (err) => {
+    if (err.code === "EADDRINUSE") {
+      console.error(`\nPort ${PORT} is already in use — something else (maybe an earlier run of this` +
+        ` server, or the python/php static server) is still listening on it.\n` +
+        `Find it with \`lsof -i :${PORT}\` and stop that process, or run this one on a different port:` +
+        ` \`PORT=5174 node server/server.js\`.\n`);
+      process.exit(1);
+    }
+    throw err;
+  });
+
+  await db.ensureSchema();
+  server.listen(PORT, () => {
+    console.log(`Continuum server running at http://localhost:${PORT}`);
+    // No host was passed to listen(), so this already accepts connections
+    // from other devices on the same network, not just this machine —
+    // printing the LAN address is just so you don't have to go find it
+    // yourself to try that.
+    for (const iface of Object.values(os.networkInterfaces()).flat()) {
+      if (iface.family === "IPv4" && !iface.internal) {
+        console.log(`  Also reachable on your network at: http://${iface.address}:${PORT}`);
+      }
+    }
+  });
+}

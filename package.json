@@ -1,0 +1,24 @@
+{
+  "name": "physics-sandbox",
+  "version": "1.0.0",
+  "description": "A browser-based sandbox spanning seven real, simulated domains — physics, chemistry, astronomy, history, cybersecurity, mathematics, and a gallery of D3 force simulations — all reachable from one top bar and one home screen.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/evanmarr/physics-sim.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "bugs": {
+    "url": "https://github.com/evanmarr/physics-sim/issues"
+  },
+  "homepage": "https://github.com/evanmarr/physics-sim#readme",
+  "dependencies": {
+    "pg": "^8.23.0"
+  }
+}

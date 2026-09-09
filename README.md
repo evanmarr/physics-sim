@@ -20,11 +20,13 @@ Static files only (no accounts, no saving worlds/charts):
 python3 -m http.server 5173
 ```
 
-With accounts and saving (sign in, save up to 6 Physics worlds and 6
-Mathematics items to your account) — requires only Node.js, no `npm install`:
+With accounts and saving (sign in, save worlds/math items/cities, classrooms):
+accounts are stored in a real Postgres database (Neon), not a local file, so
+this needs a `DATABASE_URL` — run `npm install` once, then `vercel env pull
+.env.local` to fetch it from your Vercel project, then:
 
 ```bash
-node server/server.js
+node --env-file=.env.local server/server.js
 ```
 
 Either way, open http://localhost:5173.
