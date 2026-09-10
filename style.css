@@ -206,7 +206,12 @@ button:disabled { opacity: .4; cursor: default; }
 }
 #menu-dropdown button { width: 100%; text-align: left; padding: 8px 10px; font-size: 13.5px; border: none; background: none; border-radius: 6px; }
 #menu-dropdown button:hover { background: var(--panel-alt); }
-#mode-tabs { display: flex; align-items: center; gap: 22px; overflow-x: auto; max-width: 100%; }
+/* Unlike every other direct child of #topbar, this one DOES shrink — with
+   12 modes it's easily wider than the window, and without this it just
+   pushes account-controls/the "..." menu off the right edge entirely with
+   no way to reach them (the internal overflow-x:auto here only helps once
+   this box itself is sized to fit the remaining space, not the whole bar). */
+#mode-tabs { display: flex; align-items: center; gap: 22px; overflow-x: auto; flex: 1 1 auto; min-width: 0; }
 .mode-tab {
   border: none; background: none; padding: 4px 0; border-radius: 0;
   color: var(--text-dim); font-size: 13.5px; font-weight: 500;
@@ -1254,7 +1259,11 @@ button:disabled { opacity: .4; cursor: default; }
 .sound-canvas-wrap { border: 1px solid var(--border); border-radius: 10px; background: var(--bg); padding: 10px; margin: 14px 0; }
 .sound-canvas { width: 100%; height: 180px; display: block; }
 .sound-status { font-size: 12.5px; color: var(--text-dim); margin-top: 8px; min-height: 16px; }
-.sound-record-row { margin-top: 10px; }
+.sound-record-row { margin-top: 10px; display: flex; align-items: center; gap: 10px; }
+.sound-timer { font-size: 12.5px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.sound-wave-picker { display: flex; gap: 6px; }
+.sound-wave-btn { padding: 7px 14px; border-radius: 7px; border: 1px solid var(--border); background: var(--panel-alt); color: var(--text); font-size: 13px; }
+.sound-wave-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
 .cyber-sim-btn.recording { background: #f87171; border-color: #f87171; color: #fff; }
 .sound-playback-wrap { margin-top: 14px; display: flex; flex-direction: column; gap: 10px; }
 .sound-playback-wrap audio { width: 100%; }

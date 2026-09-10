@@ -54,8 +54,15 @@ export async function setTitle(title) {
   setUser(data);
   return data;
 }
+// A trusted device (one that's already proven it can read this account's
+// inbox — see beginVerification/verify-code server-side) skips the code
+// step entirely: the server returns the real signed-in user directly
+// instead of a pending token, so this signs them in right here rather than
+// making the caller go through renderVerifyStep for no reason.
 export async function signIn(email, password) {
-  return api("/login", { method: "POST", body: { email, password } });
+  const data = await api("/login", { method: "POST", body: { email, password } });
+  if (!data.pending) setUser(data);
+  return data;
 }
 export async function signOut() {
   try { await api("/logout", { method: "POST" }); } catch { /* still clear client-side state */ }
@@ -129,6 +136,7 @@ export function initAuthUI() {
     emailWrap.classList.toggle("hidden", !u);
     dropdown.classList.add("hidden");
     accountBtn.classList.toggle("hidden", !!u);
+    titleBtn.classList.toggle("hidden", !u);
     if (u) titleBtn.textContent = `Title: ${TITLE_LABELS[u.title] || "Independent"}`;
   });
 
@@ -187,7 +195,8 @@ function renderAuthModal(mode) {
         const title = authBox.querySelector("#auth-title").value;
         pending = await signUp(email, password, authBox.querySelector("#auth-subscribe").checked, firstName, lastName, title);
       }
-      renderVerifyStep(pending.token, pending.email);
+      if (pending.pending) renderVerifyStep(pending.token, pending.email);
+      else authModal.classList.add("hidden"); // a trusted device — signIn() already completed sign-in above
     } catch (e) {
       errorEl.textContent = e.message;
     }

@@ -102,6 +102,11 @@ export function ensureSchema() {
       key TEXT PRIMARY KEY,
       value TEXT
     );
+    CREATE TABLE IF NOT EXISTS trusted_devices (
+      token TEXT PRIMARY KEY,
+      email TEXT NOT NULL REFERENCES users(email) ON DELETE CASCADE,
+      expires_at BIGINT NOT NULL
+    );
   `);
   return readySchema;
 }
@@ -373,6 +378,23 @@ export async function clearLoginAttempts(key) {
 }
 
 // ---------- app-wide metadata (unsubscribe secret, newsletter state) ----------
+
+// ---------- trusted devices ----------
+// Lets a browser skip the email-code step on future sign-ins, once it's
+// proven it can read that inbox at least once (at signup, or the first
+// login there). A separate long-lived cookie from the session cookie —
+// signing out clears the session but intentionally leaves this alone, so
+// signing back in on the same browser still skips verification.
+
+export async function insertTrustedDevice(token, email, expiresAt) {
+  await query("INSERT INTO trusted_devices (token, email, expires_at) VALUES ($1, $2, $3)", [token, email, expiresAt]);
+}
+
+export async function getTrustedDevice(token) {
+  const rows = await query("SELECT * FROM trusted_devices WHERE token = $1", [token]);
+  if (!rows[0]) return null;
+  return { email: rows[0].email, expiresAt: Number(rows[0].expires_at) };
+}
 
 export async function getMeta(key) {
   const rows = await query("SELECT value FROM app_meta WHERE key = $1", [key]);

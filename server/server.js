@@ -23,6 +23,7 @@ import os from "node:os";
 import { fileURLToPath } from "node:url";
 import { unsubscribeToken } from "./unsubscribe.js";
 import { sendEmail } from "./newsletter/mailer.js";
+import { wrapEmailHtml } from "./emailTemplate.js";
 import * as db from "./db.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -35,6 +36,7 @@ const MAX_CITIES = 3;
 const MAX_BODY_BYTES = 2 * 1024 * 1024; // 2MB — generous for a saved scene, small enough to block abuse
 const MAX_SHARED_ITEM_BYTES = 2 * 1024 * 1024;
 const SESSION_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+const TRUSTED_DEVICE_MAX_AGE_MS = 90 * 24 * 60 * 60 * 1000; // 90 days
 const MAX_NAME_LEN = 60;
 const MAX_EMAIL_LEN = 254;
 const MAX_PASSWORD_LEN = 200;
@@ -125,7 +127,11 @@ async function sendVerificationEmail(email, code) {
   await sendEmail({
     to: email,
     subject: `Your Continuum verification code: ${code}`,
-    html: `<p>Your Continuum sign-in code is:</p><p style="font-size:28px;font-weight:700;letter-spacing:.1em;">${code}</p><p>This code expires in 10 minutes. If you didn't request this, you can ignore it.</p>`,
+    html: wrapEmailHtml(`
+      <p>Your Continuum sign-in code is:</p>
+      <p style="font-size:32px;font-weight:700;letter-spacing:.14em;color:#3b6fe0;margin:12px 0;">${code}</p>
+      <p style="color:#6b7280;">This code expires in 10 minutes. If you didn't request this, you can ignore it — nothing happens without it.</p>
+    `),
   });
 }
 
@@ -135,6 +141,20 @@ async function createSession(email) {
   const token = crypto.randomBytes(32).toString("hex");
   await db.createSessionRow(token, email, Date.now() + SESSION_MAX_AGE_MS);
   return token;
+}
+
+async function issueTrustedDevice(email) {
+  const token = crypto.randomBytes(32).toString("hex");
+  await db.insertTrustedDevice(token, email, Date.now() + TRUSTED_DEVICE_MAX_AGE_MS);
+  return token;
+}
+
+async function isDeviceTrustedFor(req, email) {
+  const cookies = parseCookies(req.headers.cookie || "");
+  const token = cookies.dvt;
+  if (!token) return false;
+  const trusted = await db.getTrustedDevice(token);
+  return !!trusted && trusted.email === email && trusted.expiresAt > Date.now();
 }
 
 async function sessionUser(req) {
@@ -157,9 +177,24 @@ function parseCookies(header) {
   return out;
 }
 
+// A response can need more than one Set-Cookie header at once (the session
+// cookie plus the device-trust cookie, on a fresh verification) — plain
+// res.setHeader("Set-Cookie", ...) called twice would silently overwrite
+// the first with the second, so this appends onto whatever's already set.
+function appendCookie(res, cookieString) {
+  const existing = res.getHeader("Set-Cookie");
+  const next = existing ? (Array.isArray(existing) ? [...existing, cookieString] : [existing, cookieString]) : [cookieString];
+  res.setHeader("Set-Cookie", next);
+}
+
 function setSessionCookie(res, req, token, maxAgeSeconds) {
   const secure = req.socket.encrypted || req.headers["x-forwarded-proto"] === "https" ? "; Secure" : "";
-  res.setHeader("Set-Cookie", `sid=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${maxAgeSeconds}${secure}`);
+  appendCookie(res, `sid=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${maxAgeSeconds}${secure}`);
+}
+
+function setDeviceTrustCookie(res, req, token, maxAgeSeconds) {
+  const secure = req.socket.encrypted || req.headers["x-forwarded-proto"] === "https" ? "; Secure" : "";
+  appendCookie(res, `dvt=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${maxAgeSeconds}${secure}`);
 }
 
 // ---------- HTTP helpers ----------
@@ -388,6 +423,14 @@ export async function handleApi(req, res, url) {
       return genericError();
     }
     await clearFailedLogins(email);
+    // A password alone got them this far, but this browser needs to have
+    // proven it can read the inbox at least once before — at this account's
+    // signup, or a prior login here — to skip straight past the code step.
+    if (await isDeviceTrustedFor(req, email)) {
+      const token = await createSession(email);
+      setSessionCookie(res, req, token, SESSION_MAX_AGE_MS / 1000);
+      return sendJson(res, 200, publicUser(user));
+    }
     const pendingToken = await beginVerification(email, { kind: "login" });
     return sendJson(res, 200, { pending: true, token: pendingToken, email });
   }
@@ -419,6 +462,11 @@ export async function handleApi(req, res, url) {
     }
     const token = await createSession(pending.email);
     setSessionCookie(res, req, token, SESSION_MAX_AGE_MS / 1000);
+    // Reading the code from this inbox just now is exactly the proof this
+    // browser needs to skip the code step on future sign-ins — mark it
+    // trusted right here, whether this was a signup or a login.
+    const deviceToken = await issueTrustedDevice(pending.email);
+    setDeviceTrustCookie(res, req, deviceToken, TRUSTED_DEVICE_MAX_AGE_MS / 1000);
     return sendJson(res, 200, publicUser(await db.getUser(pending.email)));
   }
 

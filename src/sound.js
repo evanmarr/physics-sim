@@ -5,6 +5,8 @@ const SUB_MODES = [
   { id: "record", label: "Record & Visualize" },
   { id: "make", label: "Make Your Own Sound" },
 ];
+const MAX_RECORD_MS = 10000;
+const SAMPLE_INTERVAL_MS = 40; // ~25 samples/sec of amplitude history — plenty dense for a 10s strip
 
 function div(cls) {
   const el = document.createElement("div");
@@ -25,6 +27,10 @@ export class SoundMode {
   _teardown() {
     this._rafId && cancelAnimationFrame(this._rafId);
     this._rafId = null;
+    this._sampleIntervalId && clearInterval(this._sampleIntervalId);
+    this._sampleIntervalId = null;
+    this._countdownId && clearInterval(this._countdownId);
+    this._countdownId = null;
     this._stream?.getTracks().forEach((t) => t.stop());
     this._stream = null;
     this._oscillator?.stop();
@@ -73,7 +79,10 @@ export class SoundMode {
     return { wrap, canvas };
   }
 
-  _drawWaveform(canvas, analyser) {
+  // Live oscilloscope view — used for the microphone's real-time trace and
+  // for the oscillator in "Make Your Own Sound". Redraws every frame from
+  // whatever's actually flowing through the AnalyserNode right now.
+  _drawLiveWaveform(canvas, analyser) {
     const ctx = canvas.getContext("2d");
     const data = new Uint8Array(analyser.fftSize);
     const draw = () => {
@@ -94,12 +103,69 @@ export class SoundMode {
     draw();
   }
 
+  // Draws the recorded amplitude history as bars growing left-to-right —
+  // this is what makes recording feel like a real recorder instead of just
+  // a looping oscilloscope: it's a genuine history of the last 10 seconds,
+  // not a live-only snapshot.
+  _drawRecordingBars(canvas, samples, elapsedMs) {
+    const ctx = canvas.getContext("2d");
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    const accent = getComputedStyle(document.documentElement).getPropertyValue("--accent") || "#4f8cff";
+    ctx.fillStyle = accent;
+    const totalBars = Math.round(MAX_RECORD_MS / SAMPLE_INTERVAL_MS);
+    const barWidth = canvas.width / totalBars;
+    const midY = canvas.height / 2;
+    samples.forEach((s, i) => {
+      const h = Math.max(2, s * canvas.height * 0.9);
+      ctx.fillRect(i * barWidth, midY - h / 2, Math.max(1, barWidth - 1), h);
+    });
+    // A thin marker at the current recording position, past the drawn bars.
+    const x = (elapsedMs / MAX_RECORD_MS) * canvas.width;
+    ctx.fillStyle = "#f87171";
+    ctx.fillRect(x, 0, 1.5, canvas.height);
+  }
+
+  // The same bar chart, static, plus a sweeping playhead synced to
+  // audio.currentTime — so you can actually see which part of the
+  // waveform is playing right now, not just hear it.
+  _drawPlayback(canvas, samples, audio) {
+    const ctx = canvas.getContext("2d");
+    const accent = getComputedStyle(document.documentElement).getPropertyValue("--accent") || "#4f8cff";
+    const totalBars = Math.round(MAX_RECORD_MS / SAMPLE_INTERVAL_MS);
+    const barWidth = canvas.width / totalBars;
+    const midY = canvas.height / 2;
+
+    const drawBars = () => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = accent;
+      samples.forEach((s, i) => {
+        const h = Math.max(2, s * canvas.height * 0.9);
+        ctx.fillRect(i * barWidth, midY - h / 2, Math.max(1, barWidth - 1), h);
+      });
+    };
+
+    const tick = () => {
+      drawBars();
+      if (audio.duration > 0) {
+        const x = (audio.currentTime / audio.duration) * canvas.width;
+        ctx.strokeStyle = "#f87171";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, canvas.height);
+        ctx.stroke();
+      }
+      this._rafId = requestAnimationFrame(tick);
+    };
+    tick();
+  }
+
   // ---------- Record & Visualize ----------
   _renderRecord() {
     const wrap = div("sound-wrap");
     const intro = document.createElement("p");
     intro.className = "econ-intro";
-    intro.textContent = "This draws your actual microphone input in real time (a Web Audio AnalyserNode reading live samples), not a stock animation. Record a clip, then play it back at a different speed — speeding audio up raises its pitch and slowing it down lowers it, the same physical relationship a tape or vinyl record speeding up or slowing down has, because both pitch and duration come from the same underlying sample rate.";
+    intro.textContent = "This draws your actual microphone input — a growing bar for every ~40ms of real amplitude while you record (up to 10 seconds), then a sweeping playhead synced to actual playback position, not a decoration. Speeding playback up raises its pitch and slowing it down lowers it, the same physical relationship a tape or vinyl record speeding up or slowing down has, because both pitch and duration come from the same underlying sample rate.";
     wrap.appendChild(intro);
 
     const startBtn = document.createElement("button");
@@ -116,9 +182,12 @@ export class SoundMode {
     const recordRow = div("sound-record-row");
     const recordBtn = document.createElement("button");
     recordBtn.className = "cyber-sim-btn";
-    recordBtn.textContent = "● Record clip";
+    recordBtn.textContent = "● Record clip (10s max)";
     recordBtn.disabled = true;
     recordRow.appendChild(recordBtn);
+    const timerEl = document.createElement("span");
+    timerEl.className = "sound-timer";
+    recordRow.appendChild(timerEl);
     wrap.appendChild(recordRow);
 
     const playbackWrap = div("sound-playback-wrap");
@@ -140,34 +209,65 @@ export class SoundMode {
       const analyser = this._audioCtx.createAnalyser();
       analyser.fftSize = 2048;
       source.connect(analyser);
-      this._drawWaveform(canvas, analyser);
+      this._drawLiveWaveform(canvas, analyser);
 
       let chunks = [];
+      let samples = [];
+      let recordStart = 0;
+      const sampleBuf = new Uint8Array(analyser.fftSize);
+
       this._mediaRecorder = new MediaRecorder(this._stream);
       this._mediaRecorder.ondataavailable = (e) => chunks.push(e.data);
       this._mediaRecorder.onstop = () => {
         const blob = new Blob(chunks, { type: chunks[0]?.type || "audio/webm" });
         chunks = [];
-        this._showPlayback(playbackWrap, blob);
+        this._rafId && cancelAnimationFrame(this._rafId);
+        this._sampleIntervalId && clearInterval(this._sampleIntervalId);
+        this._countdownId && clearInterval(this._countdownId);
+        recordBtn.classList.remove("recording");
+        recordBtn.textContent = "● Record clip (10s max)";
+        timerEl.textContent = "";
+        this._showPlayback(playbackWrap, blob, samples);
       };
+
+      const startRecording = () => {
+        samples = [];
+        recordStart = performance.now();
+        chunks = [];
+        this._mediaRecorder.start();
+        recordBtn.classList.add("recording");
+        recordBtn.textContent = "■ Stop recording";
+
+        this._rafId && cancelAnimationFrame(this._rafId);
+        this._sampleIntervalId = setInterval(() => {
+          analyser.getByteTimeDomainData(sampleBuf);
+          let peak = 0;
+          for (let i = 0; i < sampleBuf.length; i++) peak = Math.max(peak, Math.abs(sampleBuf[i] - 128) / 128);
+          samples.push(peak);
+          this._drawRecordingBars(canvas, samples, performance.now() - recordStart);
+        }, SAMPLE_INTERVAL_MS);
+
+        const tickCountdown = () => {
+          const remaining = Math.max(0, MAX_RECORD_MS - (performance.now() - recordStart));
+          timerEl.textContent = `${(remaining / 1000).toFixed(1)}s left`;
+          if (remaining <= 0) this._mediaRecorder.stop();
+        };
+        tickCountdown();
+        this._countdownId = setInterval(tickCountdown, 100);
+        // A hard stop at exactly 10s regardless of the countdown's own polling.
+        setTimeout(() => { if (this._mediaRecorder.state === "recording") this._mediaRecorder.stop(); }, MAX_RECORD_MS);
+      };
+
       recordBtn.addEventListener("click", () => {
-        if (recordBtn.classList.contains("recording")) {
-          this._mediaRecorder.stop();
-          recordBtn.classList.remove("recording");
-          recordBtn.textContent = "● Record clip";
-        } else {
-          chunks = [];
-          this._mediaRecorder.start();
-          recordBtn.classList.add("recording");
-          recordBtn.textContent = "■ Stop recording";
-        }
+        if (recordBtn.classList.contains("recording")) this._mediaRecorder.stop();
+        else { this._drawLiveWaveform(canvas, analyser); startRecording(); }
       });
     });
 
     this.body.appendChild(wrap);
   }
 
-  _showPlayback(container, blob) {
+  _showPlayback(container, blob, samples) {
     container.innerHTML = "";
     const url = URL.createObjectURL(blob);
     const audio = document.createElement("audio");
@@ -175,6 +275,20 @@ export class SoundMode {
     audio.src = url;
     container.appendChild(audio);
 
+    const { wrap: canvasWrap, canvas } = this._makeCanvas();
+    container.appendChild(canvasWrap);
+    audio.addEventListener("loadedmetadata", () => this._drawPlayback(canvas, samples, audio), { once: true });
+
+    // Volume — a plain gain-style control on the <audio> element itself.
+    const volRow = div("sound-rate-row");
+    volRow.innerHTML = `<label>Volume: </label>`;
+    const volSlider = document.createElement("input");
+    volSlider.type = "range"; volSlider.min = "0"; volSlider.max = "1"; volSlider.step = "0.05"; volSlider.value = "1";
+    volSlider.addEventListener("input", () => { audio.volume = Number(volSlider.value); });
+    volRow.appendChild(volSlider);
+    container.appendChild(volRow);
+
+    // Speed/pitch — unchanged from before, just relocated under the new controls.
     const rateRow = div("sound-rate-row");
     const label = document.createElement("label");
     label.textContent = "Speed / pitch: ";
@@ -190,9 +304,44 @@ export class SoundMode {
     });
     rateRow.appendChild(rate);
     container.appendChild(rateRow);
+
+    // Trim — clamps playback to [start, end] without re-encoding anything;
+    // dragging past the trimmed region during playback snaps back to start.
+    const trimRow = div("sound-rate-row");
+    trimRow.innerHTML = `<label>Trim start: </label>`;
+    const trimStart = document.createElement("input");
+    trimStart.type = "range"; trimStart.min = "0"; trimStart.max = "10"; trimStart.step = "0.1"; trimStart.value = "0";
+    trimRow.appendChild(trimStart);
+    container.appendChild(trimRow);
+    const trimRow2 = div("sound-rate-row");
+    trimRow2.innerHTML = `<label>Trim end: </label>`;
+    const trimEnd = document.createElement("input");
+    trimEnd.type = "range"; trimEnd.min = "0"; trimEnd.max = "10"; trimEnd.step = "0.1"; trimEnd.value = "10";
+    trimRow2.appendChild(trimEnd);
+    container.appendChild(trimRow2);
+    audio.addEventListener("loadedmetadata", () => {
+      trimStart.max = trimEnd.max = String(audio.duration);
+      trimEnd.value = String(audio.duration);
+    }, { once: true });
+    audio.addEventListener("timeupdate", () => {
+      const s = Number(trimStart.value), e = Number(trimEnd.value);
+      if (audio.currentTime < s) audio.currentTime = s;
+      if (audio.currentTime > e) { audio.pause(); audio.currentTime = s; }
+    });
+    audio.addEventListener("play", () => { if (audio.currentTime < Number(trimStart.value) || audio.currentTime >= Number(trimEnd.value)) audio.currentTime = Number(trimStart.value); });
+
+    const downloadRow = div("sound-record-row");
+    const downloadLink = document.createElement("a");
+    downloadLink.href = url;
+    downloadLink.download = `recording-${Date.now()}.webm`;
+    downloadLink.className = "cyber-sim-btn";
+    downloadLink.textContent = "Download recording";
+    downloadRow.appendChild(downloadLink);
+    container.appendChild(downloadRow);
+
     const note = document.createElement("p");
     note.className = "sound-hint";
-    note.textContent = "This changes playback rate directly, which changes pitch and duration together — real, honest pitch/speed coupling, not a studio-grade independent pitch shifter.";
+    note.textContent = "Speed/pitch changes playback rate directly, which changes pitch and duration together — real, honest coupling, not a studio-grade independent pitch shifter.";
     container.appendChild(note);
   }
 
@@ -205,13 +354,22 @@ export class SoundMode {
     wrap.appendChild(intro);
 
     const controls = div("sound-make-controls");
-    const waveSel = document.createElement("select");
+    const waveRow = div("sound-wave-picker");
+    let currentWave = "sine";
+    const waveButtons = {};
     for (const w of ["sine", "square", "sawtooth", "triangle"]) {
-      const opt = document.createElement("option");
-      opt.value = w; opt.textContent = w[0].toUpperCase() + w.slice(1);
-      waveSel.appendChild(opt);
+      const btn = document.createElement("button");
+      btn.className = "sound-wave-btn" + (w === currentWave ? " active" : "");
+      btn.textContent = w[0].toUpperCase() + w.slice(1);
+      btn.addEventListener("click", () => {
+        currentWave = w;
+        Object.entries(waveButtons).forEach(([id, b]) => b.classList.toggle("active", id === w));
+        if (this._oscillator) this._oscillator.type = currentWave;
+      });
+      waveButtons[w] = btn;
+      waveRow.appendChild(btn);
     }
-    controls.appendChild(waveSel);
+    controls.appendChild(waveRow);
 
     const freqLabel = document.createElement("label");
     const freqVal = document.createElement("span");
@@ -245,9 +403,6 @@ export class SoundMode {
       freqVal.textContent = `${f} Hz (${noteNameFor(f)})`;
       if (this._oscillator) this._oscillator.frequency.setValueAtTime(f, this._audioCtx.currentTime);
     });
-    waveSel.addEventListener("change", () => {
-      if (this._oscillator) this._oscillator.type = waveSel.value;
-    });
 
     playBtn.addEventListener("click", () => {
       if (this._oscillator) {
@@ -259,7 +414,7 @@ export class SoundMode {
       }
       this._audioCtx ||= new (window.AudioContext || window.webkitAudioContext)();
       const osc = this._audioCtx.createOscillator();
-      osc.type = waveSel.value;
+      osc.type = currentWave;
       osc.frequency.value = Number(freqSlider.value);
       const gain = this._audioCtx.createGain();
       gain.gain.value = 0.2; // audible but not ear-splitting
@@ -268,7 +423,7 @@ export class SoundMode {
       osc.connect(gain).connect(analyser).connect(this._audioCtx.destination);
       osc.start();
       this._oscillator = osc;
-      this._drawWaveform(canvas, analyser);
+      this._drawLiveWaveform(canvas, analyser);
       playBtn.textContent = "■ Stop tone";
     });
 

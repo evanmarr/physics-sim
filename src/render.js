@@ -675,10 +675,12 @@ function buildShape(g, d) {
       break;
     }
     case "fan": {
+      // No pointer-events:none here on purpose — this dashed range is the
+      // biggest visible part of a fan, and being unable to click it (only
+      // the small body) made selecting one feel broken.
       g.append("rect").attr("class", "wind-zone")
         .attr("fill", "var(--accent)").attr("fill-opacity", 0.08)
-        .attr("stroke", "var(--accent)").attr("stroke-width", 1).attr("stroke-dasharray", "4 4")
-        .attr("pointer-events", "none");
+        .attr("stroke", "var(--accent)").attr("stroke-width", 1).attr("stroke-dasharray", "4 4");
       g.append("rect").attr("class", "shape body");
       g.append("text").attr("class", "icon-label").text("🌀").attr("text-anchor", "middle")
         .attr("dominant-baseline", "central");

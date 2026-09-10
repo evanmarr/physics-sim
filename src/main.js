@@ -422,7 +422,14 @@ function startParticleLoop() {
   stopParticleLoop();
   const loop = () => {
     particleClock += 1;
-    const items = state.playing ? null : state.objects; // during Play, particles are driven by onFrame instead
+    // Checking `sim` here (not state.playing) matters specifically for
+    // Pause: state.playing goes false on pause too, and this decorative
+    // loop used to read that as "back to editing," redrawing wind/water
+    // bubbles at their original blueprint positions and stomping the
+    // frozen paused frame the real sim had just drawn — visibly "jumping"
+    // wind/water back on every pause. `sim` staying alive (just not
+    // running) is what actually distinguishes paused from truly stopped.
+    const items = sim ? null : state.objects;
     if (items) window._renderer.renderParticles(buildParticles(items, particleClock));
     particleRafId = requestAnimationFrame(loop);
   };
