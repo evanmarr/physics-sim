@@ -37,7 +37,10 @@ export class SoundMode {
     this._oscillator = null;
     this._audioCtx?.close().catch(() => {});
     this._audioCtx = null;
+    this._playbackAudioCtx?.close().catch(() => {});
+    this._playbackAudioCtx = null;
     this._mediaRecorder = null;
+    this._redrawStaticBars = null;
   }
 
   _build() {
@@ -125,10 +128,13 @@ export class SoundMode {
     ctx.fillRect(x, 0, 1.5, canvas.height);
   }
 
-  // The same bar chart, static, plus a sweeping playhead synced to
-  // audio.currentTime — so you can actually see which part of the
-  // waveform is playing right now, not just hear it.
-  _drawPlayback(canvas, samples, audio) {
+  // The recorded bar chart, with the trimmed-out region visibly dimmed
+  // (so trim actually shows a change, not just numbers moving), plus a
+  // sweeping playhead synced to real audio.currentTime. While the clip is
+  // actually playing, a live AnalyserNode on the audio element itself
+  // drives the same oscilloscope trace the microphone uses — real motion
+  // in sync with what's audibly playing, not just a static shape.
+  _drawPlayback(canvas, samples, audio, getTrim) {
     const ctx = canvas.getContext("2d");
     const accent = getComputedStyle(document.documentElement).getPropertyValue("--accent") || "#4f8cff";
     const totalBars = Math.round(MAX_RECORD_MS / SAMPLE_INTERVAL_MS);
@@ -137,15 +143,14 @@ export class SoundMode {
 
     const drawBars = () => {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.fillStyle = accent;
+      const { start, end } = getTrim();
       samples.forEach((s, i) => {
+        const t = (i * SAMPLE_INTERVAL_MS) / 1000;
+        const inTrim = t >= start && t <= end;
+        ctx.fillStyle = inTrim ? accent : "rgba(148,163,184,0.35)"; // dimmed outside the trimmed range
         const h = Math.max(2, s * canvas.height * 0.9);
         ctx.fillRect(i * barWidth, midY - h / 2, Math.max(1, barWidth - 1), h);
       });
-    };
-
-    const tick = () => {
-      drawBars();
       if (audio.duration > 0) {
         const x = (audio.currentTime / audio.duration) * canvas.width;
         ctx.strokeStyle = "#f87171";
@@ -155,9 +160,44 @@ export class SoundMode {
         ctx.lineTo(x, canvas.height);
         ctx.stroke();
       }
+    };
+
+    let liveAnalyser = null;
+    try {
+      this._playbackAudioCtx ||= new (window.AudioContext || window.webkitAudioContext)();
+      const src = this._playbackAudioCtx.createMediaElementSource(audio);
+      liveAnalyser = this._playbackAudioCtx.createAnalyser();
+      liveAnalyser.fftSize = 2048;
+      src.connect(liveAnalyser);
+      liveAnalyser.connect(this._playbackAudioCtx.destination);
+    } catch {
+      // createMediaElementSource can only be attached once per element —
+      // harmless if this ever re-runs on the same <audio>, just skip the
+      // live trace and keep the static bars/playhead working.
+    }
+    const liveData = liveAnalyser ? new Uint8Array(liveAnalyser.fftSize) : null;
+
+    const tick = () => {
+      if (liveAnalyser && !audio.paused) {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        liveAnalyser.getByteTimeDomainData(liveData);
+        ctx.strokeStyle = accent;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        const slice = canvas.width / liveData.length;
+        for (let i = 0; i < liveData.length; i++) {
+          const y = (liveData[i] / 255) * canvas.height;
+          i === 0 ? ctx.moveTo(i * slice, y) : ctx.lineTo(i * slice, y);
+        }
+        ctx.stroke();
+      } else {
+        drawBars();
+      }
       this._rafId = requestAnimationFrame(tick);
     };
+    drawBars();
     tick();
+    this._redrawStaticBars = drawBars;
   }
 
   // ---------- Record & Visualize ----------
@@ -165,7 +205,7 @@ export class SoundMode {
     const wrap = div("sound-wrap");
     const intro = document.createElement("p");
     intro.className = "econ-intro";
-    intro.textContent = "This draws your actual microphone input — a growing bar for every ~40ms of real amplitude while you record (up to 10 seconds), then a sweeping playhead synced to actual playback position, not a decoration. Speeding playback up raises its pitch and slowing it down lowers it, the same physical relationship a tape or vinyl record speeding up or slowing down has, because both pitch and duration come from the same underlying sample rate.";
+    intro.textContent = "This draws your actual microphone input — a growing bar for every ~40ms of real amplitude while you record (up to 10 seconds). Play it back and you'll see the same kind of live waveform motion as recording, driven by the actual audio playing, not a static picture — pause it and you're back to the full recorded shape with a playhead and the trimmed-out region dimmed. Speeding playback up raises its pitch and slowing it down lowers it, the same physical relationship a tape or vinyl record speeding up or slowing down has, because both pitch and duration come from the same underlying sample rate.";
     wrap.appendChild(intro);
 
     const startBtn = document.createElement("button");
@@ -277,24 +317,29 @@ export class SoundMode {
 
     const { wrap: canvasWrap, canvas } = this._makeCanvas();
     container.appendChild(canvasWrap);
-    audio.addEventListener("loadedmetadata", () => this._drawPlayback(canvas, samples, audio), { once: true });
 
     // Volume — a plain gain-style control on the <audio> element itself.
     const volRow = div("sound-rate-row");
-    volRow.innerHTML = `<label>Volume: </label>`;
+    const volLabel = document.createElement("label");
+    const volVal = document.createElement("span");
+    volVal.textContent = "100%";
+    volLabel.append("Volume: ", volVal);
+    volRow.appendChild(volLabel);
     const volSlider = document.createElement("input");
     volSlider.type = "range"; volSlider.min = "0"; volSlider.max = "1"; volSlider.step = "0.05"; volSlider.value = "1";
-    volSlider.addEventListener("input", () => { audio.volume = Number(volSlider.value); });
+    volSlider.addEventListener("input", () => {
+      audio.volume = Number(volSlider.value);
+      volVal.textContent = `${Math.round(Number(volSlider.value) * 100)}%`;
+    });
     volRow.appendChild(volSlider);
     container.appendChild(volRow);
 
     // Speed/pitch — unchanged from before, just relocated under the new controls.
     const rateRow = div("sound-rate-row");
     const label = document.createElement("label");
-    label.textContent = "Speed / pitch: ";
     const valSpan = document.createElement("span");
     valSpan.textContent = "1.00×";
-    label.appendChild(valSpan);
+    label.append("Speed / pitch: ", valSpan);
     rateRow.appendChild(label);
     const rate = document.createElement("input");
     rate.type = "range"; rate.min = "0.5"; rate.max = "2"; rate.step = "0.05"; rate.value = "1";
@@ -307,21 +352,44 @@ export class SoundMode {
 
     // Trim — clamps playback to [start, end] without re-encoding anything;
     // dragging past the trimmed region during playback snaps back to start.
+    // The waveform above visibly dims whatever's outside [start, end] so
+    // trimming shows an actual change, not just two numbers moving.
     const trimRow = div("sound-rate-row");
-    trimRow.innerHTML = `<label>Trim start: </label>`;
+    const trimStartLabel = document.createElement("label");
+    const trimStartVal = document.createElement("span");
+    trimStartVal.textContent = "0.0s";
+    trimStartLabel.append("Trim start: ", trimStartVal);
+    trimRow.appendChild(trimStartLabel);
     const trimStart = document.createElement("input");
     trimStart.type = "range"; trimStart.min = "0"; trimStart.max = "10"; trimStart.step = "0.1"; trimStart.value = "0";
     trimRow.appendChild(trimStart);
     container.appendChild(trimRow);
+
     const trimRow2 = div("sound-rate-row");
-    trimRow2.innerHTML = `<label>Trim end: </label>`;
+    const trimEndLabel = document.createElement("label");
+    const trimEndVal = document.createElement("span");
+    trimEndVal.textContent = "10.0s";
+    trimEndLabel.append("Trim end: ", trimEndVal);
+    trimRow2.appendChild(trimEndLabel);
     const trimEnd = document.createElement("input");
     trimEnd.type = "range"; trimEnd.min = "0"; trimEnd.max = "10"; trimEnd.step = "0.1"; trimEnd.value = "10";
     trimRow2.appendChild(trimEnd);
     container.appendChild(trimRow2);
+
+    const onTrimChange = () => {
+      if (Number(trimStart.value) > Number(trimEnd.value)) trimStart.value = trimEnd.value;
+      trimStartVal.textContent = `${Number(trimStart.value).toFixed(1)}s`;
+      trimEndVal.textContent = `${Number(trimEnd.value).toFixed(1)}s`;
+      this._redrawStaticBars?.();
+    };
+    trimStart.addEventListener("input", onTrimChange);
+    trimEnd.addEventListener("input", onTrimChange);
+
     audio.addEventListener("loadedmetadata", () => {
       trimStart.max = trimEnd.max = String(audio.duration);
       trimEnd.value = String(audio.duration);
+      onTrimChange();
+      this._drawPlayback(canvas, samples, audio, () => ({ start: Number(trimStart.value), end: Number(trimEnd.value) }));
     }, { once: true });
     audio.addEventListener("timeupdate", () => {
       const s = Number(trimStart.value), e = Number(trimEnd.value);

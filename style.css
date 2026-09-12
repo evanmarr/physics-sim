@@ -609,6 +609,8 @@ button:disabled { opacity: .4; cursor: default; }
 .rope-end-handle { cursor: grab; }
 .rope-end-outer { fill: #9aa1ac; stroke: #5f6672; stroke-width: 2; }
 .rope-end-dot { fill: #1b1e24; }
+.wheel-spoke { stroke: #1b1e24; stroke-width: 2; stroke-linecap: round; opacity: 0.55; }
+.wheel-hub { fill: #1b1e24; }
 .world-object.selected .rope-end-outer { stroke: var(--accent); }
 .rope-tube { stroke-linecap: round; stroke-linejoin: round; }
 .rotate-handle { cursor: grab; }

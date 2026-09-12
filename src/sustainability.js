@@ -46,6 +46,13 @@ export class SustainabilityMode {
     this.budget = 500;
     this.armed = null;
     this.tick = 0;
+    // Population and pollution are no longer instant recomputes of the grid
+    // — a real city doesn't teleport to its capacity the moment you place a
+    // house, and smog doesn't vanish the instant you stop producing it.
+    // Both evolve tick by tick in _runTick toward/away from what the grid
+    // currently supports.
+    this.population = 0;
+    this.pollutionLevel = 0;
   }
 
   _build() {
@@ -72,32 +79,71 @@ export class SustainabilityMode {
 
   _runTick() {
     this.tick++;
-    let income = 0;
-    for (const b of this.grid) if (b) income += BUILDING_BY_ID[b].income;
+    const cap = this._capacity();
+    const energyOk = cap.energyProduce >= cap.energyUse;
+
+    // Pollution accumulates instead of being read straight off the grid: a
+    // net-polluting city keeps building up smog tick after tick, and a
+    // net-clean one (parks/water treatment outweighing the rest) only
+    // slowly clears what's already in the air — matching how a real
+    // pollution problem lingers well after its source is capped.
+    if (cap.pollutionRate > 0) this.pollutionLevel += cap.pollutionRate * 0.5;
+    else this.pollutionLevel *= 0.92;
+    this.pollutionLevel = Math.max(0, this.pollutionLevel);
+
+    // Population chases housing capacity rather than snapping to it —
+    // growth stalls under a brownout (no power for new residents) and
+    // reverses into emigration once pollution gets bad enough that people
+    // actually leave, not just "stop moving in."
+    const smogDrivesPeopleAway = this.pollutionLevel > 40;
+    if (smogDrivesPeopleAway) {
+      this.population *= 0.96;
+    } else if (energyOk) {
+      this.population += (cap.populationCapacity - this.population) * 0.15;
+    }
+    this.population = Math.max(0, Math.min(cap.populationCapacity, this.population));
+
+    // A brownout doesn't just warn you — commercial and industrial income
+    // actually depends on having power to run on, so it's halved whenever
+    // demand outstrips supply, same as the lights (and registers) actually
+    // going out.
+    const income = energyOk ? cap.income : cap.income * 0.5;
     this.budget += income;
     this._updateDashboard();
   }
 
-  _stats() {
-    let energyUse = 0, energyProduce = 0, pollution = 0, population = 0, income = 0;
+  // Structural numbers the grid supports RIGHT NOW — what _runTick uses
+  // each tick to pull population/pollution toward. Renamed from the old
+  // _stats to make clear these are capacities/rates, not the city's actual
+  // current population or pollution (see this.population/this.pollutionLevel).
+  _capacity() {
+    let energyUse = 0, energyProduce = 0, pollutionRate = 0, populationCapacity = 0, income = 0;
     for (const b of this.grid) {
       if (!b) continue;
       const def = BUILDING_BY_ID[b];
       energyUse += def.energyUse || 0;
       energyProduce += def.energyProduce || 0;
-      pollution += def.pollution || 0;
-      population += def.population || 0;
+      pollutionRate += def.pollution || 0;
+      populationCapacity += def.population || 0;
       income += def.income || 0;
     }
-    pollution = Math.max(0, pollution);
     const renewableEnergy = this.grid.filter((b) => b === "solar" || b === "wind").reduce((sum, b) => sum + BUILDING_BY_ID[b].energyProduce, 0);
     const renewableShare = energyProduce > 0 ? Math.round((renewableEnergy / energyProduce) * 100) : 0;
-    // A simple, transparent composite score: rewards meeting energy demand,
-    // rewards a high renewable share, penalizes net pollution — not hidden
-    // math, just the three things the dashboard already shows added up.
-    const energyMet = energyProduce >= energyUse;
-    const score = Math.max(0, Math.min(100, Math.round((energyMet ? 40 : 10) + renewableShare * 0.4 + Math.max(0, 20 - pollution))));
-    return { energyUse, energyProduce, pollution, population, income, renewableShare, score };
+    return { energyUse, energyProduce, pollutionRate, populationCapacity, income, renewableShare };
+  }
+
+  _stats() {
+    const cap = this._capacity();
+    const energyMet = cap.energyProduce >= cap.energyUse;
+    // Same transparent composite as before, but now scored against the
+    // city's actual lived-in population/pollution rather than its instant
+    // grid capacity — a city that just built a coal plant this tick hasn't
+    // suffered the smog for it yet, and shouldn't be scored as if it had.
+    const fillRate = cap.populationCapacity > 0 ? this.population / cap.populationCapacity : 1;
+    const score = Math.max(0, Math.min(100, Math.round(
+      (energyMet ? 30 : 5) + cap.renewableShare * 0.3 + Math.max(0, 25 - this.pollutionLevel * 0.5) + fillRate * 15
+    )));
+    return { ...cap, population: this.population, pollution: Math.round(this.pollutionLevel), score };
   }
 
   _renderView() {
@@ -195,16 +241,18 @@ export class SustainabilityMode {
     const s = this._stats();
     const energyOk = s.energyProduce >= s.energyUse;
     this.dashboard.innerHTML = `
-      <div class="sustain-stat"><span>Budget</span><strong>$${this.budget.toLocaleString()}</strong></div>
-      <div class="sustain-stat"><span>Population</span><strong>${s.population.toLocaleString()}</strong></div>
+      <div class="sustain-stat"><span>Budget</span><strong>$${Math.round(this.budget).toLocaleString()}</strong></div>
+      <div class="sustain-stat"><span>Population</span><strong>${Math.round(s.population).toLocaleString()} / ${s.populationCapacity.toLocaleString()}</strong>
+        ${this.pollutionLevel > 40 ? "<div class=\"sustain-stat-note\">Smog is bad enough that people are actually leaving.</div>" : (energyOk && s.population < s.populationCapacity ? "<div class=\"sustain-stat-note\">Moving in gradually toward capacity.</div>" : "")}
+      </div>
       <div class="sustain-stat ${energyOk ? "" : "sustain-stat-bad"}">
         <span>Energy</span><strong>${s.energyProduce} / ${s.energyUse} produced/used</strong>
-        ${energyOk ? "" : "<div class=\"sustain-stat-note\">Brownouts — build more power before more consumers.</div>"}
+        ${energyOk ? "" : "<div class=\"sustain-stat-note\">Brownouts — growth has stalled and commercial/industrial income is halved until power catches up.</div>"}
       </div>
       <div class="sustain-stat"><span>Renewable share</span><strong>${s.renewableShare}%</strong></div>
-      <div class="sustain-stat ${s.pollution > 20 ? "sustain-stat-bad" : ""}"><span>Pollution</span><strong>${s.pollution}</strong></div>
+      <div class="sustain-stat ${s.pollution > 20 ? "sustain-stat-bad" : ""}"><span>Pollution (accumulated)</span><strong>${s.pollution}</strong></div>
       <div class="sustain-stat"><span>Sustainability score</span><strong>${s.score} / 100</strong></div>
-      <div class="sustain-stat-note">Score = 40 pts for meeting energy demand (10 if not) + up to 40 for renewable share + up to 20 for low pollution.</div>
+      <div class="sustain-stat-note">Score = 30 pts for meeting energy demand (5 if not) + up to 30 for renewable share + up to 25 for low accumulated pollution + up to 15 for filled housing capacity.</div>
     `;
   }
 
@@ -214,10 +262,12 @@ export class SustainabilityMode {
       title: "My Cities",
       itemNoun: "city",
       max: 3,
-      serialize: () => ({ grid: this.grid, budget: this.budget }),
+      serialize: () => ({ grid: this.grid, budget: this.budget, population: this.population, pollutionLevel: this.pollutionLevel }),
       apply: (data) => {
         this.grid = data.grid || new Array(GRID_W * GRID_H).fill(null);
         this.budget = data.budget ?? 500;
+        this.population = data.population ?? 0;
+        this.pollutionLevel = data.pollutionLevel ?? 0;
         this._renderView();
       },
     });

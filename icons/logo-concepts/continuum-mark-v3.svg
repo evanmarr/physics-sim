@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1236 1236">
+  <!-- Traced from the uploaded outline exactly (board, blade, dashed
+       trajectory + ball, trailing wave), colored only with the site's
+       existing three-color scheme (cyan / purple / green), same thin
+       unfilled-stroke simplicity as the current atom logo. -->
+
+  <!-- Vertical board -->
+  <path d="M 470 290
+           Q 520 290 520 350
+           L 520 1010
+           Q 520 1060 460 1080
+           L 300 1130
+           Q 250 1145 250 1090
+           L 250 420
+           Q 250 375 290 355 Z"
+        fill="none" stroke="#38bdf8" stroke-width="16" stroke-linejoin="round" />
+
+  <!-- Diagonal blade: a wide leaf shape tapering to sharp points at both
+       ends, bowed outward along its length (not a straight-sided bar). -->
+  <path d="M 30 1200
+           Q 60 1080 140 1010
+           L 990 355
+           Q 1035 318 1065 340
+           Q 1080 358 1050 392
+           L 260 940
+           Q 150 1060 90 1150
+           Q 60 1185 30 1200 Z"
+        fill="none" stroke="#8b5cf6" stroke-width="16" stroke-linejoin="round" />
+
+  <!-- Dashed launch trajectory -->
+  <path d="M 555 495 Q 700 380 900 300 Q 1000 260 1045 235"
+        fill="none" stroke="#10b981" stroke-width="16" stroke-linecap="round"
+        stroke-dasharray="30 38" />
+  <!-- Ball at the end of the trajectory -->
+  <circle cx="1130" cy="248" r="85" fill="none" stroke="#10b981" stroke-width="16" />
+
+  <!-- Trailing wave: one tall hump, one wide hump, then a small ripple -->
+  <path d="M 770 790
+           C 800 660, 890 660, 920 790
+           C 945 900, 1010 900, 1035 790
+           C 1050 720, 1090 720, 1105 770
+           C 1115 800, 1150 800, 1225 775"
+        fill="none" stroke="#38bdf8" stroke-width="16" stroke-linecap="round" />
+</svg>

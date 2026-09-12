@@ -38,6 +38,7 @@ const state = {
   mathPanelOpen: true,
   lightMode: false,
   showMagneticField: false,
+  grabToolActive: false,
   simSpeed: 1,
   multiSelectMode: false, // mobile-only: tapping objects adds to selection instead of replacing it
 };
@@ -503,6 +504,7 @@ function wireTopbar(renderer) {
   const playBtn = document.getElementById("play-btn");
   playBtn.addEventListener("click", () => togglePlay(renderer));
   document.getElementById("reset-btn").addEventListener("click", () => resetPhysics(renderer));
+  document.getElementById("grab-tool-btn").addEventListener("click", () => setGrabToolActive(!state.grabToolActive));
 
   const gravitySlider = document.getElementById("gravity-slider");
   const gravityVal = document.getElementById("gravity-val");
@@ -743,6 +745,7 @@ function togglePlay(renderer) {
     });
     sim.setTimeScale(state.simSpeed);
     sim.start();
+    if (state.grabToolActive) sim.enableGrabTool();
     state.playing = true;
     playBtn.textContent = "❚❚ Pause";
     playBtn.classList.add("playing");
@@ -764,7 +767,31 @@ function resetPhysics(renderer) {
   document.getElementById("mode-banner").classList.add("hidden");
   window._renderer.renderRopeTubes([]);
   window._renderer.renderParticles([]);
+  setGrabToolActive(false);
   renderAll();
+}
+
+// Grab tool: while active during Play, the pointer drives a real Matter
+// body (see PhysicsSim.enableGrabTool) so moving the mouse can bump other
+// objects around with real momentum, not just a visual cursor.
+function setGrabToolActive(active) {
+  state.grabToolActive = active;
+  const btn = document.getElementById("grab-tool-btn");
+  btn.classList.toggle("active", active);
+  const svg = document.getElementById("canvas");
+  if (active) {
+    sim?.enableGrabTool();
+    svg.addEventListener("pointermove", onGrabPointerMove);
+  } else {
+    sim?.disableGrabTool();
+    svg.removeEventListener("pointermove", onGrabPointerMove);
+  }
+}
+
+function onGrabPointerMove(ev) {
+  if (!sim) return;
+  const { x, y } = window._renderer.screenToWorld(ev.clientX, ev.clientY);
+  sim.setGrabTarget(x, y);
 }
 
 function handleSimEvent(event) {

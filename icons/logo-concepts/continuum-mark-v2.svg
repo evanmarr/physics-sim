@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Base shape traced from the uploaded reference: a ramp/board, a
+       diagonal blade crossing it, a dashed launch trajectory with a ball,
+       and a wave trailing off the bottom — recolored in the original
+       logo's three-color line style (cyan / purple / green) instead of
+       flat black, kept unfilled/thin-stroke to match its simplicity. -->
+
+  <!-- Vertical board (the "ramp" upright) -->
+  <rect x="118" y="150" rx="24" ry="24" width="108" height="300"
+        fill="none" stroke="#38bdf8" stroke-width="9" />
+
+  <!-- Diagonal blade sweeping across — tapered to a real point at each end,
+       not an oval, same silhouette as the reference's ramp/blade. -->
+  <path d="M 46 402
+           Q 40 372 58 344
+           L 400 108
+           Q 424 92 434 104
+           Q 440 114 424 130
+           L 96 434
+           Q 66 458 46 402 Z"
+        fill="none" stroke="#8b5cf6" stroke-width="9" stroke-linejoin="round" />
+
+  <!-- Dashed launch trajectory -->
+  <path d="M 230 372 Q 320 210 420 118"
+        fill="none" stroke="#10b981" stroke-width="9" stroke-linecap="round"
+        stroke-dasharray="4 26" />
+  <!-- Ball at the end of the trajectory -->
+  <circle cx="440" cy="100" r="32" fill="none" stroke="#10b981" stroke-width="9" />
+
+  <!-- Trailing wave -->
+  <path d="M 300 400
+           C 322 360, 345 360, 363 400
+           C 381 440, 404 440, 422 400
+           C 435 372, 448 372, 458 393"
+        fill="none" stroke="#38bdf8" stroke-width="9" stroke-linecap="round" />
+</svg>

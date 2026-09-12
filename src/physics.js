@@ -434,6 +434,7 @@ export class PhysicsSim {
     let body = null;
     switch (spec.type) {
       case "ball":
+      case "wheel":
         body = Bodies.circle(spec.x, spec.y, spec.radius, common);
         break;
       case "bomb":
@@ -464,9 +465,15 @@ export class PhysicsSim {
         break;
       }
       case "cannon":
-      case "fan":
       case "lens":
         body = Bodies.rectangle(spec.x, spec.y, spec.width, spec.height, { ...common, isStatic: true });
+        break;
+      case "fan":
+        // Unlike cannon/lens, a fan can be knocked around like any other
+        // object (spec.fixed already drives isStatic via `common` for
+        // everything else) — it still blows wind from whatever direction
+        // it's currently facing, fixed or not.
+        body = Bodies.rectangle(spec.x, spec.y, spec.width, spec.height, common);
         break;
       case "mirror":
         body = Bodies.rectangle(spec.x, spec.y, spec.width, spec.height, common);
@@ -1041,6 +1048,34 @@ export class PhysicsSim {
     this.engine.gravity.y = scale;
   }
 
+  // Turns the pointer into a real physics object: a plain dynamic circle,
+  // hidden from the normal renderer (its own cursor is the visual), that
+  // gets driven to setGrabTarget's coordinates every tick in start()'s
+  // loop above — real enough to bump other bodies, not a fake overlay.
+  enableGrabTool(radius = 18) {
+    if (this.grabBody) return;
+    const pos = this.grabTarget || { x: 0, y: 0 };
+    this.grabBody = Bodies.circle(pos.x, pos.y, radius, {
+      label: "grabTool",
+      density: 0.02,
+      friction: 0.05,
+      frictionAir: 0,
+      restitution: 0.1,
+      plugin: { render: { hidden: true } },
+    });
+    Composite.add(this.engine.world, this.grabBody);
+  }
+
+  disableGrabTool() {
+    if (!this.grabBody) return;
+    Composite.remove(this.engine.world, this.grabBody);
+    this.grabBody = null;
+  }
+
+  setGrabTarget(x, y) {
+    this.grabTarget = { x, y };
+  }
+
   setTimeScale(scale) {
     this.timeScale = scale;
   }
@@ -1056,6 +1091,21 @@ export class PhysicsSim {
       this.lastTime = time;
       this._lastDelta = delta;
       this.simTime += delta;
+      // Grab tool: a real dynamic body driven to the live pointer position
+      // every frame (not Body.setStatic), so its velocity each tick is
+      // however fast the pointer is actually moving — that's what lets it
+      // shove other bodies with real momentum on contact instead of just
+      // teleporting through them. Setting position AFTER computing that
+      // velocity (but every frame, unconditionally) also cancels gravity's
+      // pull on it completely, without needing a special no-gravity flag.
+      if (this.grabBody && this.grabTarget) {
+        const dt = Math.max(delta, 1) / 1000;
+        Body.setVelocity(this.grabBody, {
+          x: (this.grabTarget.x - this.grabBody.position.x) / dt,
+          y: (this.grabTarget.y - this.grabBody.position.y) / dt,
+        });
+        Body.setPosition(this.grabBody, this.grabTarget);
+      }
       Engine.update(this.engine, delta);
       this.processPending();
       this._cullExpiredShards();
@@ -1207,7 +1257,7 @@ function isMagnetismBlocked(a, b, blockers) {
 }
 
 function areaOf(spec) {
-  if (spec.type === "ball" || spec.type === "bomb" || spec.type === "ballBearing" || spec.type === "peg" || spec.type === "magnet" || spec.type === "lightSource") {
+  if (spec.type === "ball" || spec.type === "wheel" || spec.type === "bomb" || spec.type === "ballBearing" || spec.type === "peg" || spec.type === "magnet" || spec.type === "lightSource") {
     return Math.PI * spec.radius * spec.radius;
   }
   if (spec.type === "triangle") {
@@ -1231,7 +1281,7 @@ function pointInShape(px, py, spec) {
     const [p0, p1, p2] = trianglePoints(spec.width ?? spec.size ?? 130, spec.height);
     return sameSide(lx, ly, p0, p1, p2) && sameSide(lx, ly, p1, p2, p0) && sameSide(lx, ly, p2, p0, p1);
   }
-  if (spec.type === "ball" || spec.type === "bomb" || spec.type === "ballBearing" || spec.type === "peg" || spec.type === "magnet") {
+  if (spec.type === "ball" || spec.type === "wheel" || spec.type === "bomb" || spec.type === "ballBearing" || spec.type === "peg" || spec.type === "magnet") {
     // A little slack past the drawn radius — snapping a rope end onto a
     // small peg/bearing shouldn't require pixel-perfect placement.
     const r = (spec.radius || 20) + 6;

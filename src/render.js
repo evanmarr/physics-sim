@@ -639,6 +639,17 @@ function buildShape(g, d) {
       g.append("circle").attr("class", "shape").attr("r", d.radius);
       if (d.type === "bomb") g.append("text").attr("class", "icon-label").text("💣").attr("text-anchor", "middle").attr("dy", 5).attr("font-size", d.radius);
       break;
+    case "wheel": {
+      g.append("circle").attr("class", "shape").attr("r", d.radius);
+      // Four spokes through a hub — since this group's own transform
+      // already carries the body's real physics angle (same as every other
+      // object here), these visibly spin as the wheel actually rolls,
+      // rather than being a static decoration.
+      const spokes = g.append("g").attr("class", "wheel-spokes");
+      for (let i = 0; i < 4; i++) spokes.append("line").attr("class", "wheel-spoke").attr("transform", `rotate(${i * 45})`);
+      spokes.append("circle").attr("class", "wheel-hub").attr("r", Math.max(3, d.radius * 0.14));
+      break;
+    }
     case "ballBearing":
       g.append("circle").attr("class", "shape").attr("r", d.radius);
       g.append("circle").attr("r", 2.5).attr("fill", "#1b1e24");
@@ -769,6 +780,12 @@ function updateShape(g, d, editable) {
       g.select(".shape").attr("r", d.radius);
       g.select("text.icon-label").attr("font-size", d.radius);
       break;
+    case "wheel": {
+      g.select(".shape").attr("r", d.radius);
+      g.selectAll(".wheel-spoke").attr("x1", 0).attr("y1", 0).attr("x2", 0).attr("y2", -d.radius * 0.92);
+      g.select(".wheel-hub").attr("r", Math.max(3, d.radius * 0.14));
+      break;
+    }
     case "board":
     case "button":
       g.select(".shape")

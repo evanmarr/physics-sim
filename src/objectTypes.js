@@ -22,6 +22,17 @@ export const OBJECT_DEFS = {
     defaultSpec: () => ({ type: "ball", x: 0, y: 0, rotation: 0, radius: 26, material: "rubber", fixed: false }),
     fields: ["radius", "material", "fixed"],
   },
+  wheel: {
+    label: "Wheel",
+    icon: "🛞",
+    category: "core",
+    // Physically just a circle, same as Ball — the only real difference is
+    // the drawn spokes, which make its actual rolling rotation visible
+    // (a plain ball spinning is hard to see; a wheel's spokes turning is
+    // obvious), which is the whole point of putting one on a ramp.
+    defaultSpec: () => ({ type: "wheel", x: 0, y: 0, rotation: 0, radius: 36, material: "wood", fixed: false }),
+    fields: ["radius", "material", "fixed"],
+  },
   board: {
     label: "Board",
     icon: "▭",
@@ -61,8 +72,8 @@ export const OBJECT_DEFS = {
     // Blows a constant wind force out of its front face (local +x, same
     // convention as the cannon muzzle) over `range` world units, tapering
     // to zero at the edge of that range.
-    defaultSpec: () => ({ type: "fan", x: 0, y: 0, rotation: -90, width: 50, height: 60, material: "metal", power: 18, range: 400 }),
-    fields: ["width", "height", "power", "range", "material"],
+    defaultSpec: () => ({ type: "fan", x: 0, y: 0, rotation: -90, width: 50, height: 60, material: "metal", power: 18, range: 400, fixed: true }),
+    fields: ["width", "height", "power", "range", "material", "fixed"],
   },
   cannon: {
     label: "Cannon",
