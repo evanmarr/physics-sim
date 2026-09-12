@@ -126,9 +126,9 @@ async function beginVerification(email, { kind, signupData }) {
 async function sendVerificationEmail(email, code) {
   await sendEmail({
     to: email,
-    subject: `Your Continuum verification code: ${code}`,
+    subject: `Your Kinetic verification code: ${code}`,
     html: wrapEmailHtml(`
-      <p>Your Continuum sign-in code is:</p>
+      <p>Your Kinetic sign-in code is:</p>
       <p style="font-size:32px;font-weight:700;letter-spacing:.14em;color:#3b6fe0;margin:12px 0;">${code}</p>
       <p style="color:#6b7280;">This code expires in 10 minutes. If you didn't request this, you can ignore it — nothing happens without it.</p>
     `),
@@ -391,7 +391,7 @@ export async function handleApi(req, res, url) {
     await db.removeFromMailingList(email);
     const user = await db.getUser(email);
     if (user) await db.setUserSubscribed(email, false);
-    return res.end("<p>You've been unsubscribed from the Continuum newsletter. Sorry to see you go.</p>");
+    return res.end("<p>You've been unsubscribed from the Kinetic newsletter. Sorry to see you go.</p>");
   }
 
   if (parts[1] === "signup" && req.method === "POST") {
@@ -638,7 +638,7 @@ if (isMainModule) {
 
   await db.ensureSchema();
   server.listen(PORT, () => {
-    console.log(`Continuum server running at http://localhost:${PORT}`);
+    console.log(`Kinetic server running at http://localhost:${PORT}`);
     // No host was passed to listen(), so this already accepts connections
     // from other devices on the same network, not just this machine —
     // printing the LAN address is just so you don't have to go find it

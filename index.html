@@ -3,13 +3,16 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Continuum — Physics, Chemistry, Astronomy &amp; More</title>
-<link rel="icon" type="image/svg+xml" href="favicon.svg" />
-<link rel="icon" type="image/png" sizes="32x32" href="icons/icon-32.png" />
-<!-- The tab favicon above is vector (crisp at any size already) — these are
-     specifically for "Add to Home Screen"/PWA install, where iOS and
-     Android need real, high-resolution raster icons (Safari otherwise
-     falls back to a blurry screenshot of the page as the app icon). -->
+<title>Kinetic — Physics, Chemistry, Astronomy &amp; More</title>
+<!-- Plain PNGs, not an SVG wrapping a raster <image> — that combination
+     (relative href + a multi-megabyte embedded source) was silently
+     failing to render as the browser tab icon in practice. Two sizes cover
+     standard and high-DPI tab/bookmark bars. -->
+<link rel="icon" type="image/png" sizes="32x32" href="icons/icon-32.png?v=3" />
+<link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png?v=3" />
+<!-- Separately, for "Add to Home Screen"/PWA install — iOS and Android
+     need this real, high-resolution raster icon (Safari otherwise falls
+     back to a blurry screenshot of the page as the app icon). -->
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
 <link rel="manifest" href="manifest.json" />
 <meta name="theme-color" content="#38bdf8" />
@@ -19,23 +22,13 @@
 
 <div id="loading-screen">
   <canvas id="loading-canvas"></canvas>
-  <svg id="loading-logo" viewBox="0 0 24 24" width="64" height="64" aria-hidden="true">
-    <ellipse cx="12" cy="12" rx="10" ry="4.2" fill="none" style="stroke: var(--cool-1)" stroke-width="1.5" />
-    <ellipse cx="12" cy="12" rx="10" ry="4.2" fill="none" style="stroke: var(--cool-2)" stroke-width="1.5" transform="rotate(60 12 12)" />
-    <ellipse cx="12" cy="12" rx="10" ry="4.2" fill="none" style="stroke: var(--cool-3)" stroke-width="1.5" transform="rotate(120 12 12)" />
-    <circle cx="12" cy="12" r="2.1" style="fill: var(--text)" />
-  </svg>
+  <img id="loading-logo" src="icons/kinetic-logo-transparent.png" width="64" height="64" alt="" aria-hidden="true" />
 </div>
 
 <header id="topbar">
   <div class="brand" id="brand-home-btn" role="button" title="Home">
-    <svg class="brand-logo" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
-      <ellipse cx="12" cy="12" rx="10" ry="4.2" fill="none" style="stroke: var(--cool-1)" stroke-width="1.7" />
-      <ellipse cx="12" cy="12" rx="10" ry="4.2" fill="none" style="stroke: var(--cool-2)" stroke-width="1.7" transform="rotate(60 12 12)" />
-      <ellipse cx="12" cy="12" rx="10" ry="4.2" fill="none" style="stroke: var(--cool-3)" stroke-width="1.7" transform="rotate(120 12 12)" />
-      <circle cx="12" cy="12" r="2.1" style="fill: var(--text)" />
-    </svg>
-    Continuum
+    <img class="brand-logo" src="icons/kinetic-logo-transparent.png" width="20" height="20" alt="" aria-hidden="true" />
+    Kinetic
   </div>
   <div id="mode-tabs">
     <button id="mode-physics-btn" class="mode-tab">Physics</button>
@@ -110,6 +103,7 @@
       <button id="my-worlds-btn">My Worlds</button>
       <button id="undo-btn" title="Undo (Ctrl/Cmd+Z)" disabled>↶</button>
       <button id="redo-btn" title="Redo (Ctrl/Cmd+Shift+Z)" disabled>↷</button>
+      <button id="join-btn" title="Weld the selected objects rigidly together (J)" disabled>Join Selected</button>
       <button id="clear-btn">Clear</button>
     </div>
     <!-- No keyboard on a touchscreen, so mobile mode gets its own explicit
@@ -205,21 +199,21 @@
 
 <div id="about-modal" class="modal hidden">
   <div class="modal-box about-box">
-    <h2>About Continuum</h2>
-    <p>Continuum exists to make real science feel exciting instead of abstract —
-      not animations of physics, but physics; not a diagram of an atom, but one
-      you can rotate and inspect; not a list of orbital facts, but a solar
-      system you can actually fast-forward through and watch move. Every
-      number behind every simulation here is a real, working formula, not a
-      canned effect — the goal is that playing with something here should
-      teach you at least as much as reading about it would.</p>
+    <h2>About Kinetic</h2>
+    <p><strong>Build it. Change it. See what happens.</strong> Kinetic exists to make
+      real science feel exciting instead of abstract — not animations of physics, but
+      physics; not a diagram of an atom, but one you can rotate and inspect; not a list
+      of orbital facts, but a solar system you can actually fast-forward through and
+      watch move. Every number behind every simulation here is a real, working formula,
+      not a canned effect — the goal is that playing with something here should teach
+      you at least as much as reading about it would.</p>
     <h3>Who made this</h3>
-    <p>Continuum is an independent project built by <strong>Evan Marr</strong>, a
+    <p>Kinetic is an independent project built by <strong>Evan Marr</strong>, a
       hobbyist developer and lifelong science enthusiast who kept wishing
       textbooks let you actually touch the thing they were describing. It's
       built and maintained as a free, ad-free educational resource. Donations
       go straight back into the site — about 80% of every donation goes
-      toward upgrading Continuum itself (hosting, tools, new content).</p>
+      toward upgrading Kinetic itself (hosting, tools, new content).</p>
     <div class="about-actions">
       <button id="donate-btn" class="primary">Donate</button>
       <button id="about-close">Close</button>

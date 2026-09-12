@@ -154,7 +154,11 @@ export class ZoologyMode {
     }
 
     const width = stage.clientWidth || 600, height = 420;
-    const svg = d3.select(stage).append("svg").attr("width", width).attr("height", height);
+    const PAD = 34; // keeps a node's 30px circle (plus label) fully inside the stage
+    const svg = d3.select(stage).append("svg")
+      .attr("viewBox", `0 0 ${width} ${height}`)
+      .attr("preserveAspectRatio", "xMidYMid meet")
+      .attr("width", "100%").attr("height", height);
     svg.append("defs").append("marker")
       .attr("id", "zoo-arrow").attr("viewBox", "0 -5 10 10").attr("refX", 22).attr("refY", 0)
       .attr("markerWidth", 6).attr("markerHeight", 6).attr("orient", "auto")
@@ -172,7 +176,13 @@ export class ZoologyMode {
     const node = svg.append("g").selectAll("g").data(nodes).join("g").call(
       d3.drag()
         .on("start", (e, d) => { if (!e.active) sim.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; })
-        .on("drag", (e, d) => { d.fx = e.x; d.fy = e.y; })
+        .on("drag", (e, d) => {
+          // Clamp to the stage so a dragged node can never end up (or be
+          // flung, via the simulation's own forces once released) outside
+          // the visible SVG — the whole web must stay inside its container.
+          d.fx = Math.max(PAD, Math.min(width - PAD, e.x));
+          d.fy = Math.max(PAD, Math.min(height - PAD, e.y));
+        })
         .on("end", (e, d) => { if (!e.active) sim.alphaTarget(0); d.fx = null; d.fy = null; })
     );
     node.append("circle").attr("r", 30).attr("fill", "var(--panel)").attr("stroke", "var(--accent)").attr("stroke-width", 2);
@@ -181,6 +191,13 @@ export class ZoologyMode {
     node.append("title").text((d) => d.note);
 
     sim.on("tick", () => {
+      // Clamp every node each tick, not just the one being dragged — the
+      // force layout (charge/collide) can push an untouched node toward the
+      // edge on its own, and it must stay inside the stage too.
+      for (const d of nodes) {
+        d.x = Math.max(PAD, Math.min(width - PAD, d.x));
+        d.y = Math.max(PAD, Math.min(height - PAD, d.y));
+      }
       link.attr("x1", (d) => d.source.x).attr("y1", (d) => d.source.y).attr("x2", (d) => d.target.x).attr("y2", (d) => d.target.y);
       node.attr("transform", (d) => `translate(${d.x},${d.y})`);
     });

@@ -46,6 +46,7 @@ const WIND_PARTICLES_PER_SPAWN = 3; // a fan blows a wide stream, not a thin tri
 // uses the narrower BEARING_HOST_TYPES instead.
 const PIVOTABLE_HOST_TYPES = new Set(["board", "triangle", "ball", "bomb", "ballBearing", "peg", "magnet"]);
 const WIRE_SNAP_DIST = 22; // world units — how close a wire's end needs to be to a button/bomb/cannon to link them
+const RING_SEGMENTS = 14; // wedges approximating a Ball's donut collision shape — see _ringParts
 const BEARING_HOST_TYPES = new Set(["board", "triangle", "ball", "bomb"]);
 
 export class PhysicsSim {
@@ -101,23 +102,29 @@ export class PhysicsSim {
     // nothing, which is exactly the "why won't this swing" trap.
     const pivots = []; // { bearingSpec, hostSpec }
     const pivotHostIds = new Set();
-    // A bearing sits physically embedded inside its host (that's how a pivot
-    // point works), so besides the point constraint that lets the host swing
-    // around it, the bearing and host must never solid-collide with each
-    // other — otherwise Matter treats them as permanently overlapping bodies
-    // and fights to push them apart every single step, which looks like
-    // violent jitter/explosion. Give each bearing+host pair a shared
-    // negative collision group (same technique as rope segments).
-    const noCollideGroupById = new Map(); // specId -> group, for bearing + its host
+    // A bearing sits physically embedded inside its host(s) (that's how a
+    // pivot point works), so besides the point constraint that lets each
+    // host swing around it, the bearing and every one of its hosts must
+    // never solid-collide with each other — otherwise Matter treats them as
+    // permanently overlapping bodies and fights to push them apart every
+    // single step, which looks like violent jitter/explosion. All of a
+    // bearing's hosts share the SAME negative collision group as the
+    // bearing itself (not one group per pair) — Matter only allows one
+    // group per body, and this is what lets several boards hinged on one
+    // bearing all pass through each other and the bearing's own small
+    // static disc, while still colliding normally with everything else.
+    const noCollideGroupById = new Map(); // specId -> group, for bearing + all its hosts
     for (const spec of this.specs) {
       if (spec.type !== "ballBearing") continue;
-      const host = this._findPivotHost(spec, specById, BEARING_HOST_TYPES);
-      if (!host) continue;
-      pivots.push({ bearingSpec: spec, hostSpec: host });
-      pivotHostIds.add(host.id);
+      const hosts = this._findPivotHosts(spec, specById, BEARING_HOST_TYPES);
+      if (!hosts.length) continue;
       const group = Body.nextGroup(true);
       noCollideGroupById.set(spec.id, group);
-      noCollideGroupById.set(host.id, group);
+      for (const host of hosts) {
+        pivots.push({ bearingSpec: spec, hostSpec: host });
+        pivotHostIds.add(host.id);
+        noCollideGroupById.set(host.id, group);
+      }
     }
 
     // A wire whose two ends sit near a Button and a Bomb/Cannon links them,
@@ -176,6 +183,44 @@ export class PhysicsSim {
         damping: 0,
       });
       Composite.add(world, constraint);
+    }
+
+    // Join: weld every spec sharing a joinGroup together into one rigid
+    // cluster. Unlike a Ball Bearing pivot (one point constraint, free to
+    // rotate), a weld uses TWO point constraints per pair at distinct
+    // anchor points — locking both relative translation AND rotation, the
+    // same technique real 2D engines (e.g. Box2D's weld joint) use instead
+    // of merging separate bodies into one. Each member keeps its own real
+    // mass/density/material; under extreme force a weld can flex slightly
+    // rather than being physically unbreakable, which is the honest
+    // simplification of this approach versus a true single compound body.
+    const joinGroups = new Map(); // joinGroup id -> [{ spec, body }]
+    for (const spec of this.specs) {
+      if (!spec.joinGroup) continue;
+      const body = this.byId.get(spec.id);
+      if (!body) continue;
+      if (!joinGroups.has(spec.joinGroup)) joinGroups.set(spec.joinGroup, []);
+      joinGroups.get(spec.joinGroup).push({ spec, body });
+    }
+    for (const members of joinGroups.values()) {
+      if (members.length < 2) continue;
+      // Joined members never solid-collide with each other (same
+      // shared-negative-group technique as a bearing + its host) — a weld
+      // that also fights its own collision response would jitter apart.
+      const group = Body.nextGroup(true);
+      for (const { body } of members) body.collisionFilter.group = group;
+      const [primary, ...rest] = members;
+      for (const { spec: otherSpec, body: otherBody } of rest) {
+        for (const [ax, ay] of [[primary.spec.x, primary.spec.y], [primary.spec.x + 20, primary.spec.y + 20]]) {
+          const pointA = _worldToLocalOffset(ax, ay, primary.spec.x, primary.spec.y, primary.spec.rotation || 0);
+          const pointB = _worldToLocalOffset(ax, ay, otherSpec.x, otherSpec.y, otherSpec.rotation || 0);
+          Composite.add(world, Constraint.create({
+            bodyA: primary.body, pointA,
+            bodyB: otherBody, pointB,
+            length: 0, stiffness: 1, damping: 0.3,
+          }));
+        }
+      }
     }
 
     // ropes: a chain of small segment bodies, anchored at the rope's placed
@@ -375,14 +420,28 @@ export class PhysicsSim {
   }
 
   _findPivotHost(bearing, specById, allowedTypes = PIVOTABLE_HOST_TYPES) {
-    let best = null;
     for (const spec of specById.values()) {
       if (spec.id === bearing.id) continue;
       if (!allowedTypes.has(spec.type)) continue;
       if (materialOf(spec.material).isFluid) continue;
-      if (pointInShape(bearing.x, bearing.y, spec)) { best = spec; break; }
+      if (pointInShape(bearing.x, bearing.y, spec)) return spec;
     }
-    return best;
+    return null;
+  }
+
+  // Plural version: every object overlapping the bearing's point, not just
+  // the first one found — this is what lets one Ball Bearing act as a real
+  // multi-arm pivot/joint (several boards/triangles all hinged at the same
+  // point, each free to swing independently), not just a single pin.
+  _findPivotHosts(bearing, specById, allowedTypes = PIVOTABLE_HOST_TYPES) {
+    const hosts = [];
+    for (const spec of specById.values()) {
+      if (spec.id === bearing.id) continue;
+      if (!allowedTypes.has(spec.type)) continue;
+      if (materialOf(spec.material).isFluid) continue;
+      if (pointInShape(bearing.x, bearing.y, spec)) hosts.push(spec);
+    }
+    return hosts;
   }
 
   // The nearest button/bomb/cannon within snap distance of a world point —
@@ -434,6 +493,10 @@ export class PhysicsSim {
     let body = null;
     switch (spec.type) {
       case "ball":
+        body = spec.holeRatio > 0.05
+          ? Body.create({ parts: _ringParts(spec.x, spec.y, spec.radius, spec.radius * spec.holeRatio, RING_SEGMENTS), ...common })
+          : Bodies.circle(spec.x, spec.y, spec.radius, common);
+        break;
       case "wheel":
         body = Bodies.circle(spec.x, spec.y, spec.radius, common);
         break;
@@ -509,6 +572,7 @@ export class PhysicsSim {
         type: spec.type,
         material: spec.material,
         width: spec.width, height: spec.height, radius: spec.radius,
+        holeRatio: spec.holeRatio,
         fixed: !!spec.fixed,
         power: spec.power, range: spec.range,
         // A wire has no explicit length field — like rope, it's the live
@@ -1048,28 +1112,49 @@ export class PhysicsSim {
     this.engine.gravity.y = scale;
   }
 
-  // Turns the pointer into a real physics object: a plain dynamic circle,
-  // hidden from the normal renderer (its own cursor is the visual), that
-  // gets driven to setGrabTarget's coordinates every tick in start()'s
-  // loop above — real enough to bump other bodies, not a fake overlay.
+  // Turns the pointer into a real ball: a genuine dynamic body that
+  // collides with everything else in the scene, connected to the live
+  // pointer position by a spring (the same technique Matter's own
+  // MouseConstraint uses) rather than being teleported there every frame.
+  // That distinction is the whole point — a teleported body cheats through
+  // walls and can never itself be deflected, while a spring-pulled one gets
+  // physically blocked by anything solid in its way and can be knocked off
+  // course by whatever it hits, exactly like a ball you're pushing around
+  // with an invisible leash.
   enableGrabTool(radius = 18) {
     if (this.grabBody) return;
     const pos = this.grabTarget || { x: 0, y: 0 };
     this.grabBody = Bodies.circle(pos.x, pos.y, radius, {
       label: "grabTool",
-      density: 0.02,
+      density: 0.025,
       friction: 0.05,
-      frictionAir: 0,
-      restitution: 0.1,
-      plugin: { render: { hidden: true } },
+      frictionAir: 0.02,
+      restitution: 0.3,
+      plugin: {
+        gameId: makeId("grabTool"),
+        // "cursor" is a dedicated render type (see render.js's updateShape)
+        // — an outline-only circle, not styled like any real material, so
+        // it always reads as "this is your pointer" rather than another
+        // object sitting in the scene.
+        render: { type: "cursor", radius },
+      },
     });
-    Composite.add(this.engine.world, this.grabBody);
+    this.grabConstraint = Constraint.create({
+      pointA: { x: pos.x, y: pos.y },
+      bodyB: this.grabBody,
+      stiffness: 0.2,
+      damping: 0.4,
+      length: 0,
+    });
+    Composite.add(this.engine.world, [this.grabBody, this.grabConstraint]);
   }
 
   disableGrabTool() {
     if (!this.grabBody) return;
+    Composite.remove(this.engine.world, this.grabConstraint);
     Composite.remove(this.engine.world, this.grabBody);
     this.grabBody = null;
+    this.grabConstraint = null;
   }
 
   setGrabTarget(x, y) {
@@ -1091,20 +1176,14 @@ export class PhysicsSim {
       this.lastTime = time;
       this._lastDelta = delta;
       this.simTime += delta;
-      // Grab tool: a real dynamic body driven to the live pointer position
-      // every frame (not Body.setStatic), so its velocity each tick is
-      // however fast the pointer is actually moving — that's what lets it
-      // shove other bodies with real momentum on contact instead of just
-      // teleporting through them. Setting position AFTER computing that
-      // velocity (but every frame, unconditionally) also cancels gravity's
-      // pull on it completely, without needing a special no-gravity flag.
-      if (this.grabBody && this.grabTarget) {
-        const dt = Math.max(delta, 1) / 1000;
-        Body.setVelocity(this.grabBody, {
-          x: (this.grabTarget.x - this.grabBody.position.x) / dt,
-          y: (this.grabTarget.y - this.grabBody.position.y) / dt,
-        });
-        Body.setPosition(this.grabBody, this.grabTarget);
+      // Grab tool: just move the spring's anchor to the live pointer
+      // position — Matter's own constraint solver (inside Engine.update
+      // below) is what actually moves grabBody toward it, the same as
+      // every other constraint in the scene, so it's genuinely subject to
+      // collisions the whole way there instead of being forced through them.
+      if (this.grabConstraint && this.grabTarget) {
+        this.grabConstraint.pointA.x = this.grabTarget.x;
+        this.grabConstraint.pointA.y = this.grabTarget.y;
       }
       Engine.update(this.engine, delta);
       this.processPending();
@@ -1230,6 +1309,7 @@ export class PhysicsSim {
         rotation: isFlexEndpoint ? 0 : body.angle * DEG,
         width: r.width, height: r.height, radius: r.radius,
         material: r.material,
+        holeRatio: r.holeRatio,
         fixed: body.isStatic,
         transient: !!body.plugin.transient,
         opacity,
@@ -1239,6 +1319,44 @@ export class PhysicsSim {
     }
     return items;
   }
+}
+
+// Matter has no native ring/annulus primitive, and a true ring isn't even
+// expressible as one simple (non-self-intersecting) polygon — so this
+// approximates a donut's collision shape the standard way: a ring of
+// trapezoid wedges, combined into one compound Body.create({parts}). That
+// makes the hole a REAL gap in the collision geometry (something small
+// enough genuinely passes through it), not just a visual overlay — each
+// wedge is built at its own true centroid via Bodies.fromVertices so the
+// compound body's parts end up actually arranged in a ring, not bunched at
+// the center.
+function _ringParts(cx, cy, outerR, innerR, segments) {
+  const parts = [];
+  for (let i = 0; i < segments; i++) {
+    const a0 = (i / segments) * Math.PI * 2;
+    const a1 = ((i + 1) / segments) * Math.PI * 2;
+    const raw = [
+      { x: Math.cos(a0) * outerR, y: Math.sin(a0) * outerR },
+      { x: Math.cos(a1) * outerR, y: Math.sin(a1) * outerR },
+      { x: Math.cos(a1) * innerR, y: Math.sin(a1) * innerR },
+      { x: Math.cos(a0) * innerR, y: Math.sin(a0) * innerR },
+    ];
+    const centroidX = raw.reduce((s, v) => s + v.x, 0) / raw.length;
+    const centroidY = raw.reduce((s, v) => s + v.y, 0) / raw.length;
+    const relative = raw.map((v) => ({ x: v.x - centroidX, y: v.y - centroidY }));
+    parts.push(Bodies.fromVertices(cx + centroidX, cy + centroidY, [relative], {}, true));
+  }
+  return parts;
+}
+
+// Converts a world point into a spec's own local (unrotated) frame — used
+// to bind a Join weld constraint's anchor points so they stay fixed
+// relative to each body as it rotates, the same math the Ball Bearing
+// pivot already uses for its own single anchor point.
+function _worldToLocalOffset(worldX, worldY, originX, originY, rotationDeg) {
+  const dx = worldX - originX, dy = worldY - originY;
+  const cos = Math.cos(-rotationDeg * RAD), sin = Math.sin(-rotationDeg * RAD);
+  return { x: dx * cos - dy * sin, y: dx * sin + dy * cos };
 }
 
 // Samples points along the magnet→target segment and checks each against
@@ -1258,7 +1376,13 @@ function isMagnetismBlocked(a, b, blockers) {
 
 function areaOf(spec) {
   if (spec.type === "ball" || spec.type === "wheel" || spec.type === "bomb" || spec.type === "ballBearing" || spec.type === "peg" || spec.type === "magnet" || spec.type === "lightSource") {
-    return Math.PI * spec.radius * spec.radius;
+    // A donut has less actual material than a solid disc of the same
+    // outer radius — subtracting the hole's area is what keeps its mass
+    // (and therefore how much force it takes to move) honest as the
+    // Center Hole slider opens it up, instead of a lighter-looking ring
+    // that still weighs like a solid ball.
+    const hole = spec.type === "ball" ? (spec.holeRatio || 0) : 0;
+    return Math.PI * spec.radius * spec.radius * (1 - hole * hole);
   }
   if (spec.type === "triangle") {
     const width = spec.width ?? spec.size ?? 130;
@@ -1285,7 +1409,16 @@ function pointInShape(px, py, spec) {
     // A little slack past the drawn radius — snapping a rope end onto a
     // small peg/bearing shouldn't require pixel-perfect placement.
     const r = (spec.radius || 20) + 6;
-    return lx * lx + ly * ly <= r * r;
+    const distSq = lx * lx + ly * ly;
+    if (distSq > r * r) return false;
+    // A donut's actual hole isn't "inside" the object for hit-testing
+    // purposes either — a rope dropped exactly through the middle should
+    // fall through, not snag on material that isn't there.
+    if (spec.type === "ball" && spec.holeRatio > 0.02) {
+      const innerR = spec.radius * spec.holeRatio;
+      if (distSq < innerR * innerR) return false;
+    }
+    return true;
   }
   return false;
 }

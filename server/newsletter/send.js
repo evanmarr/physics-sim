@@ -69,7 +69,7 @@ async function main() {
 
   const now = new Date();
   const monthLabel = now.toLocaleDateString("en-US", { month: "long", year: "numeric" });
-  const subject = `Continuum — ${monthLabel} newsletter${isPreview ? " (preview)" : ""}`;
+  const subject = `Kinetic — ${monthLabel} newsletter${isPreview ? " (preview)" : ""}`;
 
   let sent = 0, failed = 0;
   for (const email of recipients) {

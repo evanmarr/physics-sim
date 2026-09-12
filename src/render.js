@@ -18,7 +18,7 @@ const SPEED_UNITS = [
 // elements are always fixed, a wire isn't simulated at all, shards are
 // numerous transient debris (the label would just clutter an explosion),
 // and rope/track render at one endpoint rather than a shape center.
-const NO_SPEED_LABEL_TYPES = new Set(["wire", "lightSource", "mirror", "lens", "shard", "rope"]);
+const NO_SPEED_LABEL_TYPES = new Set(["wire", "lightSource", "mirror", "lens", "shard", "rope", "cursor"]);
 let speedUnitKey = localStorage.getItem("physics-speed-unit") || SPEED_UNITS[0].key;
 
 function currentSpeedUnit() {
@@ -176,6 +176,11 @@ export class Renderer {
       .scaleExtent([0.25, 2.5])
       .translateExtent([[WORLD.minX - 200, WORLD.minY - 200], [WORLD.maxX + 200, WORLD.maxY + 200]])
       .filter((event) => {
+        // While the grab tool is active, a touch device's own pan/zoom
+        // gestures would otherwise fight the grab tool for the same
+        // touch-drag — a finger dragging across the canvas should move the
+        // grab object, not pan the view (see setGrabActive below).
+        if (this._grabActive) return false;
         // allow wheel + drag-pan on background, but not while dragging an
         // object, and not while shift is held (that's a marquee-select drag)
         if (event.type === "wheel") return true;
@@ -239,12 +244,17 @@ export class Renderer {
 
   // Light Mode: redraws every ray as a polyline. Call with [] to clear.
   renderLightRays(rays) {
+    // Each ray is { points, color } — a dispersed (prism) ray carries its
+    // own spectral color instead of the default, so a join keyed on color
+    // alone would need to run every frame anyway; keep it simple and just
+    // rebuild since ray count/order can change frame to frame regardless.
     const sel = this.rayLayer.selectAll("polyline").data(rays);
     sel.exit().remove();
     sel.enter().append("polyline")
-      .attr("fill", "none").attr("stroke", "#ffd76b").attr("stroke-width", 1.6).attr("stroke-opacity", 0.85)
+      .attr("fill", "none").attr("stroke-width", 1.6).attr("stroke-opacity", 0.85)
       .merge(sel)
-      .attr("points", (ray) => ray.map((p) => `${p.x},${p.y}`).join(" "));
+      .attr("stroke", (ray) => ray.color || "#ffd76b")
+      .attr("points", (ray) => ray.points.map((p) => `${p.x},${p.y}`).join(" "));
   }
 
   // A magnet's force in this sandbox falls off radially from one point
@@ -387,6 +397,16 @@ export class Renderer {
     const rect = this.svg.node().getBoundingClientRect();
     const [x, y] = this.zoomTransform.invert([clientX - rect.left, clientY - rect.top]);
     return { x, y };
+  }
+
+  // Toggled by the Grab Tool (main.js). #canvas already has touch-action:
+  // none in CSS (needed for d3-zoom's own pinch/pan gestures), so a touch
+  // drag never scrolls the page — the actual conflict is that d3-zoom's
+  // OWN drag-to-pan would otherwise capture that same touch-drag as a pan
+  // gesture instead of it driving the grab object. The filter above reads
+  // this flag to stand down while grab mode is on.
+  setGrabActive(active) {
+    this._grabActive = active;
   }
 
   currentScale() {
@@ -632,10 +652,23 @@ function braidStrandPath(ex, ey, phaseDeg) {
   return "M" + pts.join(" L");
 }
 
+// A full circle as two-arc SVG path data, centered at (cx,cy) — used
+// (rather than a plain <circle>) for Ball so a second, inner one can be
+// appended for its optional center hole (see updateShape's "ball" case).
+function circlePathD(cx, cy, r) {
+  return `M${cx - r},${cy} A${r},${r} 0 1,0 ${cx + r},${cy} A${r},${r} 0 1,0 ${cx - r},${cy} Z`;
+}
+
 function buildShape(g, d) {
   switch (d.type) {
     case "ball":
+      // A <path> (not <circle>) even when there's no hole yet — that way
+      // turning "Center Hole" up later just redraws the same element's `d`
+      // (see updateShape) instead of needing to swap element types.
+      g.append("path").attr("class", "shape").attr("fill-rule", "evenodd");
+      break;
     case "bomb":
+    case "cursor":
       g.append("circle").attr("class", "shape").attr("r", d.radius);
       if (d.type === "bomb") g.append("text").attr("class", "icon-label").text("💣").attr("text-anchor", "middle").attr("dy", 5).attr("font-size", d.radius);
       break;
@@ -760,6 +793,21 @@ function buildShape(g, d) {
 }
 
 function updateShape(g, d, editable) {
+  // The pointer/grab-tool ball is deliberately not styled like a real
+  // material object — it's an outline only (transparent fill, opaque
+  // stroke) so it always reads as "this is your cursor," never as another
+  // physics item sitting in the scene.
+  if (d.type === "cursor") {
+    g.select(".shape")
+      .attr("fill", "none")
+      .attr("fill-opacity", 0)
+      .attr("stroke", "var(--accent)")
+      .attr("stroke-width", 3)
+      .attr("stroke-dasharray", null)
+      .attr("r", d.radius);
+    return;
+  }
+
   const mat = materialOf(d.material);
   const fillOpacity = mat.fillOpacity ?? 1;
   const isFluid = !!mat.isFluid;
@@ -772,7 +820,18 @@ function updateShape(g, d, editable) {
     .attr("stroke-dasharray", d.fixed && !isFluid ? null : (isFluid ? null : "0"));
 
   switch (d.type) {
-    case "ball":
+    case "ball": {
+      // holeRatio > 0 draws a second, reverse-wound circle inside the
+      // outer one — with fill-rule: evenodd (set once in buildShape) that
+      // inner region renders as a real hole (you can see the canvas
+      // background — and whatever's behind it — straight through it),
+      // not a colored-over decoration.
+      const hole = d.holeRatio || 0;
+      let path = circlePathD(0, 0, d.radius);
+      if (hole > 0.02) path += " " + circlePathD(0, 0, d.radius * hole);
+      g.select(".shape").attr("d", path);
+      break;
+    }
     case "bomb":
     case "ballBearing":
     case "peg":

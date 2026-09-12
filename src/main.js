@@ -311,6 +311,8 @@ function renderPanelUI() {
     onOpenMath: () => { state.mathPanelOpen = true; renderMathPanelUI(); renderPanelUI(); },
   });
   renderMathPanelUI();
+  const joinBtn = document.getElementById("join-btn");
+  if (joinBtn) joinBtn.disabled = state.selectedIds.size < 2 || state.playing;
 }
 
 function renderMathPanelUI() {
@@ -335,6 +337,29 @@ function deleteObject(id) {
   renderAll();
   renderPanelUI();
   scheduleSave();
+}
+
+// Flexible/routing objects, not solid rigid shapes — welding one to
+// something else doesn't mean anything physically, so Join refuses rather
+// than silently doing something nonsensical.
+const JOIN_INCOMPATIBLE_TYPES = new Set(["rope", "wire"]);
+
+function joinSelected() {
+  if (state.selectedIds.size < 2 || state.playing) return;
+  const specs = state.objects.filter((o) => state.selectedIds.has(o.id));
+  const bad = specs.filter((o) => JOIN_INCOMPATIBLE_TYPES.has(o.type));
+  if (bad.length) {
+    const labels = [...new Set(bad.map((o) => OBJECT_DEFS[o.type].label))].join(", ");
+    showToast(`Can't join ${labels} — not a rigid shape.`);
+    return;
+  }
+  pushUndoNow();
+  const groupId = makeId("join");
+  for (const spec of specs) spec.joinGroup = groupId;
+  renderAll();
+  renderPanelUI();
+  scheduleSave();
+  showToast(`Joined ${specs.length} objects`);
 }
 
 function deleteSelected() {
@@ -555,6 +580,7 @@ function wireTopbar(renderer) {
 
   document.getElementById("undo-btn").addEventListener("click", () => undo());
   document.getElementById("redo-btn").addEventListener("click", () => redo());
+  document.getElementById("join-btn").addEventListener("click", () => joinSelected());
 
   document.getElementById("light-mode-btn").addEventListener("click", () => {
     state.lightMode = !state.lightMode;
@@ -779,13 +805,23 @@ function setGrabToolActive(active) {
   const btn = document.getElementById("grab-tool-btn");
   btn.classList.toggle("active", active);
   const svg = document.getElementById("canvas");
+  window._renderer.setGrabActive(active);
   if (active) {
     sim?.enableGrabTool();
+    svg.addEventListener("pointerdown", onGrabPointerDown);
     svg.addEventListener("pointermove", onGrabPointerMove);
   } else {
     sim?.disableGrabTool();
+    svg.removeEventListener("pointerdown", onGrabPointerDown);
     svg.removeEventListener("pointermove", onGrabPointerMove);
   }
+}
+
+// Captures the pointer to the canvas on touch-down so a fast finger swipe
+// that briefly slips past the SVG's edge keeps generating pointermove
+// events on it instead of silently losing tracking mid-drag.
+function onGrabPointerDown(ev) {
+  try { ev.currentTarget.setPointerCapture(ev.pointerId); } catch { /* ignore */ }
 }
 
 function onGrabPointerMove(ev) {
@@ -933,14 +969,10 @@ function buildHomePage(root, onNavigate) {
     <canvas class="home-bg" aria-hidden="true"></canvas>
     <div class="home-wrap">
       <div class="home-hero">
-        <svg class="home-logo" viewBox="0 0 24 24" width="48" height="48" aria-hidden="true">
-          <ellipse cx="12" cy="12" rx="10" ry="4.2" fill="none" style="stroke: var(--cool-1)" stroke-width="1.3" />
-          <ellipse cx="12" cy="12" rx="10" ry="4.2" fill="none" style="stroke: var(--cool-2)" stroke-width="1.3" transform="rotate(60 12 12)" />
-          <ellipse cx="12" cy="12" rx="10" ry="4.2" fill="none" style="stroke: var(--cool-3)" stroke-width="1.3" transform="rotate(120 12 12)" />
-          <circle cx="12" cy="12" r="2.1" style="fill: var(--text)" />
-        </svg>
+        <img class="home-logo" src="icons/kinetic-logo-transparent.png" width="48" height="48" alt="" aria-hidden="true" />
         <div class="home-kicker">twelve sandboxes · one app</div>
-        <h1>Continuum</h1>
+        <h1>Kinetic</h1>
+        <p class="home-slogan">Build it. Change it. See what happens.</p>
         <p class="home-tagline">Real simulations, not animations — physics, chemistry, astronomy,
           mathematics, economics, zoology, sound, a city to run sustainably, a whiteboard for your own
           ideas, and the history and security behind them all. Pick a section to start.</p>
@@ -1423,6 +1455,9 @@ function wireKeyboard(renderer) {
     } else if ((e.code === "Delete" || e.code === "Backspace") && state.selectedIds.size && !state.playing) {
       e.preventDefault();
       deleteSelected();
+    } else if (e.code === "KeyJ" && !cmd && state.selectedIds.size >= 2 && !state.playing) {
+      e.preventDefault();
+      joinSelected();
     } else if (e.code === "Escape") {
       state.selectedIds = new Set();
       state.selectedId = null;
@@ -1466,6 +1501,11 @@ function pasteClipboardAt(x, y) {
 
 function _pasteWithOffset(dx, dy) {
   pushUndoNow();
+  // A pasted group that was joined stays joined to its own copies, not
+  // welded to the originals — same idea as clearing targetId below, just
+  // remapped instead of dropped, since the whole point of copying a welded
+  // cluster is to get another independent welded cluster.
+  const joinGroupRemap = new Map();
   const pasted = clipboard.map((spec) => {
     const s = cloneSpec(spec);
     s.id = makeId(s.type);
@@ -1473,6 +1513,10 @@ function _pasteWithOffset(dx, dy) {
     s.y = snap(s.y + dy);
     if (s.x2 != null) { s.x2 = snap(s.x2 + dx); s.y2 = snap(s.y2 + dy); } // flexible-endpoint objects (rope/track): shift both ends together
     if (s.targetId) s.targetId = null; // don't silently share a trigger link with the original
+    if (s.joinGroup) {
+      if (!joinGroupRemap.has(s.joinGroup)) joinGroupRemap.set(s.joinGroup, makeId("join"));
+      s.joinGroup = joinGroupRemap.get(s.joinGroup);
+    }
     return s;
   });
   state.objects.push(...pasted);

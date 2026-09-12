@@ -19,19 +19,8 @@ export const OBJECT_DEFS = {
     label: "Ball",
     icon: "●",
     category: "core",
-    defaultSpec: () => ({ type: "ball", x: 0, y: 0, rotation: 0, radius: 26, material: "rubber", fixed: false }),
-    fields: ["radius", "material", "fixed"],
-  },
-  wheel: {
-    label: "Wheel",
-    icon: "🛞",
-    category: "core",
-    // Physically just a circle, same as Ball — the only real difference is
-    // the drawn spokes, which make its actual rolling rotation visible
-    // (a plain ball spinning is hard to see; a wheel's spokes turning is
-    // obvious), which is the whole point of putting one on a ramp.
-    defaultSpec: () => ({ type: "wheel", x: 0, y: 0, rotation: 0, radius: 36, material: "wood", fixed: false }),
-    fields: ["radius", "material", "fixed"],
+    defaultSpec: () => ({ type: "ball", x: 0, y: 0, rotation: 0, radius: 26, material: "rubber", fixed: false, holeRatio: 0 }),
+    fields: ["radius", "material", "fixed", "holeRatio"],
   },
   board: {
     label: "Board",

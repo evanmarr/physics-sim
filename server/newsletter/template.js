@@ -41,7 +41,7 @@ export function renderNewsletterHtml({ monthLabel, scientist, equation, fact, ne
 <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:12px;overflow:hidden;max-width:600px;width:100%;">
 
 <tr><td style="padding:32px 32px 8px;background:linear-gradient(100deg,#38bdf8,#8b5cf6 55%,#10b981);">
-  <div style="font:700 22px/1.2 -apple-system,Segoe UI,Helvetica,Arial,sans-serif;color:#ffffff;">Continuum</div>
+  <div style="font:700 22px/1.2 -apple-system,Segoe UI,Helvetica,Arial,sans-serif;color:#ffffff;">Kinetic</div>
   <div style="font:500 13px/1.4 -apple-system,Segoe UI,Helvetica,Arial,sans-serif;color:rgba(255,255,255,0.9);margin-top:2px;">${escapeHtml(monthLabel)} newsletter</div>
 </td></tr>
 
@@ -53,7 +53,7 @@ ${adsHtml ? section("Advertisements", adsHtml, "#6b7280") : ""}
 
 <tr><td style="padding:24px 32px 32px;border-top:1px solid #e6e8ec;">
   <div style="font:400 12px/1.6 -apple-system,Segoe UI,Helvetica,Arial,sans-serif;color:#6b7280;">
-    You're receiving this because you subscribed to Continuum updates.
+    You're receiving this because you subscribed to Kinetic updates.
     <a href="${escapeHtml(unsubscribeUrl)}" style="color:#6b7280;">Unsubscribe</a>
   </div>
 </td></tr>

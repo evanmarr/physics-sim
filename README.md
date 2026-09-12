@@ -1,4 +1,6 @@
-# Continuum
+# Kinetic
+
+Build it. Change it. See what happens.
 
 A browser-based sandbox spanning seven real, simulated domains — physics,
 chemistry, astronomy, history, cybersecurity, mathematics, and a gallery of
@@ -33,7 +35,7 @@ Either way, open http://localhost:5173.
 
 ## Home
 
-The landing screen — click the Continuum logo from any mode to return to it.
+The landing screen — click the Kinetic logo from any mode to return to it.
 One card per section, each with a small live-rendered thumbnail representing
 what that section actually looks like.
 

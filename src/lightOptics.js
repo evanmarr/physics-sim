@@ -4,11 +4,33 @@
 // lens approximation — bend once at the lens's center line — the standard
 // simplification used by most teaching-oriented optics simulators).
 import { materialOf } from "./materials.js";
+import { trianglePoints } from "./render.js";
 
 const AIR_N = 1.0;
 const MAX_BOUNCES = 6;
 const MAX_SEGMENT = 3000;
 const EPS = 0.01;
+const DEFAULT_RAY_COLOR = "#ffd76b";
+
+// A glass Triangle acts as a real prism: white light disperses into these
+// bands on the way through, each refracted at its OWN wavelength-dependent
+// index instead of one shared index for "glass". Real optical dispersion
+// (Cauchy's equation, n(λ) = A + B/λ², λ in µm) — CAUCHY_B here is picked
+// several times larger than real crown glass so the spread is actually
+// visible at simulator scale; the panel copy calls this out as
+// exaggerated-but-real-physics, not painted-on color.
+const CAUCHY_B = 0.01;
+function dispersionBands() {
+  const baseN = materialOf("glass").refractiveIndex || 1.5;
+  return [
+    { name: "violet", lambda: 0.40, color: "#8b5cf6" },
+    { name: "blue", lambda: 0.47, color: "#3b82f6" },
+    { name: "green", lambda: 0.53, color: "#22c55e" },
+    { name: "yellow", lambda: 0.58, color: "#eab308" },
+    { name: "orange", lambda: 0.62, color: "#f97316" },
+    { name: "red", lambda: 0.70, color: "#ef4444" },
+  ].map((b) => ({ ...b, n: baseN + CAUCHY_B / (b.lambda * b.lambda) }));
+}
 
 function vec(x, y) { return { x, y }; }
 function sub(a, b) { return vec(a.x - b.x, a.y - b.y); }
@@ -22,9 +44,14 @@ function rotate(a, rad) {
   return vec(a.x * c - a.y * s, a.x * s + a.y * c);
 }
 
-function refractiveIndexOf(spec) {
+function refractiveIndexOf(spec, forcedIndexFor) {
+  if (forcedIndexFor && spec.id === forcedIndexFor.specId) return forcedIndexFor.n;
   const mat = materialOf(spec.material);
   return mat.refractiveIndex || null;
+}
+
+function isGlassTriangle(spec) {
+  return spec.type === "triangle" && materialOf(spec.material).refractiveIndex != null;
 }
 
 // Refract direction `d` (unit, incoming) at a surface with outward normal
@@ -102,12 +129,49 @@ function hitBox(o, d, spec) {
   return { t: hit.t, point, normal: norm(normal) };
 }
 
+// Ray (already in the polygon's local space) vs. each of its edges — the
+// nearest valid crossing, with that edge's own perpendicular as the normal
+// (refract()/reflectOffMirror() self-correct which way "outward" is, via
+// their own dot-product sign check, so winding order doesn't matter here).
+function hitLocalPolygon(o, d, points) {
+  let best = null;
+  const n = points.length;
+  for (let i = 0; i < n; i++) {
+    const a = points[i], b = points[(i + 1) % n];
+    const edge = sub(b, a);
+    const denom = d.x * edge.y - d.y * edge.x;
+    if (Math.abs(denom) < 1e-9) continue;
+    const qp = sub(a, o);
+    const t = (qp.x * edge.y - qp.y * edge.x) / denom;
+    const u = (qp.x * d.y - qp.y * d.x) / denom;
+    if (t > EPS && u >= 0 && u <= 1 && (!best || t < best.t)) {
+      best = { t, edge };
+    }
+  }
+  return best;
+}
+
+function hitTriangle(o, d, spec) {
+  const angle = (spec.rotation || 0) * Math.PI / 180;
+  const localO = rotate(sub(o, vec(spec.x, spec.y)), -angle);
+  const localD = rotate(d, -angle);
+  const pts = trianglePoints(spec.width ?? spec.size ?? 130, spec.height);
+  const hit = hitLocalPolygon(localO, localD, pts);
+  if (!hit) return null;
+  const point = add(o, scale(d, hit.t));
+  const normal = norm(rotate(vec(hit.edge.y, -hit.edge.x), angle));
+  return { t: hit.t, point, normal };
+}
+
 function shapeHit(o, d, spec) {
   if (spec.type === "ball" || spec.type === "bomb" || spec.type === "peg" || spec.type === "ballBearing" || spec.type === "magnet") {
     return hitCircle(o, d, vec(spec.x, spec.y), spec.radius);
   }
   if (spec.type === "board" || spec.type === "button" || spec.type === "springPad") {
     return hitBox(o, d, spec);
+  }
+  if (spec.type === "triangle") {
+    return hitTriangle(o, d, spec);
   }
   return null;
 }
@@ -152,7 +216,9 @@ function bendThroughLens(o, d, lens) {
 // Trace every light source's rays through the given specs (edit-mode
 // blueprint or live play-mode render items — either works, both just need
 // x/y/rotation/width/height/radius/material). Returns an array of
-// polylines: [{x,y}, {x,y}, ...] per ray.
+// { points: [{x,y}, ...], color } — most rays share one default color, but
+// a ray that passes through a glass Triangle comes back as several
+// separately-colored rays (see traceOneRay's prismIds / dispersionBands).
 export function traceLightRays(specs, worldBounds) {
   const sources = specs.filter((s) => s.type === "lightSource");
   const obstacles = specs.filter((s) => s.type !== "lightSource" && s.type !== "lens" && s.type !== "mirror");
@@ -168,22 +234,36 @@ export function traceLightRays(specs, worldBounds) {
     for (let i = 0; i < n; i++) {
       const offset = n === 1 ? 0 : (i / (n - 1) - 0.5) * src.beamWidth;
       const origin = add(vec(src.x, src.y), scale(perp, offset));
-      rays.push(traceOneRay(origin, dir0, obstacles, lenses, mirrors, worldBounds));
+
+      // First pass at the plain glass index, just to find out whether this
+      // particular ray happens to pass through a glass triangle at all —
+      // most rays in most scenes never touch one, and re-tracing every ray
+      // six times over for a scene with no prism would be pure waste.
+      const probe = traceOneRay(origin, dir0, obstacles, lenses, mirrors, worldBounds);
+      if (!probe.prismId) {
+        rays.push({ points: probe.points, color: DEFAULT_RAY_COLOR });
+        continue;
+      }
+      for (const band of dispersionBands()) {
+        const dispersed = traceOneRay(origin, dir0, obstacles, lenses, mirrors, worldBounds, { specId: probe.prismId, n: band.n });
+        rays.push({ points: dispersed.points, color: band.color });
+      }
     }
   }
   return rays;
 }
 
-function traceOneRay(origin, dir, obstacles, lenses, mirrors, bounds) {
+function traceOneRay(origin, dir, obstacles, lenses, mirrors, bounds, forcedIndexFor = null) {
   const points = [origin];
   let o = origin, d = dir, medium = AIR_N;
   let insideId = null; // spec id of the shape we're currently inside, if any
+  let prismId = null; // first glass-triangle spec id this ray actually entered, if any
 
   for (let bounce = 0; bounce < MAX_BOUNCES; bounce++) {
     let nearest = null, nearestSpec = null, nearestIsLens = false, nearestIsMirror = false, nearestOpaque = false;
 
     for (const spec of obstacles) {
-      const n2 = refractiveIndexOf(spec);
+      const n2 = refractiveIndexOf(spec, forcedIndexFor);
       const hit = shapeHit(o, d, spec);
       if (hit && (!nearest || hit.t < nearest.t)) { nearest = hit; nearestSpec = spec; nearestIsLens = false; nearestIsMirror = false; nearestOpaque = !n2; }
     }
@@ -221,7 +301,9 @@ function traceOneRay(origin, dir, obstacles, lenses, mirrors, bounds) {
       continue;
     }
 
-    const n2 = refractiveIndexOf(nearestSpec);
+    if (prismId == null && insideId !== nearestSpec.id && isGlassTriangle(nearestSpec)) prismId = nearestSpec.id;
+
+    const n2 = refractiveIndexOf(nearestSpec, forcedIndexFor);
     const enteringNow = insideId !== nearestSpec.id;
     const { dir: newDir, tir } = refract(d, nearest.normal, medium, enteringNow ? n2 : AIR_N);
     d = newDir;
@@ -232,5 +314,5 @@ function traceOneRay(origin, dir, obstacles, lenses, mirrors, bounds) {
     }
   }
 
-  return points;
+  return { points, prismId };
 }

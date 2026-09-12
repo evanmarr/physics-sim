@@ -5,7 +5,7 @@
 
 const STEPS = [
   {
-    text: "Welcome to Continuum! Let's take a real, hands-on tour of everything each section can do — this takes a few minutes but covers the whole app. Click Physics to start.",
+    text: "Welcome to Kinetic! Let's take a real, hands-on tour of everything each section can do — this takes a few minutes but covers the whole app. Click Physics to start.",
     target: "#mode-physics-btn",
     advance: { type: "click", selector: "#mode-physics-btn" },
   },

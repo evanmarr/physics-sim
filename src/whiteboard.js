@@ -93,7 +93,10 @@ export class WhiteboardMode {
 
     let tool = tools[0];
     let color = colors[0];
-    let size = defaultSize;
+    // Each tool remembers its own brush size — maxing out the Eraser and
+    // then switching to Pencil must not carry that size over (and vice
+    // versa), so this is a map keyed by tool id, not one shared variable.
+    const sizes = Object.fromEntries(tools.map((t) => [t, defaultSize]));
 
     const toolRow = document.createElement("div");
     toolRow.className = "wb-tool-row";
@@ -106,6 +109,7 @@ export class WhiteboardMode {
       btn.addEventListener("click", () => {
         tool = t;
         for (const [id, b] of Object.entries(toolButtons)) b.classList.toggle("active", id === tool);
+        sizeSlider.value = String(sizes[tool]);
       });
       toolButtons[t] = btn;
       toolRow.appendChild(btn);
@@ -147,7 +151,7 @@ export class WhiteboardMode {
     sizeSlider.min = "1";
     sizeSlider.max = "60";
     sizeSlider.value = String(defaultSize);
-    sizeSlider.addEventListener("input", () => { size = parseFloat(sizeSlider.value); });
+    sizeSlider.addEventListener("input", () => { sizes[tool] = parseFloat(sizeSlider.value); });
     sizeRow.appendChild(sizeSlider);
     const undoBtn = document.createElement("button");
     undoBtn.textContent = "↶ Undo";
@@ -224,7 +228,7 @@ export class WhiteboardMode {
     const drawSegment = (x0, y0, x1, y1) => {
       ctx.globalCompositeOperation = tool === "eraser" ? "destination-out" : "source-over";
       ctx.strokeStyle = color;
-      ctx.lineWidth = size;
+      ctx.lineWidth = sizes[tool];
       ctx.lineCap = "round";
       ctx.lineJoin = "round";
       ctx.beginPath();

@@ -30,7 +30,7 @@ export function showPrompt(isChange = false) {
   overlay.className = "device-prompt-overlay";
   overlay.innerHTML = `
     <div class="device-prompt-box">
-      <h2>${isChange ? "Change device mode" : "Welcome to Continuum"}</h2>
+      <h2>${isChange ? "Change device mode" : "Welcome to Kinetic"}</h2>
       <p>Are you on a mobile device or a computer? This just resizes buttons and controls for touch — everything still works the same either way.</p>
       <div class="device-prompt-actions">
         <button class="primary" data-mode="mobile">📱 Mobile device</button>

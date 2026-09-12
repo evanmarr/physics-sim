@@ -53,6 +53,12 @@ export function renderPanel(container, spec, state, handlers) {
   if (fields.includes("radius")) {
     container.appendChild(sliderField("Radius", spec.radius, 6, 90, 1, (v) => set({ radius: v }), null, distScale, distUnit));
   }
+  if (fields.includes("holeRatio")) {
+    container.appendChild(sliderField("Center Hole", spec.holeRatio ?? 0, 0, 0.85, 0.01, (v) => set({ holeRatio: v })));
+    container.appendChild(helpText(
+      "0 is a normal solid ball. Turning this up opens a real hole through the middle — the physical collision shape has the hole too, so a small enough object can actually pass through it, not just look like it can."
+    ));
+  }
   if (fields.includes("width") || fields.includes("height")) {
     container.appendChild(fieldRow([
       fields.includes("width") ? sliderField("Width", spec.width, 10, 600, 5, (v) => set({ width: v }), null, distScale, distUnit) : null,
@@ -66,6 +72,11 @@ export function renderPanel(container, spec, state, handlers) {
     // material's default density too. So this one field needs a real
     // re-render after the patch, not just the state write.
     container.appendChild(materialField(spec.material, (v) => { set({ material: v }); renderPanel(container, spec, state, handlers); }));
+    if (spec.type === "triangle" && spec.material === "glass") {
+      container.appendChild(helpText(
+        "A glass Triangle acts as a real prism in Light Mode: it splits white light into a spectrum using real (if exaggerated for visibility) wavelength-dependent refraction — each color band bends by a slightly different amount, the same reason a real prism disperses light — not a painted rainbow effect. Rotate it to change how the spectrum spreads out."
+      ));
+    }
     // Weight is just density with a friendlier name — mass = density × area,
     // so at a fixed size this is exactly the knob that changes how much
     // force it takes to move or stop the object. Overrides the material's
