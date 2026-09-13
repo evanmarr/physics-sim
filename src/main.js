@@ -18,13 +18,15 @@ import { SoundMode } from "./sound.js";
 import { SustainabilityMode } from "./sustainability.js";
 import { traceLightRays } from "./lightOptics.js";
 import { openQuiz } from "./quiz.js";
-import { initAuthUI, openSavesPanel, sendFeedback, fetchCommunitySimById } from "./auth.js";
+import { initAuthUI, openSavesPanel, sendFeedback, fetchCommunitySimById, verifyUnlockCode } from "./auth.js";
 import { initClassroomUI } from "./classroom.js";
 import { initDashboardUI, registerShareApplier } from "./dashboard.js";
+import { initAdminUI } from "./admin.js";
+import { initOnboarding } from "./onboarding.js";
 import { initTutorial } from "./tutorial.js";
 import { initDeviceMode, showPrompt as showDeviceModePrompt } from "./deviceMode.js";
 import { toggleUnitSystem, distanceUnitSuffix, weightUnitSuffix, gridSquareInUnits } from "./units.js";
-import { confirmPopup, alertPopup } from "./popup.js";
+import { confirmPopup, alertPopup, promptPopup } from "./popup.js";
 import { startLoadingAnimation, finishLoading } from "./loading.js";
 import { generateSnapshot } from "./snapshot.js";
 
@@ -40,6 +42,12 @@ const state = {
   lightMode: false,
   showMagneticField: false,
   grabToolActive: false,
+  grabShape: "ball",
+  // Set whenever a world is loaded from somewhere that could carry a
+  // publish-time lock code (My Worlds, Community Sims Open, a shared link)
+  // — see requestUnlock() and panel.js's Locked checkbox. Null means
+  // "nothing here is tied to any code," so Locked objects unlock for free.
+  worldLock: null,
   simSpeed: 1,
   multiSelectMode: false, // mobile-only: tapping objects adds to selection instead of replacing it
 };
@@ -64,11 +72,17 @@ let sustainabilityMode = null;
 // instead of collapsing to a zero-length default.
 function migrateRopeSpecs(objects) {
   for (const spec of objects) {
-    if (spec.type !== "rope" || spec.x2 != null) continue;
-    const rad = (spec.rotation || 0) * (Math.PI / 180);
-    const length = spec.length ?? 240;
-    spec.x2 = spec.x + Math.cos(rad) * length;
-    spec.y2 = spec.y + Math.sin(rad) * length;
+    if (spec.type !== "rope") continue;
+    if (spec.x2 == null) {
+      const rad = (spec.rotation || 0) * (Math.PI / 180);
+      const length = spec.length ?? 240;
+      spec.x2 = spec.x + Math.cos(rad) * length;
+      spec.y2 = spec.y + Math.sin(rad) * length;
+    }
+    // Rope is now rubber-only (see panel.js) — force any older save's rope
+    // back to rubber rather than leaving it stuck on a material the picker
+    // can no longer set.
+    spec.material = "rubber";
   }
 }
 
@@ -158,6 +172,7 @@ function boot() {
       if (state.playing || document.documentElement.dataset.device !== "mobile" || !clipboard?.length) return;
       showTouchMenu(clientX, clientY, [{ label: "Paste", onClick: () => pasteClipboardAt(worldX, worldY) }]);
     },
+    onLockedEditAttempt: () => showToast("Locked — uncheck Locked in the panel to edit"),
   });
   window._renderer = renderer;
 
@@ -308,12 +323,29 @@ function renderPanelUI() {
   renderPanel(document.getElementById("prop-panel"), spec, state, {
     onChange: (id, patch) => { patchObject(id, patch); },
     onDelete: (id) => { deleteObject(id); },
+    onUnlock: () => requestUnlock(),
     mathPanelOpen: state.mathPanelOpen,
     onOpenMath: () => { state.mathPanelOpen = true; renderMathPanelUI(); renderPanelUI(); },
   });
   renderMathPanelUI();
   const joinBtn = document.getElementById("join-btn");
   if (joinBtn) joinBtn.disabled = state.selectedIds.size < 2 || state.playing;
+}
+
+// The one path that clears a Locked checkbox — free when this world was
+// never tied to a publish-time code (state.worldLock is null/hasLock false),
+// otherwise prompts for the 6-digit code once per world-load and remembers
+// a correct entry for the rest of the session (state.worldLock.verified).
+async function requestUnlock() {
+  if (!state.worldLock?.hasLock) return true;
+  if (state.worldLock.verified) return true;
+  const code = await promptPopup("Enter the 6-digit code to unlock objects in this world:", { title: "Locked", placeholder: "123456", maxLength: 6 });
+  if (code === null) return false;
+  if (!/^\d{6}$/.test(code.trim())) { await alertPopup("Enter exactly 6 digits.", { title: "Invalid code" }); return false; }
+  const result = await verifyUnlockCode(state.worldLock.kind, state.worldLock.id, code.trim());
+  if (!result?.ok) { await alertPopup("That code isn't right.", { title: "Couldn't unlock" }); return false; }
+  state.worldLock.verified = true;
+  return true;
 }
 
 function renderMathPanelUI() {
@@ -330,6 +362,8 @@ function renderMathPanelUI() {
 }
 
 function deleteObject(id) {
+  const spec = state.objects.find((o) => o.id === id);
+  if (spec?.locked) { showToast("Locked — uncheck Locked in the panel to edit"); return; }
   pushUndoNow();
   state.objects = state.objects.filter((o) => o.id !== id);
   state.objects.forEach((o) => { if (o.targetId === id) o.targetId = null; });
@@ -348,6 +382,7 @@ const JOIN_INCOMPATIBLE_TYPES = new Set(["rope", "wire"]);
 function joinSelected() {
   if (state.selectedIds.size < 2 || state.playing) return;
   const specs = state.objects.filter((o) => state.selectedIds.has(o.id));
+  if (specs.some((o) => o.locked)) { showToast("Locked — uncheck Locked in the panel to edit"); return; }
   const bad = specs.filter((o) => JOIN_INCOMPATIBLE_TYPES.has(o.type));
   if (bad.length) {
     const labels = [...new Set(bad.map((o) => OBJECT_DEFS[o.type].label))].join(", ");
@@ -365,8 +400,10 @@ function joinSelected() {
 
 function deleteSelected() {
   if (!state.selectedIds.size) return;
+  const locked = state.objects.filter((o) => state.selectedIds.has(o.id) && o.locked);
+  const ids = new Set([...state.selectedIds].filter((id) => !locked.some((o) => o.id === id)));
+  if (!ids.size) { showToast("Locked — uncheck Locked in the panel to edit"); return; }
   pushUndoNow();
-  const ids = state.selectedIds;
   state.objects = state.objects.filter((o) => !ids.has(o.id));
   state.objects.forEach((o) => { if (o.targetId && ids.has(o.targetId)) o.targetId = null; });
   state.selectedIds = new Set();
@@ -374,6 +411,7 @@ function deleteSelected() {
   renderAll();
   renderPanelUI();
   scheduleSave();
+  if (locked.length) showToast(`Deleted ${ids.size} — ${locked.length} locked object${locked.length === 1 ? "" : "s"} skipped`);
 }
 
 // ---- Cannon predicted-trajectory preview ----
@@ -520,7 +558,7 @@ async function _openSharedSimFromUrl() {
   try {
     const sim = await fetchCommunitySimById(id);
     if (!sim) { showToast("That shared sim couldn't be found — it may have been unpublished."); return; }
-    if (sim.kind === "worlds") { window._setMode("physics"); applyPhysicsWorldData(window._renderer, sim.data); }
+    if (sim.kind === "worlds") { window._setMode("physics"); applyPhysicsWorldData(window._renderer, sim.data, { kind: "community-sim", id: sim.id, hasLock: sim.hasLock }); }
     else if (sim.kind === "math-items") { window._setMode("mathematics"); mathematicsMode.applySavedData(sim.data); }
     showToast(`Opened "${sim.name}" by ${sim.creatorName}`);
   } catch {
@@ -528,7 +566,7 @@ async function _openSharedSimFromUrl() {
   }
 }
 
-function applyPhysicsWorldData(renderer, data) {
+function applyPhysicsWorldData(renderer, data, lockMeta = null) {
   if (state.playing) togglePlay(renderer);
   pushUndoNow();
   state.objects = dropRemovedTypes(data.objects || []);
@@ -540,6 +578,11 @@ function applyPhysicsWorldData(renderer, data) {
   state.selectedIds = new Set();
   state.selectedId = null;
   state.activeChallengeId = null;
+  // Each freshly-loaded world gets its own lock context — a code entered to
+  // unlock the previous world's objects shouldn't carry over and silently
+  // unlock this one's too.
+  state.worldLock = lockMeta ? { ...lockMeta, verified: false } : null;
+  renderer.fitToObjects(state.objects);
   renderAll();
   renderPanelUI();
   scheduleSave();
@@ -550,6 +593,10 @@ function wireTopbar(renderer) {
   playBtn.addEventListener("click", () => togglePlay(renderer));
   document.getElementById("reset-btn").addEventListener("click", () => resetPhysics(renderer));
   document.getElementById("grab-tool-btn").addEventListener("click", () => setGrabToolActive(!state.grabToolActive));
+  document.getElementById("grab-shape-select").addEventListener("change", (e) => {
+    state.grabShape = e.target.value;
+    if (state.grabToolActive && sim) { sim.disableGrabTool(); sim.enableGrabTool(state.grabShape); }
+  });
 
   const gravitySlider = document.getElementById("gravity-slider");
   const gravityVal = document.getElementById("gravity-val");
@@ -622,7 +669,7 @@ function wireTopbar(renderer) {
       title: "My Physics Worlds",
       itemNoun: "world",
       serialize: () => ({ objects: state.objects, gravity: state.gravity }),
-      apply: (data) => applyPhysicsWorldData(renderer, data),
+      apply: (data, lockMeta) => applyPhysicsWorldData(renderer, data, lockMeta),
       getSnapshot: () => generateSnapshot(state.objects),
     });
   });
@@ -633,6 +680,8 @@ function wireTopbar(renderer) {
   initAuthUI();
   initClassroomUI();
   initDashboardUI();
+  initAdminUI();
+  initOnboarding();
   initTutorial();
   document.getElementById("about-btn").addEventListener("click", () => document.getElementById("about-modal").classList.remove("hidden"));
   document.getElementById("about-close").addEventListener("click", () => document.getElementById("about-modal").classList.add("hidden"));
@@ -793,7 +842,7 @@ function togglePlay(renderer) {
     });
     sim.setTimeScale(state.simSpeed);
     sim.start();
-    if (state.grabToolActive) sim.enableGrabTool();
+    if (state.grabToolActive) sim.enableGrabTool(state.grabShape);
     state.playing = true;
     playBtn.textContent = "❚❚ Pause";
     playBtn.classList.add("playing");
@@ -829,7 +878,7 @@ function setGrabToolActive(active) {
   const svg = document.getElementById("canvas");
   window._renderer.setGrabActive(active);
   if (active) {
-    sim?.enableGrabTool();
+    sim?.enableGrabTool(state.grabShape);
     svg.addEventListener("pointerdown", onGrabPointerDown);
     svg.addEventListener("pointermove", onGrabPointerMove);
   } else {
@@ -1474,6 +1523,9 @@ function wireKeyboard(renderer) {
     } else if (e.code === "KeyR" && !cmd) {
       e.preventDefault();
       resetPhysics(renderer);
+    } else if (e.code === "KeyG" && !cmd) {
+      e.preventDefault();
+      setGrabToolActive(!state.grabToolActive);
     } else if ((e.code === "Delete" || e.code === "Backspace") && state.selectedIds.size && !state.playing) {
       e.preventDefault();
       deleteSelected();

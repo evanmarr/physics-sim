@@ -46,9 +46,24 @@ const WIND_PARTICLES_PER_SPAWN = 3; // a fan blows a wide stream, not a thin tri
 // uses the narrower BEARING_HOST_TYPES instead.
 const PIVOTABLE_HOST_TYPES = new Set(["board", "triangle", "ball", "bomb", "ballBearing", "peg", "magnet"]);
 const WIRE_SNAP_DIST = 22; // world units — how close a wire's end needs to be to a button/bomb/cannon to link them
-const RING_SEGMENTS = 14; // wedges approximating a Ball's donut collision shape — see _ringParts
+// Wedges approximating a Ball's donut collision shape — see _ringParts. Too
+// few segments (this used to be 14) makes each wedge's outer edge a
+// noticeably flat chord instead of a near-tangent to the true circle, so a
+// holed ball resting on the ground gets 2-3 simultaneous wedge/ground
+// contacts with slightly different normals fighting each other — the
+// visible symptom was the ball's spin randomly reversing/jittering forever
+// instead of settling, since it could never find one stable, unambiguous
+// contact the way a true circle (or a high-segment polygon) does.
+const RING_SEGMENTS = 32;
 const FIXED_CATEGORY = 0x0002; // collision category for every static/fixed body — see enableGrabTool
 const BEARING_HOST_TYPES = new Set(["board", "triangle", "ball", "bomb"]);
+// What the Grab Tool's pointer body can emulate — see enableGrabTool. A
+// `radius` shape is a circle; anything else is a rectangle.
+export const GRAB_SHAPES = {
+  ball: { radius: 18 },
+  square: { width: 40, height: 40 },
+  board: { width: 110, height: 24 },
+};
 
 export class PhysicsSim {
   constructor(specs, gravity, callbacks) {
@@ -1134,10 +1149,11 @@ export class PhysicsSim {
   // walls/floors could trap in a corner would make the tool worse, not
   // better, since those are exactly the kind of boundary you want to be
   // able to reach through to grab something on the other side.
-  enableGrabTool(radius = 18) {
+  enableGrabTool(shape = "ball") {
     if (this.grabBody) return;
     const pos = this.grabTarget || { x: 0, y: 0 };
-    this.grabBody = Bodies.circle(pos.x, pos.y, radius, {
+    const dims = GRAB_SHAPES[shape] || GRAB_SHAPES.ball;
+    const bodyOpts = {
       label: "grabTool",
       density: 0.025,
       friction: 0.05,
@@ -1146,12 +1162,15 @@ export class PhysicsSim {
       plugin: {
         gameId: makeId("grabTool"),
         // "cursor" is a dedicated render type (see render.js's updateShape)
-        // — an outline-only circle, not styled like any real material, so
+        // — an outline-only shape, not styled like any real material, so
         // it always reads as "this is your pointer" rather than another
         // object sitting in the scene.
-        render: { type: "cursor", radius },
+        render: { type: "cursor", shape: dims.radius ? "circle" : "rect", ...dims },
       },
-    });
+    };
+    this.grabBody = dims.radius
+      ? Bodies.circle(pos.x, pos.y, dims.radius, bodyOpts)
+      : Bodies.rectangle(pos.x, pos.y, dims.width, dims.height, bodyOpts);
     this.grabBody.collisionFilter.mask = 0xFFFFFFFF & ~FIXED_CATEGORY;
     this.grabConstraint = Constraint.create({
       pointA: { x: pos.x, y: pos.y },
@@ -1321,7 +1340,7 @@ export class PhysicsSim {
         // translate()+rotate() transform apply that same angle a *second*
         // time on top, visibly turning e.g. a vertical track horizontal.
         rotation: isFlexEndpoint ? 0 : body.angle * DEG,
-        width: r.width, height: r.height, radius: r.radius,
+        width: r.width, height: r.height, radius: r.radius, shape: r.shape,
         material: r.material,
         holeRatio: r.holeRatio,
         fixed: body.isStatic,

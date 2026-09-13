@@ -547,6 +547,18 @@ button:disabled { opacity: .4; cursor: default; }
 .auth-error.auth-notice { color: var(--good); }
 #auth-code { font-size: 22px; letter-spacing: .3em; text-align: center; }
 
+#onboarding-modal-box { width: 420px; max-width: 92vw; }
+.onboarding-progress { display: flex; gap: 6px; margin-bottom: 14px; }
+.onboarding-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--border); }
+.onboarding-dot.active { background: var(--accent); }
+.onboarding-dot.done { background: var(--good); }
+.onboarding-options { display: flex; flex-direction: column; gap: 8px; margin: 14px 0; }
+.onboarding-option { text-align: left; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-alt); }
+.onboarding-option.selected { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, var(--panel-alt)); font-weight: 600; }
+.onboarding-actions { display: flex; align-items: center; justify-content: space-between; margin-top: 6px; }
+.onboarding-actions-right { display: flex; gap: 8px; }
+#onboarding-skip { color: var(--text-dim); background: none; border: none; }
+
 #saves-modal-box { width: 420px; max-width: 92vw; }
 #saves-modal-box:has(.community-card) { width: 640px; }
 .saves-new-row { display: flex; gap: 8px; align-items: flex-start; }
@@ -605,6 +617,11 @@ button:disabled { opacity: .4; cursor: default; }
 .water-layer { opacity: 0.82; }
 
 .world-object.selected > .shape { stroke: var(--accent) !important; stroke-width: 3px; }
+/* A padlock cue on any Locked object (see panel.js) — a dashed amber
+   outline reads as "protected" without needing its own icon layer, and
+   stays visible under the normal selection highlight too. */
+.world-object.locked > .shape { stroke-dasharray: 6 3 !important; stroke: #d9a441 !important; }
+.world-object.locked { cursor: not-allowed; }
 /* Rope keeps its own configured tube thickness even while selected —
    the generic 3px override above would otherwise thin a fat rope down to
    a spindly line the moment you click it. --rope-width is set inline by

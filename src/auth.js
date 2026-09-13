@@ -82,12 +82,30 @@ export const fetchCommunitySims = (kind) => api(`/community-sims${kind ? `?kind=
 export const fetchCommunitySimById = (id) => api(`/community-sims/${id}`).then((d) => d.sim);
 export const fetchFeaturedSims = () => api("/community-sims/featured").then((d) => d.sims);
 export const fetchMyFavoriteIds = () => api("/community-sims?mine=1").then((d) => d.favoriteIds).catch(() => []);
-export const publishCommunitySim = (kind, name, description, subject, data, snapshot) =>
-  api("/community-sims", { method: "POST", body: { kind, name, description, subject, data, snapshot } }).catch((e) => ({ error: e.message }));
+export const publishCommunitySim = (kind, name, description, subject, data, snapshot, lockCode) =>
+  api("/community-sims", { method: "POST", body: { kind, name, description, subject, data, snapshot, lockCode } }).catch((e) => ({ error: e.message }));
 export const remixCommunitySim = (id) => api(`/community-sims/${id}/remix`, { method: "POST" }).catch((e) => ({ error: e.message }));
 export const toggleFavoriteSim = (id) => api(`/community-sims/${id}/favorite`, { method: "POST" }).catch((e) => ({ error: e.message }));
 export const reportSim = (id) => api(`/community-sims/${id}/report`, { method: "POST" }).catch((e) => ({ error: e.message }));
 export const unpublishSim = (id) => api(`/community-sims/${id}`, { method: "DELETE" }).catch((e) => ({ error: e.message }));
+
+// Admin-only — the server itself checks ADMIN_EMAILS and 403s a non-admin,
+// this is just the client side of that same gate.
+export const fetchAdminCommunitySims = () => api("/admin/community-sims").then((d) => d.sims);
+
+// Onboarding quiz answers (src/onboarding.js) — writing them back through
+// api("/me")'s own shape keeps `user` in sync immediately, same as
+// title/subscribed changes elsewhere in this file.
+export const savePreferences = (preferences) =>
+  api("/preferences", { method: "POST", body: { preferences } }).then((u) => { setUser(u); return u; }).catch((e) => ({ error: e.message }));
+
+// Checks a Locked object's unlock code — see panel.js's Locked checkbox and
+// main.js's requestUnlock(). Never sees or stores the actual code/hash
+// itself; the server does the comparison and only says yes/no.
+export const verifyUnlockCode = (kind, id, code) =>
+  api("/unlock-code", { method: "POST", body: { kind, id, code } }).catch((e) => ({ error: e.message }));
+export const setSimFeatured = (id, featured) =>
+  api(`/community-sims/${id}/feature`, { method: "POST", body: { featured } }).catch((e) => ({ error: e.message }));
 
 // Works whether or not anyone is signed in — the server attaches the
 // session email automatically if there is one.
@@ -394,7 +412,7 @@ export async function openSavesPanel({ kind, title, itemNoun, serialize, apply, 
     });
     box.querySelectorAll(".saves-load").forEach((btn) => btn.addEventListener("click", () => {
       const item = items.find((it) => it.id === btn.dataset.id);
-      if (item) { apply(item.data); modal.classList.add("hidden"); }
+      if (item) { apply(item.data, { kind, id: item.id, hasLock: !!item.hasLock }); modal.classList.add("hidden"); }
     }));
     box.querySelectorAll(".saves-overwrite").forEach((btn) => btn.addEventListener("click", async () => {
       const item = items.find((it) => it.id === btn.dataset.id);
@@ -411,7 +429,27 @@ export async function openSavesPanel({ kind, title, itemNoun, serialize, apply, 
       const item = items.find((it) => it.id === btn.dataset.id);
       const description = await promptPopup("Describe this sim for the Community gallery (optional):", { title: "Publish to Community" });
       if (description === null) return; // cancelled
-      const result = await publishCommunitySim(kind, item.name, description, "", item.data, item.snapshot);
+
+      // Only Physics worlds have lockable objects (see panel.js) — a
+      // published world with any still carries real risk of a remixer
+      // undoing the careful setup, so offer a code before it goes public.
+      let lockCode = "";
+      const hasLockedObjects = kind === "worlds" && Array.isArray(item.data?.objects) && item.data.objects.some((o) => o.locked);
+      if (hasLockedObjects) {
+        while (true) {
+          const entered = await promptPopup(
+            "This world has locked objects. Set a 6-digit code others will need to unlock and edit them? Leave blank to publish with no protection.",
+            { title: "Protect locked objects", placeholder: "e.g. 482913", maxLength: 6 }
+          );
+          const trimmed = (entered ?? "").trim();
+          if (!trimmed) { lockCode = ""; break; }
+          if (!/^\d{6}$/.test(trimmed)) { await alertPopup("Enter exactly 6 digits, or leave it blank.", { title: "Invalid code" }); continue; }
+          lockCode = trimmed;
+          break;
+        }
+      }
+
+      const result = await publishCommunitySim(kind, item.name, description, "", item.data, item.snapshot, lockCode);
       if (result.error) { await alertPopup(result.error, { title: "Couldn't publish" }); return; }
       await alertPopup(`Published "${item.name}" to Community Sims.`, { title: "Published" });
     }));
@@ -457,7 +495,7 @@ export async function openSavesPanel({ kind, title, itemNoun, serialize, apply, 
   function wireCommunityActions(sims) {
     box.querySelectorAll(".community-open").forEach((btn) => btn.addEventListener("click", async () => {
       const full = await api(`/community-sims/${btn.dataset.id}`).catch(() => null);
-      if (full?.sim) { apply(full.sim.data); modal.classList.add("hidden"); }
+      if (full?.sim) { apply(full.sim.data, { kind: "community-sim", id: full.sim.id, hasLock: !!full.sim.hasLock }); modal.classList.add("hidden"); }
     }));
     box.querySelectorAll(".community-remix").forEach((btn) => btn.addEventListener("click", async () => {
       const result = await remixCommunitySim(btn.dataset.id);

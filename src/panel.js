@@ -32,6 +32,23 @@ export function renderPanel(container, spec, state, handlers) {
 
   const set = (patch) => handlers.onChange(spec.id, patch);
 
+  // Locking protects an object from drag/delete/panel edits everywhere else
+  // (render.js's drag behavior, main.js's delete handlers) — the checkbox
+  // here is the ONE way back out. Locking itself is always free; unlocking
+  // is free too UNLESS this world came from a published/remixed Community
+  // Sim that had a 6-digit code set on it, in which case handlers.onUnlock
+  // (wired in main.js) prompts for that code before it's allowed through.
+  container.appendChild(checkboxField(spec.locked ? "🔒 Locked" : "Locked (protect from editing)", spec.locked, async (checked) => {
+    if (checked) { set({ locked: true }); renderPanel(container, spec, state, handlers); return; }
+    const ok = await handlers.onUnlock(spec);
+    if (ok) set({ locked: false });
+    renderPanel(container, spec, state, handlers);
+  }));
+  if (spec.locked) {
+    container.appendChild(helpText("This object can't be moved, deleted, or edited while locked. Uncheck Locked above to change it."));
+    return;
+  }
+
   // Read once per render — switching units (see the topbar toggle) just
   // re-renders whatever panel is showing, so this always reflects the
   // current choice without the fields needing to watch it themselves.
@@ -71,7 +88,13 @@ export function renderPanel(container, spec, state, handlers) {
     // in sync, and the Weight slider below needs to pick up the new
     // material's default density too. So this one field needs a real
     // re-render after the patch, not just the state write.
-    container.appendChild(materialField(spec.material, (v) => { set({ material: v }); renderPanel(container, spec, state, handlers); }));
+    // A rope's tube rendering and physical behavior (see physics.js/render.js)
+    // was only ever tuned against rubber's own numbers — every other
+    // material's shatter/fluid/bounce behavior doesn't make sense stretched
+    // along a rope, so it's the one type this picker doesn't offer a choice
+    // for.
+    const materialOptions = spec.type === "rope" ? ["rubber"] : MATERIAL_LIST;
+    container.appendChild(materialField(spec.material, (v) => { set({ material: v }); renderPanel(container, spec, state, handlers); }, materialOptions));
     if (spec.type === "triangle" && spec.material === "glass") {
       container.appendChild(helpText(
         "A glass Triangle acts as a real prism in Light Mode: it splits white light into a spectrum using real (if exaggerated for visibility) wavelength-dependent refraction — each color band bends by a slightly different amount, the same reason a real prism disperses light — not a painted rainbow effect. Rotate it to change how the spectrum spreads out."
@@ -83,6 +106,12 @@ export function renderPanel(container, spec, state, handlers) {
     // own density until a different value is dragged in here again.
     const mat = materialOf(spec.material);
     container.appendChild(sliderField("Weight", spec.densityOverride ?? mat.density, 0.05, 15, 0.05, (v) => set({ densityOverride: v }), null, weightScale, weightUnit));
+    if (!mat.isFluid) {
+      // Same value physicsEdu.js's "e (restitution)" formula line edits —
+      // this is just a friendlier, more discoverable name/location for the
+      // exact same override, for anyone who never opens the math panel.
+      container.appendChild(sliderField("Flexibility (bounciness)", spec.restitutionOverride ?? mat.restitution, 0, 1, 0.02, (v) => set({ restitutionOverride: v })));
+    }
   }
   if (fields.includes("fixed")) {
     container.appendChild(checkboxField("Fixed (ignores gravity/forces)", spec.fixed, (v) => set({ fixed: v })));
@@ -324,7 +353,7 @@ function checkboxField(label, checked, onChange) {
   return wrap;
 }
 
-function materialField(current, onChange) {
+function materialField(current, onChange, options = MATERIAL_LIST) {
   const wrap = document.createElement("div");
   wrap.className = "field";
   const l = document.createElement("label");
@@ -332,7 +361,7 @@ function materialField(current, onChange) {
   wrap.appendChild(l);
   const row = document.createElement("div");
   row.className = "material-swatches";
-  MATERIAL_LIST.forEach((m) => {
+  options.forEach((m) => {
     const item = document.createElement("div");
     item.className = "material-option" + (m === current ? " selected" : "");
     item.title = materialOf(m).label;

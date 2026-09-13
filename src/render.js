@@ -393,6 +393,28 @@ export class Renderer {
     this.svg.call(this.zoom.transform, t);
   }
 
+  // Loading a save/remix/community-sim replaces state.objects wholesale, but
+  // the camera's pan/zoom is whatever the user last left it at — which can
+  // easily put the new content entirely outside the viewport (looking
+  // exactly like "nothing loaded"). Recenter on the loaded objects' actual
+  // bounding box instead of leaving the stale camera in place.
+  fitToObjects(objects) {
+    if (!objects || !objects.length) { this.centerOn(0, WORLD.groundY - 300, 0.7); return; }
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    for (const o of objects) {
+      const halfW = (o.width ?? o.radius * 2 ?? 60) / 2;
+      const halfH = (o.height ?? o.radius * 2 ?? 60) / 2;
+      minX = Math.min(minX, o.x - halfW); maxX = Math.max(maxX, o.x + halfW);
+      minY = Math.min(minY, o.y - halfH); maxY = Math.max(maxY, o.y + halfH);
+    }
+    const rect = this.svg.node().getBoundingClientRect();
+    const pad = 150;
+    const w = Math.max(maxX - minX, 200) + pad * 2;
+    const h = Math.max(maxY - minY, 200) + pad * 2;
+    const scale = Math.max(0.25, Math.min(2.5, Math.min(rect.width / w, rect.height / h, 1.2)));
+    this.centerOn((minX + maxX) / 2, (minY + maxY) / 2, scale);
+  }
+
   screenToWorld(clientX, clientY) {
     const rect = this.svg.node().getBoundingClientRect();
     const [x, y] = this.zoomTransform.invert([clientX - rect.left, clientY - rect.top]);
@@ -438,6 +460,7 @@ export class Renderer {
     merged
       .classed("selected", (d) => selectedIds.has(d.id))
       .classed("fixed", (d) => d.fixed)
+      .classed("locked", (d) => !!d.locked)
       .attr("transform", (d) => `translate(${d.x},${d.y}) rotate(${d.rotation || 0})`)
       .style("cursor", editable ? "grab" : "default")
       .style("opacity", (d) => d.opacity ?? 1);
@@ -448,11 +471,11 @@ export class Renderer {
     this.objectLayer.selectAll(".rotate-handle").remove();
     if (editable && selectedId) {
       const d = items.find((it) => it.id === selectedId);
-      if (d && !d.transient && ROTATABLE.has(d.type)) {
+      if (d && !d.transient && !d.locked && ROTATABLE.has(d.type)) {
         this._addRotateHandle(d);
       }
     } else if (editable && selectedIds.size > 1) {
-      const group = items.filter((it) => selectedIds.has(it.id) && !it.transient && ROTATABLE.has(it.type));
+      const group = items.filter((it) => selectedIds.has(it.id) && !it.transient && !it.locked && ROTATABLE.has(it.type));
       if (group.length > 1) this._addGroupRotateHandle(group);
     }
 
@@ -574,8 +597,17 @@ export class Renderer {
         } else {
           group = [{ node: this, d }];
         }
+        // A Locked object (see panel.js) can't be dragged at all — if ANY
+        // object in the drag group is locked, refuse the whole gesture
+        // rather than silently moving just the unlocked ones out from under
+        // a mixed selection.
+        if (group.some(({ d: dd }) => dd.locked)) {
+          self.handlers.onLockedEditAttempt?.();
+          group = null;
+        }
       })
       .on("drag", (event) => {
+        if (!group) return;
         moved = true;
         for (const { node, d: dd } of group) {
           dd.x += event.dx;
@@ -589,7 +621,7 @@ export class Renderer {
         }
       })
       .on("end", () => {
-        if (moved) {
+        if (moved && group) {
           self.handlers.onMoveMany(group.map(({ d: dd }) => ({
             id: dd.id, x: snap(dd.x), y: snap(dd.y),
             ...(FLEXIBLE_ENDPOINT_TYPES.has(dd.type) && dd.x2 != null ? { x2: snap(dd.x2), y2: snap(dd.y2) } : {}),
@@ -668,9 +700,12 @@ function buildShape(g, d) {
       g.append("path").attr("class", "shape").attr("fill-rule", "evenodd");
       break;
     case "bomb":
-    case "cursor":
       g.append("circle").attr("class", "shape").attr("r", d.radius);
-      if (d.type === "bomb") g.append("text").attr("class", "icon-label").text("💣").attr("text-anchor", "middle").attr("dy", 5).attr("font-size", d.radius);
+      g.append("text").attr("class", "icon-label").text("💣").attr("text-anchor", "middle").attr("dy", 5).attr("font-size", d.radius);
+      break;
+    case "cursor":
+      if (d.shape === "rect") g.append("rect").attr("class", "shape");
+      else g.append("circle").attr("class", "shape").attr("r", d.radius);
       break;
     case "wheel": {
       g.append("circle").attr("class", "shape").attr("r", d.radius);
@@ -798,13 +833,17 @@ function updateShape(g, d, editable) {
   // stroke) so it always reads as "this is your cursor," never as another
   // physics item sitting in the scene.
   if (d.type === "cursor") {
-    g.select(".shape")
+    const shape = g.select(".shape")
       .attr("fill", "none")
       .attr("fill-opacity", 0)
       .attr("stroke", "var(--accent)")
       .attr("stroke-width", 3)
-      .attr("stroke-dasharray", null)
-      .attr("r", d.radius);
+      .attr("stroke-dasharray", null);
+    if (d.shape === "rect") {
+      shape.attr("x", -d.width / 2).attr("y", -d.height / 2).attr("width", d.width).attr("height", d.height);
+    } else {
+      shape.attr("r", d.radius);
+    }
     return;
   }
 

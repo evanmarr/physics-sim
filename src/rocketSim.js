@@ -114,6 +114,7 @@ export class RocketSimMode {
     this.throttle = 100;
     this.activeChallenge = null;
     this.ghost = null; // { altitude: [...], time: [...] } from the previous flight
+    this.viewZoom = 1; // user-controlled multiplier on top of the auto-fit camera — see _renderCanvas
     this._resetFlight();
     this._build();
   }
@@ -455,6 +456,36 @@ export class RocketSimMode {
     this.canvas.style.borderRadius = "8px";
     wrap.appendChild(this.canvas);
 
+    // Scroll/pinch to zoom in on the trajectory canvas — layered on top of
+    // the auto-fit camera in _renderCanvas rather than replacing it, so
+    // "Reset View" can always get back to a sane default.
+    this.canvas.addEventListener("wheel", (e) => {
+      e.preventDefault();
+      const factor = Math.exp(-e.deltaY * 0.001);
+      this.viewZoom = Math.max(0.2, Math.min(30, this.viewZoom * factor));
+      this._renderCanvas();
+    }, { passive: false });
+
+    const zoomRow = div("chem-hint");
+    zoomRow.style.display = "flex";
+    zoomRow.style.gap = "6px";
+    zoomRow.style.marginTop = "6px";
+    const zoomOutBtn = document.createElement("button");
+    zoomOutBtn.textContent = "−";
+    zoomOutBtn.title = "Zoom out";
+    zoomOutBtn.addEventListener("click", () => { this.viewZoom = Math.max(0.2, this.viewZoom / 1.5); this._renderCanvas(); });
+    const zoomInBtn = document.createElement("button");
+    zoomInBtn.textContent = "+";
+    zoomInBtn.title = "Zoom in";
+    zoomInBtn.addEventListener("click", () => { this.viewZoom = Math.min(30, this.viewZoom * 1.5); this._renderCanvas(); });
+    const zoomResetBtn = document.createElement("button");
+    zoomResetBtn.textContent = "Reset View";
+    zoomResetBtn.addEventListener("click", () => { this.viewZoom = 1; this._renderCanvas(); });
+    zoomRow.appendChild(zoomOutBtn);
+    zoomRow.appendChild(zoomInBtn);
+    zoomRow.appendChild(zoomResetBtn);
+    wrap.appendChild(zoomRow);
+
     this.graphCanvas = document.createElement("canvas");
     this.graphCanvas.width = 560;
     this.graphCanvas.height = 100;
@@ -496,7 +527,7 @@ export class RocketSimMode {
     // "on the pad" all the way out to orbital altitude.
     const r = Math.hypot(this.x, this.y);
     const viewRadius = Math.max(body.radius * 1.15, r * 1.3);
-    const scale = (Math.min(w, h) / 2 - 10) / viewRadius;
+    const scale = ((Math.min(w, h) / 2 - 10) / viewRadius) * this.viewZoom;
     const cx = w / 2, cy = h / 2;
     const toScreen = (x, y) => ({ sx: cx + x * scale, sy: cy - y * scale });
 

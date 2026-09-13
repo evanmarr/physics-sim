@@ -113,6 +113,14 @@ export function ensureSchema() {
     -- above, since "IF NOT EXISTS" on CREATE TABLE never touches columns
     -- on a table that already exists.
     ALTER TABLE saved_items ADD COLUMN IF NOT EXISTS snapshot TEXT;
+    -- NULL until the onboarding quiz (src/onboarding.js) runs once, then
+    -- either the answers or {} if explicitly skipped — see setUserPreferences.
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS preferences JSONB;
+    -- Set only by remixing a Community Sim that itself had a lock code (see
+    -- community_sims.lock_code_hash below) — a plain save from your own
+    -- workspace never gets one. Never sent to a client; only compared
+    -- server-side by the /unlock-code route.
+    ALTER TABLE saved_items ADD COLUMN IF NOT EXISTS lock_code_hash TEXT;
     CREATE TABLE IF NOT EXISTS community_sims (
       id TEXT PRIMARY KEY,
       owner_email TEXT NOT NULL REFERENCES users(email) ON DELETE CASCADE,
@@ -126,9 +134,19 @@ export function ensureSchema() {
       created_at BIGINT NOT NULL,
       is_featured BOOLEAN NOT NULL DEFAULT false,
       unpublished BOOLEAN NOT NULL DEFAULT false,
-      remix_count INT NOT NULL DEFAULT 0
+      remix_count INT NOT NULL DEFAULT 0,
+      -- Set when the publisher chose a 6-digit code to protect this world's
+      -- Locked objects (see src/panel.js) — a hash, never the raw code.
+      -- Every public-facing read exposes only a hasLock boolean derived
+      -- from this; the hash itself only ever leaves the DB for the
+      -- server-side comparison in the /unlock-code route.
+      lock_code_hash TEXT
     );
     CREATE INDEX IF NOT EXISTS community_sims_public_idx ON community_sims(unpublished, kind);
+    -- community_sims already existed before locking was added, so the
+    -- column in its CREATE TABLE above never touches a database that
+    -- already has the table — same story as saved_items.lock_code_hash.
+    ALTER TABLE community_sims ADD COLUMN IF NOT EXISTS lock_code_hash TEXT;
     CREATE TABLE IF NOT EXISTS sim_favorites (
       user_email TEXT NOT NULL REFERENCES users(email) ON DELETE CASCADE,
       sim_id TEXT NOT NULL REFERENCES community_sims(id) ON DELETE CASCADE,
@@ -168,6 +186,14 @@ export async function setUserSubscribed(email, subscribed) {
   await query("UPDATE users SET subscribed = $2 WHERE email = $1", [email, subscribed]);
 }
 
+// null = never been through onboarding yet (see src/onboarding.js); {} =
+// explicitly skipped it. Either way, `preferences` is a plain object of
+// whatever the quiz's questions currently are, so adding/removing a
+// question later never needs a migration.
+export async function setUserPreferences(email, preferences) {
+  await query("UPDATE users SET preferences = $2 WHERE email = $1", [email, JSON.stringify(preferences)]);
+}
+
 // ---------- sessions ----------
 
 export async function createSessionRow(token, email, expires) {
@@ -186,8 +212,8 @@ export async function deleteSession(token) {
 // ---------- saved items (worlds / mathItems / cities) ----------
 
 export async function listSavedItems(email, kind) {
-  const rows = await query("SELECT id, name, data, snapshot, updated_at FROM saved_items WHERE email = $1 AND kind = $2 ORDER BY updated_at DESC", [email, kind]);
-  return rows.map((r) => ({ id: r.id, name: r.name, data: r.data, snapshot: r.snapshot, updatedAt: Number(r.updated_at) }));
+  const rows = await query("SELECT id, name, data, snapshot, updated_at, lock_code_hash FROM saved_items WHERE email = $1 AND kind = $2 ORDER BY updated_at DESC", [email, kind]);
+  return rows.map((r) => ({ id: r.id, name: r.name, data: r.data, snapshot: r.snapshot, updatedAt: Number(r.updated_at), hasLock: !!r.lock_code_hash }));
 }
 
 export async function countSavedItems(email, kind) {
@@ -195,8 +221,8 @@ export async function countSavedItems(email, kind) {
   return rows[0].n;
 }
 
-export async function insertSavedItem(id, email, kind, name, data, updatedAt, snapshot) {
-  await query("INSERT INTO saved_items (id, email, kind, name, data, updated_at, snapshot) VALUES ($1, $2, $3, $4, $5, $6, $7)", [id, email, kind, name, JSON.stringify(data), updatedAt, snapshot || null]);
+export async function insertSavedItem(id, email, kind, name, data, updatedAt, snapshot, lockCodeHash) {
+  await query("INSERT INTO saved_items (id, email, kind, name, data, updated_at, snapshot, lock_code_hash) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)", [id, email, kind, name, JSON.stringify(data), updatedAt, snapshot || null, lockCodeHash || null]);
 }
 
 export async function updateSavedItem(email, kind, id, name, data, updatedAt, snapshot) {
@@ -214,11 +240,11 @@ export async function deleteSavedItem(email, kind, id) {
 
 // ---------- community sims ----------
 
-export async function insertCommunitySim(id, ownerEmail, creatorName, kind, name, description, subject, data, snapshot, createdAt) {
+export async function insertCommunitySim(id, ownerEmail, creatorName, kind, name, description, subject, data, snapshot, createdAt, lockCodeHash) {
   await query(
-    `INSERT INTO community_sims (id, owner_email, creator_name, kind, name, description, subject, data, snapshot, created_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-    [id, ownerEmail, creatorName, kind, name, description, subject, JSON.stringify(data), snapshot || null, createdAt]
+    `INSERT INTO community_sims (id, owner_email, creator_name, kind, name, description, subject, data, snapshot, created_at, lock_code_hash)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+    [id, ownerEmail, creatorName, kind, name, description, subject, JSON.stringify(data), snapshot || null, createdAt, lockCodeHash || null]
   );
 }
 
@@ -234,7 +260,7 @@ export async function listCommunitySims({ kind, subject, featuredOnly } = {}) {
   if (featuredOnly) conditions.push("is_featured = true");
   const rows = await query(
     `SELECT c.id, c.owner_email, c.creator_name, c.kind, c.name, c.description, c.subject, c.snapshot,
-            c.created_at, c.is_featured, c.remix_count,
+            c.created_at, c.is_featured, c.remix_count, c.lock_code_hash,
             (SELECT count(*)::int FROM sim_favorites f WHERE f.sim_id = c.id) AS favorite_count
      FROM community_sims c
      WHERE ${conditions.join(" AND ")}
@@ -244,7 +270,7 @@ export async function listCommunitySims({ kind, subject, featuredOnly } = {}) {
   return rows.map((r) => ({
     id: r.id, ownerEmail: r.owner_email, creatorName: r.creator_name, kind: r.kind, name: r.name,
     description: r.description, subject: r.subject, snapshot: r.snapshot, createdAt: Number(r.created_at),
-    isFeatured: r.is_featured, remixCount: r.remix_count, favoriteCount: r.favorite_count,
+    isFeatured: r.is_featured, remixCount: r.remix_count, favoriteCount: r.favorite_count, hasLock: !!r.lock_code_hash,
   }));
 }
 
@@ -255,8 +281,23 @@ export async function getCommunitySim(id) {
   return {
     id: r.id, ownerEmail: r.owner_email, creatorName: r.creator_name, kind: r.kind, name: r.name,
     description: r.description, subject: r.subject, data: r.data, snapshot: r.snapshot,
-    createdAt: Number(r.created_at), isFeatured: r.is_featured,
+    createdAt: Number(r.created_at), isFeatured: r.is_featured, hasLock: !!r.lock_code_hash,
   };
+}
+
+// Internal only — the raw hash never leaves the server (see the
+// /unlock-code route and remixCommunitySim, the only two callers).
+export async function getCommunitySimLockHash(id) {
+  const rows = await query("SELECT lock_code_hash FROM community_sims WHERE id = $1", [id]);
+  return rows[0]?.lock_code_hash || null;
+}
+
+// Looks up whichever table `kind` refers to — used only by the
+// /unlock-code route to verify a submitted code server-side.
+export async function getLockHash(kind, id) {
+  if (kind === "community-sim") return getCommunitySimLockHash(id);
+  const rows = await query("SELECT lock_code_hash FROM saved_items WHERE id = $1", [id]);
+  return rows[0]?.lock_code_hash || null;
 }
 
 export async function unpublishCommunitySim(id, ownerEmail) {
@@ -294,6 +335,26 @@ export async function reportSim(userEmail, simId) {
   await query("INSERT INTO sim_reports (user_email, sim_id, created_at) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING", [userEmail, simId, Date.now()]);
   const rows = await query("SELECT count(*)::int AS n FROM sim_reports WHERE sim_id = $1", [simId]);
   return rows[0].n;
+}
+
+// Admin-only listing: every published sim (any kind), with live report and
+// favorite counts, for the manual "Feature" curation pass — never exposed
+// to the public listing since it includes moderation data.
+export async function listCommunitySimsForAdmin() {
+  const rows = await query(
+    `SELECT c.id, c.owner_email, c.creator_name, c.kind, c.name, c.description, c.subject,
+            c.created_at, c.is_featured, c.remix_count,
+            (SELECT count(*)::int FROM sim_favorites f WHERE f.sim_id = c.id) AS favorite_count,
+            (SELECT count(*)::int FROM sim_reports r WHERE r.sim_id = c.id) AS report_count
+     FROM community_sims c
+     WHERE unpublished = false
+     ORDER BY c.created_at DESC`
+  );
+  return rows.map((r) => ({
+    id: r.id, ownerEmail: r.owner_email, creatorName: r.creator_name, kind: r.kind, name: r.name,
+    description: r.description, subject: r.subject, createdAt: Number(r.created_at),
+    isFeatured: r.is_featured, remixCount: r.remix_count, favoriteCount: r.favorite_count, reportCount: r.report_count,
+  }));
 }
 
 // ---------- classrooms ----------

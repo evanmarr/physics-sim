@@ -59,7 +59,13 @@ function clampPersonName(name) { return String(name ?? "").slice(0, MAX_NAME_LEN
 function clampName(name) { return String(name ?? "").slice(0, MAX_NAME_LEN).trim() || "Untitled"; }
 
 function publicUser(u) {
-  return { email: u.email, subscribed: !!u.subscribed, firstName: u.first_name || "", lastName: u.last_name || "", title: u.title || "independent" };
+  return {
+    email: u.email, subscribed: !!u.subscribed, firstName: u.first_name || "", lastName: u.last_name || "",
+    title: u.title || "independent", isAdmin: ADMIN_EMAILS.has(u.email),
+    // null = hasn't been through the onboarding quiz yet (see
+    // src/onboarding.js) — {} means they explicitly skipped it.
+    preferences: u.preferences ?? null,
+  };
 }
 
 // ---------- passwords ----------
@@ -360,9 +366,19 @@ async function shareItem(email, { kind, name, data, classroomCode, direction }) 
 const MAX_COMMUNITY_SIM_BYTES = 2 * 1024 * 1024;
 const MAX_DESCRIPTION_LEN = 400;
 
-async function publishCommunitySim(email, { kind, name, description, subject, data, snapshot }) {
+// The 6-digit unlock code (see src/panel.js's Locked checkbox) is hashed
+// before it ever touches the database — a plain sha256 is plenty here since
+// this is a lightweight "don't let a remixer casually break my setup"
+// feature, not account security, but there's still no reason to store or
+// transmit the raw digits when a hash does the same comparison job.
+function hashLockCode(code) {
+  return crypto.createHash("sha256").update(String(code)).digest("hex");
+}
+
+async function publishCommunitySim(email, { kind, name, description, subject, data, snapshot, lockCode }) {
   if (kind !== "worlds" && kind !== "math-items") return { error: "Can only publish Physics worlds or Mathematics items." };
   if (JSON.stringify(data ?? {}).length > MAX_COMMUNITY_SIM_BYTES) return { error: "That item is too large to publish." };
+  if (lockCode && !/^\d{6}$/.test(String(lockCode))) return { error: "The unlock code must be exactly 6 digits." };
   const user = await db.getUser(email);
   const creatorName = [user?.first_name, user?.last_name].filter(Boolean).join(" ") || email.split("@")[0];
   const sim = {
@@ -372,8 +388,9 @@ async function publishCommunitySim(email, { kind, name, description, subject, da
     data, snapshot: typeof snapshot === "string" ? snapshot.slice(0, 200000) : null,
     createdAt: Date.now(),
   };
-  await db.insertCommunitySim(sim.id, sim.ownerEmail, sim.creatorName, sim.kind, sim.name, sim.description, sim.subject, sim.data, sim.snapshot, sim.createdAt);
-  return { sim: { ...sim, data: undefined } };
+  const lockCodeHash = lockCode ? hashLockCode(lockCode) : null;
+  await db.insertCommunitySim(sim.id, sim.ownerEmail, sim.creatorName, sim.kind, sim.name, sim.description, sim.subject, sim.data, sim.snapshot, sim.createdAt, lockCodeHash);
+  return { sim: { ...sim, data: undefined, hasLock: !!lockCodeHash } };
 }
 
 // Remix = a real, independent copy in the caller's OWN saved items —
@@ -394,9 +411,13 @@ async function remixCommunitySim(email, simId) {
   const max = sim.kind === "worlds" ? MAX_WORLDS : MAX_MATH_ITEMS;
   if (count >= max) return { error: `You already have ${max} saved ${sim.kind === "worlds" ? "worlds" : "items"} — delete one first, then remix.` };
   const item = { id: crypto.randomUUID(), name: clampName(`${sim.name} (remix)`), data: sim.data, updatedAt: Date.now() };
-  await db.insertSavedItem(item.id, email, savedKind, item.name, item.data, item.updatedAt, sim.snapshot);
+  // Propagate the original's lock (if any) onto the remixed copy too — a
+  // remix is "your own editable copy" of the WORLD, not a bypass of
+  // whatever the creator chose to protect within it.
+  const lockCodeHash = await db.getCommunitySimLockHash(simId);
+  await db.insertSavedItem(item.id, email, savedKind, item.name, item.data, item.updatedAt, sim.snapshot, lockCodeHash);
   await db.incrementRemixCount(simId);
-  return { item };
+  return { item: { ...item, hasLock: !!lockCodeHash } };
 }
 
 // What shows up on a signed-in user's dashboard: items they're the
@@ -583,6 +604,19 @@ export async function handleApi(req, res, url) {
     return sendJson(res, 200, publicUser(await db.getUser(email)));
   }
 
+  // The onboarding quiz (src/onboarding.js) writes here once, whether
+  // finished or skipped ({} either way marks it done) — and again anytime
+  // afterward, since the answers stay editable from the account menu.
+  if (parts[1] === "preferences" && req.method === "POST") {
+    const body = await readJsonBody(req);
+    if (typeof body.preferences !== "object" || body.preferences === null || Array.isArray(body.preferences)) {
+      return sendJson(res, 400, { error: "Invalid preferences." });
+    }
+    if (JSON.stringify(body.preferences).length > 4000) return sendJson(res, 400, { error: "That's too much data." });
+    await db.setUserPreferences(email, body.preferences);
+    return sendJson(res, 200, publicUser(await db.getUser(email)));
+  }
+
   if (parts[1] === "classrooms") {
     if (parts.length === 2 && req.method === "GET") {
       return sendJson(res, 200, { teaching: await classroomsTaughtBy(email), joined: await classroomsJoinedBy(email) });
@@ -640,6 +674,34 @@ export async function handleApi(req, res, url) {
     if (parts.length === 2 && req.method === "GET" && url.searchParams.get("mine") === "1") {
       return sendJson(res, 200, { favoriteIds: await db.listFavoriteSimIds(email) });
     }
+  }
+
+  // Verifies a Locked object's 6-digit unlock code (see src/panel.js) —
+  // `kind` is "community-sim" for a Community Sims Open/shared link, or a
+  // saved_items kind ("worlds") for a world already remixed into someone's
+  // My Worlds. Same failed-attempt throttling as login, keyed per world so
+  // one bad guesser can't hammer it, and the response never reveals whether
+  // the world has a code at all — just whether this one matched.
+  if (parts[1] === "unlock-code" && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const kind = String(body.kind || "");
+    const id = String(body.id || "");
+    const code = String(body.code || "");
+    if (!id || !/^\d{6}$/.test(code)) return sendJson(res, 400, { error: "Enter a 6-digit code." });
+    const throttleKey = `unlock:${kind}:${id}`;
+    if (await isLockedOut(throttleKey)) return sendJson(res, 429, { error: "Too many attempts. Try again in a few minutes." });
+    const hash = await db.getLockHash(kind, id);
+    if (!hash || hashLockCode(code) !== hash) {
+      await recordFailedLogin(throttleKey);
+      return sendJson(res, 200, { ok: false });
+    }
+    await clearFailedLogins(throttleKey);
+    return sendJson(res, 200, { ok: true });
+  }
+
+  if (parts[1] === "admin" && parts[2] === "community-sims" && req.method === "GET") {
+    if (!ADMIN_EMAILS.has(email)) return sendJson(res, 403, { error: "Not allowed." });
+    return sendJson(res, 200, { sims: await db.listCommunitySimsForAdmin() });
   }
 
   if (parts[1] === "shared-items") {
@@ -720,6 +782,7 @@ if (isMainModule) {
     const url = new URL(req.url, `http://${req.headers.host}`);
     if (url.pathname.startsWith("/api/")) {
       handleApi(req, res, url).catch((err) => {
+        console.error("API error:", err);
         sendJson(res, err.status || 500, { error: err.status ? err.message : "Server error" });
       });
     } else {

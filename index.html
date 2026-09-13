@@ -61,6 +61,8 @@
       <button id="about-btn">About</button>
       <button id="classroom-btn">Classroom</button>
       <button id="dashboard-btn" class="hidden">Dashboard</button>
+      <button id="admin-btn" class="hidden">Admin</button>
+      <button id="preferences-btn" class="hidden">Preferences</button>
       <button id="title-btn" class="hidden" title="Click to change">Title: Independent</button>
       <button id="feedback-btn">Feedback</button>
       <button id="device-mode-btn">Device Mode</button>
@@ -78,7 +80,13 @@
       <span class="hint">space</span>
       <button id="reset-btn" title="Reset everything back to your blueprint (stays stopped)">Reset</button>
       <span class="hint">R</span>
-      <button id="grab-tool-btn" title="While playing, turns your pointer into a real object you can bump other things with">🖐 Grab Tool</button>
+      <button id="grab-tool-btn" title="Turns your pointer into a real object you can bump other things with, while playing (G)">🖐 Grab Tool</button>
+      <select id="grab-shape-select" title="What shape the grab tool emulates">
+        <option value="ball">Ball</option>
+        <option value="square">Square</option>
+        <option value="board">Board</option>
+      </select>
+      <span class="hint">G</span>
     </div>
     <div id="gravity-controls">
       <label>Gravity <span id="gravity-val">1.0</span>x</label>
@@ -191,6 +199,14 @@
 
 <div id="dashboard-modal" class="modal hidden">
   <div class="modal-box classroom-box" id="dashboard-modal-box"></div>
+</div>
+
+<div id="admin-modal" class="modal hidden">
+  <div class="modal-box classroom-box" id="admin-modal-box"></div>
+</div>
+
+<div id="onboarding-modal" class="modal hidden">
+  <div class="modal-box" id="onboarding-modal-box"></div>
 </div>
 
 <div id="popup-modal" class="modal hidden">

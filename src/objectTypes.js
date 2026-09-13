@@ -133,7 +133,7 @@ export const OBJECT_DEFS = {
     // stretches between wherever you leave them. Each end auto-pivots onto
     // whatever's there (like a ball bearing does), or hangs/swings free if
     // nothing's there.
-    defaultSpec: () => ({ type: "rope", x: 0, y: 0, x2: 0, y2: 240, thickness: 10, elasticity: 0.15, material: "wood", attachStartId: null, attachEndId: null }),
+    defaultSpec: () => ({ type: "rope", x: 0, y: 0, x2: 0, y2: 240, thickness: 10, elasticity: 0.15, material: "rubber", attachStartId: null, attachEndId: null }),
     fields: ["thickness", "elasticity", "material", "attachStartId", "attachEndId"],
   },
   wire: {
