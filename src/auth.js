@@ -2,7 +2,7 @@
 // Physics (worlds) and Mathematics (charts). Talks to the same-origin
 // /api/* routes in server/server.js — no tokens or secrets live here,
 // just a session cookie the browser sends automatically.
-import { confirmPopup, alertPopup } from "./popup.js";
+import { confirmPopup, alertPopup, promptPopup } from "./popup.js";
 
 let user = null; // { email, subscribed } | null
 const listeners = [];
@@ -70,9 +70,24 @@ export async function signOut() {
 }
 
 export const fetchItems = (kind) => api(`/${kind}`).then((d) => d.items);
-export const createItem = (kind, name, data) => api(`/${kind}`, { method: "POST", body: { name, data } }).catch((e) => ({ error: e.message }));
-export const updateSavedItem = (kind, id, name, data) => api(`/${kind}/${id}`, { method: "PUT", body: { name, data } }).catch((e) => ({ error: e.message }));
+export const createItem = (kind, name, data, snapshot) => api(`/${kind}`, { method: "POST", body: { name, data, snapshot } }).catch((e) => ({ error: e.message }));
+export const updateSavedItem = (kind, id, name, data, snapshot) => api(`/${kind}/${id}`, { method: "PUT", body: { name, data, snapshot } }).catch((e) => ({ error: e.message }));
 export const deleteSavedItem = (kind, id) => api(`/${kind}/${id}`, { method: "DELETE" }).catch((e) => ({ error: e.message }));
+
+// ---------- Community Sims ----------
+// Browsing is public (no /api session gate on GET) — these still go
+// through the same `api()` helper, which just means a signed-out call
+// works fine and simply won't include any of this browser's own session.
+export const fetchCommunitySims = (kind) => api(`/community-sims${kind ? `?kind=${encodeURIComponent(kind)}` : ""}`).then((d) => d.sims);
+export const fetchCommunitySimById = (id) => api(`/community-sims/${id}`).then((d) => d.sim);
+export const fetchFeaturedSims = () => api("/community-sims/featured").then((d) => d.sims);
+export const fetchMyFavoriteIds = () => api("/community-sims?mine=1").then((d) => d.favoriteIds).catch(() => []);
+export const publishCommunitySim = (kind, name, description, subject, data, snapshot) =>
+  api("/community-sims", { method: "POST", body: { kind, name, description, subject, data, snapshot } }).catch((e) => ({ error: e.message }));
+export const remixCommunitySim = (id) => api(`/community-sims/${id}/remix`, { method: "POST" }).catch((e) => ({ error: e.message }));
+export const toggleFavoriteSim = (id) => api(`/community-sims/${id}/favorite`, { method: "POST" }).catch((e) => ({ error: e.message }));
+export const reportSim = (id) => api(`/community-sims/${id}/report`, { method: "POST" }).catch((e) => ({ error: e.message }));
+export const unpublishSim = (id) => api(`/community-sims/${id}`, { method: "DELETE" }).catch((e) => ({ error: e.message }));
 
 // Works whether or not anyone is signed in — the server attaches the
 // session email automatically if there is one.
@@ -239,8 +254,58 @@ function renderVerifyStep(token, email) {
 }
 
 // ---------- My Saves panel (shared by Physics worlds + Mathematics charts) ----------
+// Community Sims / Featured Creator Worlds live as extra tabs in this same
+// modal — only offered for kinds the server actually allows publishing
+// ("worlds" / "math-items"), so Sustainability's cities panel just doesn't
+// show them rather than showing a Publish button that would always 400.
 
-export async function openSavesPanel({ kind, title, itemNoun, serialize, apply, max = 6 }) {
+const COMMUNITY_ENABLED_KINDS = new Set(["worlds", "math-items"]);
+
+function timeAgo(ts) {
+  const days = Math.floor((Date.now() - ts) / 86400000);
+  if (days <= 0) return "today";
+  if (days === 1) return "1 day ago";
+  if (days < 30) return `${days} days ago`;
+  return new Date(ts).toLocaleDateString();
+}
+
+// A community sim is public by definition once published, so the share
+// link + QR code just point at it directly — no separate permission check
+// needed (there's no paid-tier/entitlement system in this app to gate on).
+async function showShareLink(simId) {
+  const modal = document.getElementById("popup-modal");
+  const box = document.getElementById("popup-modal-box");
+  const link = `${location.origin}${location.pathname}?sim=${encodeURIComponent(simId)}`;
+  box.innerHTML = `
+    <h2>Share this sim</h2>
+    <p class="popup-message">Anyone with this link (or who scans the code) opens it directly — on a phone, a classroom projector, wherever.</p>
+    <input id="share-link-input" type="text" readonly value="${link}" style="width:100%;box-sizing:border-box;margin-bottom:10px;" />
+    <div id="share-qr" style="display:flex;justify-content:center;margin-bottom:12px;"></div>
+    <div class="popup-actions">
+      <button id="popup-cancel">Close</button>
+      <button id="share-copy-btn" class="primary">Copy link</button>
+    </div>
+  `;
+  modal.classList.remove("hidden");
+  box.querySelector("#popup-cancel").addEventListener("click", () => modal.classList.add("hidden"));
+  box.querySelector("#share-copy-btn").addEventListener("click", async () => {
+    try { await navigator.clipboard.writeText(link); box.querySelector("#share-copy-btn").textContent = "Copied!"; }
+    catch { box.querySelector("#share-link-input").select(); }
+  });
+  const qrHolder = box.querySelector("#share-qr");
+  try {
+    // Type 0 = auto-sized to fit the data; "M" = medium error correction,
+    // the standard default for a URL-carrying QR code.
+    const qr = window.qrcode(0, "M");
+    qr.addData(link);
+    qr.make();
+    qrHolder.innerHTML = qr.createImgTag(5, 8);
+  } catch {
+    qrHolder.textContent = "(QR code unavailable)";
+  }
+}
+
+export async function openSavesPanel({ kind, title, itemNoun, serialize, apply, max = 6, getSnapshot }) {
   if (!user) {
     renderAuthModal("signin");
     authModal.classList.remove("hidden");
@@ -248,13 +313,54 @@ export async function openSavesPanel({ kind, title, itemNoun, serialize, apply, 
   }
   const modal = document.getElementById("saves-modal");
   const box = document.getElementById("saves-modal-box");
+  const communityEnabled = COMMUNITY_ENABLED_KINDS.has(kind);
+  let tab = "mine";
+  let favoriteIds = new Set();
+
+  function tabsHtml() {
+    if (!communityEnabled) return "";
+    return `
+      <div class="econ-tabs" style="margin-bottom:10px;">
+        <button class="econ-tab saves-tab ${tab === "mine" ? "active" : ""}" data-tab="mine">${escapeHtml(title)}</button>
+        <button class="econ-tab saves-tab ${tab === "community" ? "active" : ""}" data-tab="community">Community Sims</button>
+        <button class="econ-tab saves-tab ${tab === "featured" ? "active" : ""}" data-tab="featured">Featured Creator Worlds</button>
+      </div>`;
+  }
+
+  function simCardHtml(sim, { mine }) {
+    const isFavorited = favoriteIds.has(sim.id);
+    return `
+      <div class="saves-item community-card">
+        ${sim.snapshot ? `<img class="community-snapshot" src="${sim.snapshot}" alt="" />` : `<div class="community-snapshot community-snapshot-empty"></div>`}
+        <div class="saves-item-info">
+          <div class="saves-item-name">${escapeHtml(sim.name)}</div>
+          <div class="saves-item-date">by ${escapeHtml(sim.creatorName)}${sim.subject ? ` · ${escapeHtml(sim.subject)}` : ""} · ${timeAgo(sim.createdAt)}</div>
+          ${sim.description ? `<div class="saves-item-date">${escapeHtml(sim.description)}</div>` : ""}
+          <div class="saves-item-date">★ ${sim.favoriteCount} · 🔀 ${sim.remixCount} remix${sim.remixCount === 1 ? "" : "es"}</div>
+        </div>
+        <div class="saves-item-actions">
+          <button class="community-open" data-id="${sim.id}">Open</button>
+          <button class="community-remix" data-id="${sim.id}">Remix</button>
+          <button class="community-favorite" data-id="${sim.id}">${isFavorited ? "★ Favorited" : "☆ Favorite"}</button>
+          <button class="community-share" data-id="${sim.id}">🔗 Share</button>
+          ${mine ? `<button class="community-unpublish danger" data-id="${sim.id}">Unpublish</button>` : `<button class="community-report" data-id="${sim.id}">Report</button>`}
+        </div>
+      </div>`;
+  }
 
   async function render() {
+    if (tab === "mine") return renderMine();
+    if (tab === "community") return renderCommunity();
+    return renderFeatured();
+  }
+
+  async function renderMine() {
     let items;
     try { items = await fetchItems(kind); } catch { items = []; }
     const atMax = items.length >= max;
     box.innerHTML = `
       <h2>${escapeHtml(title)}</h2>
+      ${tabsHtml()}
       <div class="saves-new-row">
         <input id="saves-new-name" type="text" placeholder="Name this ${escapeHtml(itemNoun || "save")}" maxlength="60" ${atMax ? "disabled" : ""} />
         <button id="saves-new-btn" class="primary" ${atMax ? "disabled" : ""}>Save current</button>
@@ -263,6 +369,7 @@ export async function openSavesPanel({ kind, title, itemNoun, serialize, apply, 
       <div class="saves-list">
         ${items.length === 0 ? '<p class="saves-empty">Nothing saved yet.</p>' : items.map((it) => `
           <div class="saves-item">
+            ${it.snapshot ? `<img class="community-snapshot" src="${it.snapshot}" alt="" />` : ""}
             <div class="saves-item-info">
               <div class="saves-item-name">${escapeHtml(it.name)}</div>
               <div class="saves-item-date">${new Date(it.updatedAt).toLocaleString()}</div>
@@ -270,6 +377,7 @@ export async function openSavesPanel({ kind, title, itemNoun, serialize, apply, 
             <div class="saves-item-actions">
               <button class="saves-load" data-id="${it.id}">Load</button>
               <button class="saves-overwrite" data-id="${it.id}">Overwrite</button>
+              ${communityEnabled ? `<button class="saves-publish" data-id="${it.id}">Publish</button>` : ""}
               <button class="saves-delete danger" data-id="${it.id}">Delete</button>
             </div>
           </div>`).join("")}
@@ -277,10 +385,10 @@ export async function openSavesPanel({ kind, title, itemNoun, serialize, apply, 
       <button id="saves-close">Close</button>
     `;
 
-    box.querySelector("#saves-close").addEventListener("click", () => modal.classList.add("hidden"));
+    wireCommon();
     box.querySelector("#saves-new-btn")?.addEventListener("click", async () => {
       const name = box.querySelector("#saves-new-name").value.trim() || "Untitled";
-      const result = await createItem(kind, name, serialize());
+      const result = await createItem(kind, name, serialize(), getSnapshot?.());
       if (result.error) { await alertPopup(result.error, { title: "Couldn't save" }); return; }
       render();
     });
@@ -291,12 +399,86 @@ export async function openSavesPanel({ kind, title, itemNoun, serialize, apply, 
     box.querySelectorAll(".saves-overwrite").forEach((btn) => btn.addEventListener("click", async () => {
       const item = items.find((it) => it.id === btn.dataset.id);
       if (!(await confirmPopup(`Overwrite "${item.name}" with the current one?`, { confirmLabel: "Overwrite" }))) return;
-      await updateSavedItem(kind, item.id, item.name, serialize());
+      await updateSavedItem(kind, item.id, item.name, serialize(), getSnapshot?.());
       render();
     }));
     box.querySelectorAll(".saves-delete").forEach((btn) => btn.addEventListener("click", async () => {
       if (!(await confirmPopup("Delete this save? This can't be undone.", { title: "Delete save", confirmLabel: "Delete", danger: true }))) return;
       await deleteSavedItem(kind, btn.dataset.id);
+      render();
+    }));
+    box.querySelectorAll(".saves-publish").forEach((btn) => btn.addEventListener("click", async () => {
+      const item = items.find((it) => it.id === btn.dataset.id);
+      const description = await promptPopup("Describe this sim for the Community gallery (optional):", { title: "Publish to Community" });
+      if (description === null) return; // cancelled
+      const result = await publishCommunitySim(kind, item.name, description, "", item.data, item.snapshot);
+      if (result.error) { await alertPopup(result.error, { title: "Couldn't publish" }); return; }
+      await alertPopup(`Published "${item.name}" to Community Sims.`, { title: "Published" });
+    }));
+  }
+
+  async function renderCommunity() {
+    let sims;
+    try { sims = await fetchCommunitySims(kind); favoriteIds = new Set(await fetchMyFavoriteIds()); } catch { sims = []; }
+    box.innerHTML = `
+      <h2>Community Sims</h2>
+      ${tabsHtml()}
+      <p class="saves-hint">Published by other creators — Open to try one, Remix to make your own editable copy (never edits the original).</p>
+      <div class="saves-list">
+        ${sims.length === 0 ? '<p class="saves-empty">Nothing published yet — be the first from the "' + escapeHtml(title) + '" tab.</p>' : sims.map((s) => simCardHtml(s, { mine: s.ownerEmail === user.email })).join("")}
+      </div>
+      <button id="saves-close">Close</button>
+    `;
+    wireCommon();
+    wireCommunityActions(sims);
+  }
+
+  async function renderFeatured() {
+    let sims;
+    try { sims = await fetchFeaturedSims(); favoriteIds = new Set(await fetchMyFavoriteIds()); } catch { sims = []; }
+    box.innerHTML = `
+      <h2>Featured Creator Worlds</h2>
+      ${tabsHtml()}
+      <p class="saves-hint">Hand-picked by the Kinetic team.</p>
+      <div class="saves-list">
+        ${sims.length === 0 ? '<p class="saves-empty">Nothing featured yet.</p>' : sims.map((s) => simCardHtml(s, { mine: s.ownerEmail === user.email })).join("")}
+      </div>
+      <button id="saves-close">Close</button>
+    `;
+    wireCommon();
+    wireCommunityActions(sims);
+  }
+
+  function wireCommon() {
+    box.querySelector("#saves-close").addEventListener("click", () => modal.classList.add("hidden"));
+    box.querySelectorAll(".saves-tab").forEach((btn) => btn.addEventListener("click", () => { tab = btn.dataset.tab; render(); }));
+  }
+
+  function wireCommunityActions(sims) {
+    box.querySelectorAll(".community-open").forEach((btn) => btn.addEventListener("click", async () => {
+      const full = await api(`/community-sims/${btn.dataset.id}`).catch(() => null);
+      if (full?.sim) { apply(full.sim.data); modal.classList.add("hidden"); }
+    }));
+    box.querySelectorAll(".community-remix").forEach((btn) => btn.addEventListener("click", async () => {
+      const result = await remixCommunitySim(btn.dataset.id);
+      if (result.error) { await alertPopup(result.error, { title: "Couldn't remix" }); return; }
+      await alertPopup(`Added "${result.item.name}" to your own ${escapeHtml(title)}.`, { title: "Remixed" });
+      tab = "mine";
+      render();
+    }));
+    box.querySelectorAll(".community-favorite").forEach((btn) => btn.addEventListener("click", async () => {
+      await toggleFavoriteSim(btn.dataset.id);
+      render();
+    }));
+    box.querySelectorAll(".community-share").forEach((btn) => btn.addEventListener("click", () => showShareLink(btn.dataset.id)));
+    box.querySelectorAll(".community-report").forEach((btn) => btn.addEventListener("click", async () => {
+      if (!(await confirmPopup("Report this sim for review?", { confirmLabel: "Report" }))) return;
+      await reportSim(btn.dataset.id);
+      await alertPopup("Thanks — this has been reported for review.", { title: "Reported" });
+    }));
+    box.querySelectorAll(".community-unpublish").forEach((btn) => btn.addEventListener("click", async () => {
+      if (!(await confirmPopup("Unpublish this from Community Sims? Your own saved copy (if any) is unaffected.", { confirmLabel: "Unpublish", danger: true }))) return;
+      await unpublishSim(btn.dataset.id);
       render();
     }));
   }

@@ -107,6 +107,40 @@ export function ensureSchema() {
       email TEXT NOT NULL REFERENCES users(email) ON DELETE CASCADE,
       expires_at BIGINT NOT NULL
     );
+    -- A saved item's snapshot is a small canvas-rendered PNG data URL
+    -- (see src/snapshot.js) generated client-side at save time — added to
+    -- an existing table via ALTER rather than the CREATE-only pattern
+    -- above, since "IF NOT EXISTS" on CREATE TABLE never touches columns
+    -- on a table that already exists.
+    ALTER TABLE saved_items ADD COLUMN IF NOT EXISTS snapshot TEXT;
+    CREATE TABLE IF NOT EXISTS community_sims (
+      id TEXT PRIMARY KEY,
+      owner_email TEXT NOT NULL REFERENCES users(email) ON DELETE CASCADE,
+      creator_name TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      name TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      subject TEXT NOT NULL DEFAULT '',
+      data JSONB NOT NULL,
+      snapshot TEXT,
+      created_at BIGINT NOT NULL,
+      is_featured BOOLEAN NOT NULL DEFAULT false,
+      unpublished BOOLEAN NOT NULL DEFAULT false,
+      remix_count INT NOT NULL DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS community_sims_public_idx ON community_sims(unpublished, kind);
+    CREATE TABLE IF NOT EXISTS sim_favorites (
+      user_email TEXT NOT NULL REFERENCES users(email) ON DELETE CASCADE,
+      sim_id TEXT NOT NULL REFERENCES community_sims(id) ON DELETE CASCADE,
+      created_at BIGINT NOT NULL,
+      PRIMARY KEY (user_email, sim_id)
+    );
+    CREATE TABLE IF NOT EXISTS sim_reports (
+      user_email TEXT NOT NULL REFERENCES users(email) ON DELETE CASCADE,
+      sim_id TEXT NOT NULL REFERENCES community_sims(id) ON DELETE CASCADE,
+      created_at BIGINT NOT NULL,
+      PRIMARY KEY (user_email, sim_id)
+    );
   `);
   return readySchema;
 }
@@ -152,8 +186,8 @@ export async function deleteSession(token) {
 // ---------- saved items (worlds / mathItems / cities) ----------
 
 export async function listSavedItems(email, kind) {
-  const rows = await query("SELECT id, name, data, updated_at FROM saved_items WHERE email = $1 AND kind = $2 ORDER BY updated_at DESC", [email, kind]);
-  return rows.map((r) => ({ id: r.id, name: r.name, data: r.data, updatedAt: Number(r.updated_at) }));
+  const rows = await query("SELECT id, name, data, snapshot, updated_at FROM saved_items WHERE email = $1 AND kind = $2 ORDER BY updated_at DESC", [email, kind]);
+  return rows.map((r) => ({ id: r.id, name: r.name, data: r.data, snapshot: r.snapshot, updatedAt: Number(r.updated_at) }));
 }
 
 export async function countSavedItems(email, kind) {
@@ -161,14 +195,14 @@ export async function countSavedItems(email, kind) {
   return rows[0].n;
 }
 
-export async function insertSavedItem(id, email, kind, name, data, updatedAt) {
-  await query("INSERT INTO saved_items (id, email, kind, name, data, updated_at) VALUES ($1, $2, $3, $4, $5, $6)", [id, email, kind, name, JSON.stringify(data), updatedAt]);
+export async function insertSavedItem(id, email, kind, name, data, updatedAt, snapshot) {
+  await query("INSERT INTO saved_items (id, email, kind, name, data, updated_at, snapshot) VALUES ($1, $2, $3, $4, $5, $6, $7)", [id, email, kind, name, JSON.stringify(data), updatedAt, snapshot || null]);
 }
 
-export async function updateSavedItem(email, kind, id, name, data, updatedAt) {
+export async function updateSavedItem(email, kind, id, name, data, updatedAt, snapshot) {
   const rows = await query(
-    "UPDATE saved_items SET name = $4, data = $5, updated_at = $6 WHERE id = $1 AND email = $2 AND kind = $3 RETURNING id",
-    [id, email, kind, name, JSON.stringify(data), updatedAt]
+    "UPDATE saved_items SET name = $4, data = $5, updated_at = $6, snapshot = $7 WHERE id = $1 AND email = $2 AND kind = $3 RETURNING id",
+    [id, email, kind, name, JSON.stringify(data), updatedAt, snapshot || null]
   );
   return rows.length > 0;
 }
@@ -176,6 +210,90 @@ export async function updateSavedItem(email, kind, id, name, data, updatedAt) {
 export async function deleteSavedItem(email, kind, id) {
   const rows = await query("DELETE FROM saved_items WHERE id = $1 AND email = $2 AND kind = $3 RETURNING id", [id, email, kind]);
   return rows.length > 0;
+}
+
+// ---------- community sims ----------
+
+export async function insertCommunitySim(id, ownerEmail, creatorName, kind, name, description, subject, data, snapshot, createdAt) {
+  await query(
+    `INSERT INTO community_sims (id, owner_email, creator_name, kind, name, description, subject, data, snapshot, created_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+    [id, ownerEmail, creatorName, kind, name, description, subject, JSON.stringify(data), snapshot || null, createdAt]
+  );
+}
+
+// Public listing — never includes unpublished sims regardless of caller,
+// with each row's live favorite count joined in rather than trusted as a
+// stored counter (a counter that could drift from the real join table is
+// worse than just always computing it).
+export async function listCommunitySims({ kind, subject, featuredOnly } = {}) {
+  const conditions = ["unpublished = false"];
+  const params = [];
+  if (kind) { params.push(kind); conditions.push(`kind = $${params.length}`); }
+  if (subject) { params.push(subject); conditions.push(`subject = $${params.length}`); }
+  if (featuredOnly) conditions.push("is_featured = true");
+  const rows = await query(
+    `SELECT c.id, c.owner_email, c.creator_name, c.kind, c.name, c.description, c.subject, c.snapshot,
+            c.created_at, c.is_featured, c.remix_count,
+            (SELECT count(*)::int FROM sim_favorites f WHERE f.sim_id = c.id) AS favorite_count
+     FROM community_sims c
+     WHERE ${conditions.join(" AND ")}
+     ORDER BY c.created_at DESC`,
+    params
+  );
+  return rows.map((r) => ({
+    id: r.id, ownerEmail: r.owner_email, creatorName: r.creator_name, kind: r.kind, name: r.name,
+    description: r.description, subject: r.subject, snapshot: r.snapshot, createdAt: Number(r.created_at),
+    isFeatured: r.is_featured, remixCount: r.remix_count, favoriteCount: r.favorite_count,
+  }));
+}
+
+export async function getCommunitySim(id) {
+  const rows = await query("SELECT * FROM community_sims WHERE id = $1 AND unpublished = false", [id]);
+  if (!rows.length) return null;
+  const r = rows[0];
+  return {
+    id: r.id, ownerEmail: r.owner_email, creatorName: r.creator_name, kind: r.kind, name: r.name,
+    description: r.description, subject: r.subject, data: r.data, snapshot: r.snapshot,
+    createdAt: Number(r.created_at), isFeatured: r.is_featured,
+  };
+}
+
+export async function unpublishCommunitySim(id, ownerEmail) {
+  const rows = await query("UPDATE community_sims SET unpublished = true WHERE id = $1 AND owner_email = $2 RETURNING id", [id, ownerEmail]);
+  return rows.length > 0;
+}
+
+export async function setCommunitySimFeatured(id, featured) {
+  const rows = await query("UPDATE community_sims SET is_featured = $2 WHERE id = $1 RETURNING id", [id, featured]);
+  return rows.length > 0;
+}
+
+export async function incrementRemixCount(id) {
+  await query("UPDATE community_sims SET remix_count = remix_count + 1 WHERE id = $1", [id]);
+}
+
+export async function toggleFavorite(userEmail, simId) {
+  const existing = await query("SELECT 1 FROM sim_favorites WHERE user_email = $1 AND sim_id = $2", [userEmail, simId]);
+  if (existing.length) {
+    await query("DELETE FROM sim_favorites WHERE user_email = $1 AND sim_id = $2", [userEmail, simId]);
+    return false;
+  }
+  await query("INSERT INTO sim_favorites (user_email, sim_id, created_at) VALUES ($1, $2, $3)", [userEmail, simId, Date.now()]);
+  return true;
+}
+
+export async function listFavoriteSimIds(userEmail) {
+  const rows = await query("SELECT sim_id FROM sim_favorites WHERE user_email = $1", [userEmail]);
+  return rows.map((r) => r.sim_id);
+}
+
+// One report per user per sim (the primary key enforces that) — reporting
+// twice just no-ops rather than inflating the count.
+export async function reportSim(userEmail, simId) {
+  await query("INSERT INTO sim_reports (user_email, sim_id, created_at) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING", [userEmail, simId, Date.now()]);
+  const rows = await query("SELECT count(*)::int AS n FROM sim_reports WHERE sim_id = $1", [simId]);
+  return rows[0].n;
 }
 
 // ---------- classrooms ----------

@@ -29,6 +29,11 @@ import * as db from "./db.js";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, "..");
 const PORT = process.env.PORT ? Number(process.env.PORT) : 5173;
+// Featured Creator Worlds curation, gated to a manual allowlist for now —
+// "Initially allow manual/admin curation" per spec, with no general
+// roles/permissions system in this app to build a real admin UI on top of
+// yet. Set ADMIN_EMAILS="a@x.com,b@y.com" in the environment to grant it.
+const ADMIN_EMAILS = new Set((process.env.ADMIN_EMAILS || "").split(",").map((e) => e.trim().toLowerCase()).filter(Boolean));
 
 const MAX_WORLDS = 6;
 const MAX_MATH_ITEMS = 6;
@@ -244,18 +249,18 @@ async function listItems(email, kind) {
   return db.listSavedItems(email, kind);
 }
 
-async function createItem(email, kind, max, name, data) {
+async function createItem(email, kind, max, name, data, snapshot) {
   const count = await db.countSavedItems(email, kind);
   if (count >= max) return { error: `You already have ${max} saved — delete one first.` };
   const item = { id: crypto.randomUUID(), name: clampName(name), data, updatedAt: Date.now() };
-  await db.insertSavedItem(item.id, email, kind, item.name, item.data, item.updatedAt);
+  await db.insertSavedItem(item.id, email, kind, item.name, item.data, item.updatedAt, snapshot);
   return { item };
 }
 
-async function updateItem(email, kind, id, name, data) {
+async function updateItem(email, kind, id, name, data, snapshot) {
   const updatedAt = Date.now();
   const clampedName = clampName(name);
-  const ok = await db.updateSavedItem(email, kind, id, clampedName, data, updatedAt);
+  const ok = await db.updateSavedItem(email, kind, id, clampedName, data, updatedAt, snapshot);
   if (!ok) return { error: "Not found" };
   return { item: { id, name: clampedName, data, updatedAt } };
 }
@@ -344,6 +349,54 @@ async function shareItem(email, { kind, name, data, classroomCode, direction }) 
   };
   await db.insertSharedItem(item);
   return { item: { ...item, data: undefined } }; // the confirmation doesn't need to echo the payload back
+}
+
+// ---------- Community Sims ----------
+// Publishing is always an explicit, separate action from saving — a saved
+// world never becomes public on its own. A published sim is a standalone
+// copy in its own table, so editing (or even deleting) your private saved
+// world afterward never changes what other people already see published.
+
+const MAX_COMMUNITY_SIM_BYTES = 2 * 1024 * 1024;
+const MAX_DESCRIPTION_LEN = 400;
+
+async function publishCommunitySim(email, { kind, name, description, subject, data, snapshot }) {
+  if (kind !== "worlds" && kind !== "math-items") return { error: "Can only publish Physics worlds or Mathematics items." };
+  if (JSON.stringify(data ?? {}).length > MAX_COMMUNITY_SIM_BYTES) return { error: "That item is too large to publish." };
+  const user = await db.getUser(email);
+  const creatorName = [user?.first_name, user?.last_name].filter(Boolean).join(" ") || email.split("@")[0];
+  const sim = {
+    id: crypto.randomUUID(), ownerEmail: email, creatorName, kind, name: clampName(name),
+    description: String(description ?? "").slice(0, MAX_DESCRIPTION_LEN).trim(),
+    subject: String(subject ?? "").slice(0, 60).trim(),
+    data, snapshot: typeof snapshot === "string" ? snapshot.slice(0, 200000) : null,
+    createdAt: Date.now(),
+  };
+  await db.insertCommunitySim(sim.id, sim.ownerEmail, sim.creatorName, sim.kind, sim.name, sim.description, sim.subject, sim.data, sim.snapshot, sim.createdAt);
+  return { sim: { ...sim, data: undefined } };
+}
+
+// Remix = a real, independent copy in the caller's OWN saved items —
+// "never edits the original" isn't just a UI restriction, the remixed
+// world is a brand-new saved_items row with a new id from the moment it's
+// created, with no ongoing link back to the community sim it came from.
+// community_sims.kind stores the same client-facing string used everywhere
+// else ("worlds" / "math-items"), but saved_items has always used a
+// slightly different internal key for the math case ("mathItems") — this
+// bridges the two rather than introducing a third spelling.
+const SAVED_ITEM_KIND = { worlds: "worlds", "math-items": "mathItems" };
+
+async function remixCommunitySim(email, simId) {
+  const sim = await db.getCommunitySim(simId);
+  if (!sim) return { error: "Not found" };
+  const savedKind = SAVED_ITEM_KIND[sim.kind] || sim.kind;
+  const count = await db.countSavedItems(email, savedKind);
+  const max = sim.kind === "worlds" ? MAX_WORLDS : MAX_MATH_ITEMS;
+  if (count >= max) return { error: `You already have ${max} saved ${sim.kind === "worlds" ? "worlds" : "items"} — delete one first, then remix.` };
+  const item = { id: crypto.randomUUID(), name: clampName(`${sim.name} (remix)`), data: sim.data, updatedAt: Date.now() };
+  await db.insertSavedItem(item.id, email, savedKind, item.name, item.data, item.updatedAt, sim.snapshot);
+  await db.incrementRemixCount(simId);
+  return { item };
 }
 
 // What shows up on a signed-in user's dashboard: items they're the
@@ -497,6 +550,25 @@ export async function handleApi(req, res, url) {
     return sendJson(res, 200, { ok: true });
   }
 
+  // Community Sims browsing is public — no account needed to look around,
+  // same as walking into a gallery. Publishing/remixing/favoriting/
+  // reporting (below, past the session gate) does need one.
+  if (parts[1] === "community-sims") {
+    if (parts.length === 2 && req.method === "GET") {
+      const kind = url.searchParams.get("kind") || undefined;
+      const subject = url.searchParams.get("subject") || undefined;
+      return sendJson(res, 200, { sims: await db.listCommunitySims({ kind, subject }) });
+    }
+    if (parts.length === 3 && parts[2] === "featured" && req.method === "GET") {
+      return sendJson(res, 200, { sims: await db.listCommunitySims({ featuredOnly: true }) });
+    }
+    if (parts.length === 3 && req.method === "GET") {
+      const sim = await db.getCommunitySim(parts[2]);
+      if (!sim) return sendJson(res, 404, { error: "Not found" });
+      return sendJson(res, 200, { sim });
+    }
+  }
+
   // Everything past this point requires a signed-in session.
   const email = await sessionUser(req);
   if (parts[1] === "me") {
@@ -535,6 +607,41 @@ export async function handleApi(req, res, url) {
     }
   }
 
+  if (parts[1] === "community-sims") {
+    if (parts.length === 2 && req.method === "POST") {
+      const body = await readJsonBody(req);
+      const result = await publishCommunitySim(email, body);
+      return sendJson(res, result.error ? 400 : 200, result.error ? result : { sim: result.sim });
+    }
+    if (parts.length === 4 && parts[3] === "favorite" && req.method === "POST") {
+      const favorited = await db.toggleFavorite(email, parts[2]);
+      return sendJson(res, 200, { favorited });
+    }
+    if (parts.length === 4 && parts[3] === "report" && req.method === "POST") {
+      const reportCount = await db.reportSim(email, parts[2]);
+      return sendJson(res, 200, { ok: true, reportCount });
+    }
+    if (parts.length === 4 && parts[3] === "remix" && req.method === "POST") {
+      const result = await remixCommunitySim(email, parts[2]);
+      return sendJson(res, result.error ? 404 : 200, result.error ? result : { item: result.item });
+    }
+    if (parts.length === 3 && req.method === "DELETE") {
+      const ok = await db.unpublishCommunitySim(parts[2], email);
+      if (!ok) return sendJson(res, 404, { error: "Not found, or you're not the one who published it." });
+      return sendJson(res, 200, { ok: true });
+    }
+    if (parts.length === 4 && parts[3] === "feature" && req.method === "POST") {
+      if (!ADMIN_EMAILS.has(email)) return sendJson(res, 403, { error: "Not allowed." });
+      const body = await readJsonBody(req);
+      const ok = await db.setCommunitySimFeatured(parts[2], !!body.featured);
+      if (!ok) return sendJson(res, 404, { error: "Not found" });
+      return sendJson(res, 200, { ok: true });
+    }
+    if (parts.length === 2 && req.method === "GET" && url.searchParams.get("mine") === "1") {
+      return sendJson(res, 200, { favoriteIds: await db.listFavoriteSimIds(email) });
+    }
+  }
+
   if (parts[1] === "shared-items") {
     if (parts.length === 2 && req.method === "GET") {
       return sendJson(res, 200, { received: await sharedItemsFor(email), sent: await sentItemsBy(email) });
@@ -556,12 +663,12 @@ export async function handleApi(req, res, url) {
     if (parts.length === 2 && req.method === "GET") return sendJson(res, 200, { items: await listItems(email, collectionKey) });
     if (parts.length === 2 && req.method === "POST") {
       const body = await readJsonBody(req);
-      const result = await createItem(email, collectionKey, max, body.name, body.data);
+      const result = await createItem(email, collectionKey, max, body.name, body.data, body.snapshot);
       return sendJson(res, result.error ? 400 : 200, result.error ? result : { item: result.item });
     }
     if (parts.length === 3 && req.method === "PUT") {
       const body = await readJsonBody(req);
-      const result = await updateItem(email, collectionKey, parts[2], body.name, body.data);
+      const result = await updateItem(email, collectionKey, parts[2], body.name, body.data, body.snapshot);
       return sendJson(res, result.error ? 404 : 200, result.error ? result : { item: result.item });
     }
     if (parts.length === 3 && req.method === "DELETE") {

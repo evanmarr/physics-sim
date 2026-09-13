@@ -47,6 +47,7 @@ const WIND_PARTICLES_PER_SPAWN = 3; // a fan blows a wide stream, not a thin tri
 const PIVOTABLE_HOST_TYPES = new Set(["board", "triangle", "ball", "bomb", "ballBearing", "peg", "magnet"]);
 const WIRE_SNAP_DIST = 22; // world units — how close a wire's end needs to be to a button/bomb/cannon to link them
 const RING_SEGMENTS = 14; // wedges approximating a Ball's donut collision shape — see _ringParts
+const FIXED_CATEGORY = 0x0002; // collision category for every static/fixed body — see enableGrabTool
 const BEARING_HOST_TYPES = new Set(["board", "triangle", "ball", "bomb"]);
 
 export class PhysicsSim {
@@ -556,6 +557,14 @@ export class PhysicsSim {
       default:
         return null;
     }
+
+    // Tag every body that ends up static/fixed with a distinct collision
+    // category — the Grab Tool's own pointer body (see enableGrabTool)
+    // excludes this category from its mask, so it passes straight through
+    // fixed scenery (walls, floors, anchored ramps) instead of getting
+    // physically trapped by it, while still solidly colliding with — and
+    // able to shove — anything actually movable.
+    if (body.isStatic) body.collisionFilter.category = FIXED_CATEGORY;
 
     body.plugin = {
       gameId: spec.id,
@@ -1113,14 +1122,18 @@ export class PhysicsSim {
   }
 
   // Turns the pointer into a real ball: a genuine dynamic body that
-  // collides with everything else in the scene, connected to the live
+  // collides with everything movable in the scene, connected to the live
   // pointer position by a spring (the same technique Matter's own
   // MouseConstraint uses) rather than being teleported there every frame.
   // That distinction is the whole point — a teleported body cheats through
   // walls and can never itself be deflected, while a spring-pulled one gets
   // physically blocked by anything solid in its way and can be knocked off
   // course by whatever it hits, exactly like a ball you're pushing around
-  // with an invisible leash.
+  // with an invisible leash. It deliberately passes straight through any
+  // FIXED object though (see the mask below) — a solid pointer that fixed
+  // walls/floors could trap in a corner would make the tool worse, not
+  // better, since those are exactly the kind of boundary you want to be
+  // able to reach through to grab something on the other side.
   enableGrabTool(radius = 18) {
     if (this.grabBody) return;
     const pos = this.grabTarget || { x: 0, y: 0 };
@@ -1139,6 +1152,7 @@ export class PhysicsSim {
         render: { type: "cursor", radius },
       },
     });
+    this.grabBody.collisionFilter.mask = 0xFFFFFFFF & ~FIXED_CATEGORY;
     this.grabConstraint = Constraint.create({
       pointA: { x: pos.x, y: pos.y },
       bodyB: this.grabBody,

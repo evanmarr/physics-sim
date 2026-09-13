@@ -547,18 +547,22 @@ button:disabled { opacity: .4; cursor: default; }
 .auth-error.auth-notice { color: var(--good); }
 #auth-code { font-size: 22px; letter-spacing: .3em; text-align: center; }
 
-#saves-modal-box { width: 420px; }
+#saves-modal-box { width: 420px; max-width: 92vw; }
+#saves-modal-box:has(.community-card) { width: 640px; }
 .saves-new-row { display: flex; gap: 8px; align-items: flex-start; }
 .saves-new-row input { flex: 1; }
 .saves-hint { font-size: 11.5px; color: var(--text-dim); margin-top: -6px; }
-.saves-list { display: flex; flex-direction: column; gap: 8px; margin: 14px 0; }
+.saves-list { display: flex; flex-direction: column; gap: 8px; margin: 14px 0; max-height: 55vh; overflow-y: auto; }
 .saves-empty { color: var(--text-dim); font-size: 13px; }
-.saves-item { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px; border: 1px solid var(--border); border-radius: 8px; }
+.saves-item { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px; border: 1px solid var(--border); border-radius: 8px; flex-wrap: wrap; }
+.saves-item-info { flex: 1; min-width: 140px; }
 .saves-item-name { font-weight: 600; }
 .saves-item-date { font-size: 11px; color: var(--text-dim); }
-.saves-item-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.saves-item-actions { display: flex; gap: 6px; flex-shrink: 0; flex-wrap: wrap; }
 .saves-item-actions button { padding: 5px 8px; font-size: 12px; }
 #saves-modal-box #saves-close { width: 100%; margin-top: 4px; }
+.community-snapshot { width: 64px; height: 40px; object-fit: cover; border-radius: 6px; border: 1px solid var(--border); flex-shrink: 0; background: var(--panel-alt); }
+.community-snapshot-empty { display: flex; align-items: center; justify-content: center; }
 
 .popup-message { color: var(--text-dim); font-size: 13.5px; line-height: 1.5; }
 .popup-actions { display: flex; gap: 8px; margin-top: 16px; }
@@ -784,6 +788,10 @@ button:disabled { opacity: .4; cursor: default; }
   overflow-x: auto;
   overflow-y: hidden;
 }
+.astro-outer { display: flex; flex-direction: column; width: 100%; height: 100%; overflow: hidden; }
+.astro-mode-tabs { flex: 0 0 auto; padding: 10px 14px 0; }
+.astro-solar-wrap { display: flex; flex: 1; min-height: 0; overflow-x: auto; overflow-y: hidden; }
+.astro-rocket-wrap { flex: 1; min-height: 0; overflow: hidden; display: flex; }
 .anat-layers { flex: 0.9; border-right: 1px solid var(--border); min-width: 220px; }
 .anat-viewer { flex: 1.4; border-right: 1px solid var(--border); min-width: 340px; display: flex; flex-direction: column; position: relative; }
 .anat-info { flex: 1; min-width: 260px; }

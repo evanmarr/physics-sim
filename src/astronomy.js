@@ -1,4 +1,5 @@
 import { PLANETS, DWARF_PLANETS, MOONS, planetPosition, moonOffsetFromEarth, moonPhaseAngleRad, dateToJulianDate, julianDateToDate, orbitalPeriodDays, findNextSolarEclipse } from "./astronomyData.js";
+import { RocketSimMode } from "./rocketSim.js";
 
 // One linear world-units-per-km factor applied to EVERY body — Sun
 // included — so relative sizes are all physically accurate at once:
@@ -38,21 +39,83 @@ export class AstronomyMode {
     this._build();
   }
 
-  mount() { this._running = true; this._animate(); }
-  unmount() { this._running = false; if (this._raf) cancelAnimationFrame(this._raf); this._lastFrameMs = null; }
+  mount() { if (this.sub === "rocket") this.rocketSim?.mount(); else { this._running = true; this._animate(); } }
+  unmount() {
+    this._running = false;
+    if (this._raf) cancelAnimationFrame(this._raf);
+    this._lastFrameMs = null;
+    this.rocketSim?.unmount();
+  }
 
   _build() {
     this.root.innerHTML = "";
+    this.sub = "solar";
+
+    // #astronomy-root is itself `display:flex` (row) for the three
+    // existing panels — appending the tab bar directly to it would make
+    // the tab bar a 4th flex column instead of a header above them, so
+    // everything below lives inside one flex-column wrapper instead.
+    const outer = div("astro-outer");
+    this.root.appendChild(outer);
+
+    const tabs = div("econ-tabs astro-mode-tabs");
+    const solarTab = document.createElement("button");
+    solarTab.className = "econ-tab active";
+    solarTab.textContent = "Solar System";
+    solarTab.addEventListener("click", () => this._showSolarSystem(solarTab, rocketTab));
+    const rocketTab = document.createElement("button");
+    rocketTab.className = "econ-tab";
+    rocketTab.textContent = "🚀 Rocket Simulator";
+    rocketTab.addEventListener("click", () => this._showRocketSim(solarTab, rocketTab));
+    tabs.appendChild(solarTab);
+    tabs.appendChild(rocketTab);
+    outer.appendChild(tabs);
+
+    // The existing solar-system view (three panels) and the Rocket
+    // Simulator's own root live side by side as siblings, toggled by
+    // `.hidden` — swapping DOM wholesale on every tab switch would mean
+    // tearing down and rebuilding the whole THREE.js scene each time,
+    // which is both wasteful and a good way to leak WebGL contexts.
+    this.solarWrap = div("astro-solar-wrap");
+    outer.appendChild(this.solarWrap);
     this.controlsPanel = div("chem-panel anat-layers");
     this.viewerPanel = div("chem-panel anat-viewer");
     this.infoPanel = div("chem-panel anat-info");
-    this.root.appendChild(this.controlsPanel);
-    this.root.appendChild(this.viewerPanel);
-    this.root.appendChild(this.infoPanel);
+    this.solarWrap.appendChild(this.controlsPanel);
+    this.solarWrap.appendChild(this.viewerPanel);
+    this.solarWrap.appendChild(this.infoPanel);
 
     this._buildControls();
     this._buildViewer();
     this._buildInfo();
+
+    this.rocketWrap = div("astro-rocket-wrap hidden");
+    outer.appendChild(this.rocketWrap);
+  }
+
+  _showSolarSystem(solarTab, rocketTab) {
+    if (this.sub === "solar") return;
+    this.sub = "solar";
+    solarTab.classList.add("active");
+    rocketTab.classList.remove("active");
+    this.rocketWrap.classList.add("hidden");
+    this.solarWrap.classList.remove("hidden");
+    this.rocketSim?.unmount();
+    this._running = true;
+    this._animate();
+  }
+
+  _showRocketSim(solarTab, rocketTab) {
+    if (this.sub === "rocket") return;
+    this.sub = "rocket";
+    rocketTab.classList.add("active");
+    solarTab.classList.remove("active");
+    this.solarWrap.classList.add("hidden");
+    this.rocketWrap.classList.remove("hidden");
+    this._running = false;
+    if (this._raf) cancelAnimationFrame(this._raf);
+    if (!this.rocketSim) this.rocketSim = new RocketSimMode(this.rocketWrap, this.ctx);
+    this.rocketSim.mount();
   }
 
   _buildControls() {

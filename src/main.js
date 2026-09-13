@@ -18,7 +18,7 @@ import { SoundMode } from "./sound.js";
 import { SustainabilityMode } from "./sustainability.js";
 import { traceLightRays } from "./lightOptics.js";
 import { openQuiz } from "./quiz.js";
-import { initAuthUI, openSavesPanel, sendFeedback } from "./auth.js";
+import { initAuthUI, openSavesPanel, sendFeedback, fetchCommunitySimById } from "./auth.js";
 import { initClassroomUI } from "./classroom.js";
 import { initDashboardUI, registerShareApplier } from "./dashboard.js";
 import { initTutorial } from "./tutorial.js";
@@ -26,6 +26,7 @@ import { initDeviceMode, showPrompt as showDeviceModePrompt } from "./deviceMode
 import { toggleUnitSystem, distanceUnitSuffix, weightUnitSuffix, gridSquareInUnits } from "./units.js";
 import { confirmPopup, alertPopup } from "./popup.js";
 import { startLoadingAnimation, finishLoading } from "./loading.js";
+import { generateSnapshot } from "./snapshot.js";
 
 const state = {
   objects: [],
@@ -508,6 +509,25 @@ function hashSeed(id, i) {
   return Math.abs(h) % 997;
 }
 
+// A scanned/clicked Community Sim share link (see auth.js's showShareLink)
+// lands here as ?sim=<id> — fetched and opened in the right mode, then the
+// param is stripped so refreshing/sharing the resulting URL from the
+// browser bar doesn't keep re-opening it.
+async function _openSharedSimFromUrl() {
+  const id = new URLSearchParams(location.search).get("sim");
+  if (!id) return;
+  history.replaceState(null, "", location.pathname);
+  try {
+    const sim = await fetchCommunitySimById(id);
+    if (!sim) { showToast("That shared sim couldn't be found — it may have been unpublished."); return; }
+    if (sim.kind === "worlds") { window._setMode("physics"); applyPhysicsWorldData(window._renderer, sim.data); }
+    else if (sim.kind === "math-items") { window._setMode("mathematics"); mathematicsMode.applySavedData(sim.data); }
+    showToast(`Opened "${sim.name}" by ${sim.creatorName}`);
+  } catch {
+    showToast("Couldn't load that shared sim.");
+  }
+}
+
 function applyPhysicsWorldData(renderer, data) {
   if (state.playing) togglePlay(renderer);
   pushUndoNow();
@@ -603,10 +623,12 @@ function wireTopbar(renderer) {
       itemNoun: "world",
       serialize: () => ({ objects: state.objects, gravity: state.gravity }),
       apply: (data) => applyPhysicsWorldData(renderer, data),
+      getSnapshot: () => generateSnapshot(state.objects),
     });
   });
   registerShareApplier("worlds", (data) => { window._setMode("physics"); applyPhysicsWorldData(window._renderer, data); });
   registerShareApplier("mathItems", (data) => { window._setMode("mathematics"); mathematicsMode.applySavedData(data); });
+  _openSharedSimFromUrl();
 
   initAuthUI();
   initClassroomUI();
