@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "static-server",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "5173"],
+      "port": 5173
+    },
+    {
+      "name": "continuum-server",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["--env-file=.env.local", "server/server.js"],
+      "port": 5173
+    }
+  ]
+}
