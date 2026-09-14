@@ -106,12 +106,10 @@ export function renderPanel(container, spec, state, handlers) {
     // own density until a different value is dragged in here again.
     const mat = materialOf(spec.material);
     container.appendChild(sliderField("Weight", spec.densityOverride ?? mat.density, 0.05, 15, 0.05, (v) => set({ densityOverride: v }), null, weightScale, weightUnit));
-    if (!mat.isFluid) {
-      // Same value physicsEdu.js's "e (restitution)" formula line edits —
-      // this is just a friendlier, more discoverable name/location for the
-      // exact same override, for anyone who never opens the math panel.
-      container.appendChild(sliderField("Flexibility (bounciness)", spec.restitutionOverride ?? mat.restitution, 0, 1, 0.02, (v) => set({ restitutionOverride: v })));
-    }
+    // Same value physicsEdu.js's "e (restitution)" formula line edits — this
+    // is just a friendlier, more discoverable name/location for the exact
+    // same override, for anyone who never opens the math panel.
+    container.appendChild(sliderField("Flexibility (bounciness)", spec.restitutionOverride ?? mat.restitution, 0, 1, 0.02, (v) => set({ restitutionOverride: v })));
   }
   if (fields.includes("fixed")) {
     container.appendChild(checkboxField("Fixed (ignores gravity/forces)", spec.fixed, (v) => set({ fixed: v })));

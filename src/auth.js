@@ -92,6 +92,7 @@ export const unpublishSim = (id) => api(`/community-sims/${id}`, { method: "DELE
 // Admin-only — the server itself checks ADMIN_EMAILS and 403s a non-admin,
 // this is just the client side of that same gate.
 export const fetchAdminCommunitySims = () => api("/admin/community-sims").then((d) => d.sims);
+export const verifyAdminCode = (code) => api("/admin/verify-code", { method: "POST", body: { code } }).catch((e) => ({ error: e.message }));
 
 // Onboarding quiz answers (src/onboarding.js) — writing them back through
 // api("/me")'s own shape keeps `user` in sync immediately, same as

@@ -597,6 +597,25 @@ button:disabled { opacity: .4; cursor: default; }
   padding: 1px 8px;
   margin: 3px 0 5px;
 }
+.difficulty-badge {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  padding: 2px 8px;
+  border-radius: 999px;
+  color: #0b1220;
+  vertical-align: middle;
+}
+.difficulty-badge[data-tier="Simple"] { background: #4fd18b; }
+.difficulty-badge[data-tier="Easy"] { background: #8bd14f; }
+.difficulty-badge[data-tier="Medium"] { background: #d8cf4a; }
+.difficulty-badge[data-tier="Hard"] { background: #e0a34a; }
+.difficulty-badge[data-tier="Challenging"] { background: #e0794a; }
+.difficulty-badge[data-tier="Extreme"] { background: #e0544a; color: #fff; }
+.difficulty-badge[data-tier="Impossible"] { background: #a94ae0; color: #fff; }
+
 .challenge-hint-toggle {
   margin-top: 6px; padding: 3px 10px; font-size: 11px; border-radius: 999px;
   border: 1px solid var(--border); background: var(--panel); color: var(--text-dim); cursor: pointer;

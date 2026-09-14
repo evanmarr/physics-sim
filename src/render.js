@@ -104,21 +104,6 @@ export class Renderer {
       .attr("d", `M ${GRID_SIZE * 4} 0 L 0 0 0 ${GRID_SIZE * 4}`)
       .attr("fill", "none").attr("stroke", "var(--grid-major)").attr("stroke-width", 1.2);
 
-    // The classic "gooey" filter trick: blur a bunch of separate circles
-    // together until they overlap into soft blobs, then sharpen the alpha
-    // channel back up so those blobs fuse into one shape with a clean,
-    // continuous edge instead of a pile of visibly-separate dots. Applied
-    // to the water particle layer only — the physics underneath is still a
-    // few hundred small rigid circles, but this is what turns that into
-    // something that actually reads as a body of water with a real
-    // surface, flowing and merging as it moves.
-    const goo = defs.append("filter").attr("id", "water-goo").attr("x", "-40%").attr("y", "-40%").attr("width", "180%").attr("height", "180%");
-    goo.append("feGaussianBlur").attr("in", "SourceGraphic").attr("stdDeviation", 7).attr("result", "blur");
-    goo.append("feColorMatrix")
-      .attr("in", "blur")
-      .attr("mode", "matrix")
-      .attr("values", "1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 22 -10");
-
     this.viewport = svg.append("g").attr("class", "viewport");
 
     this.viewport.append("rect")
@@ -150,10 +135,6 @@ export class Renderer {
     // Play. This draws the smooth tube from collectRopePaths() instead.
     this.ropeTubeLayer = this.viewport.append("g").attr("class", "rope-tube-layer").attr("pointer-events", "none");
     this.particleLayer = this.viewport.append("g").attr("class", "particle-layer").attr("pointer-events", "none");
-    // Water bubbles get the gooey filter (so they read as one flowing
-    // liquid surface); wind streaks live in a separate, unfiltered group
-    // right after so blurring one never bleeds into the other.
-    this.waterLayer = this.particleLayer.append("g").attr("class", "water-layer").attr("filter", "url(#water-goo)");
     this.streakLayer = this.particleLayer.append("g").attr("class", "streak-layer");
     this.trajectoryLayer = this.viewport.append("g").attr("class", "trajectory-layer").attr("pointer-events", "none");
     this.rayLayer = this.viewport.append("g").attr("class", "ray-layer").attr("pointer-events", "none");
@@ -322,21 +303,10 @@ export class Renderer {
     });
   }
 
-  // Water bubbles (goo-filtered into one continuous liquid surface — see
-  // the #water-goo filter) and wind streaks — the streaks are cosmetic,
-  // but the water particles are real Matter bodies rendered as a fluid.
+  // Wind streaks — cosmetic lines drawn along each real wind particle's
+  // current velocity, colored by speed.
   renderParticles(particles) {
-    const bubbles = particles.filter((p) => p.kind === "bubble");
-    const streaks = particles.filter((p) => p.kind !== "bubble");
-
-    const bSel = this.waterLayer.selectAll(".p").data(bubbles, (p) => p.id);
-    bSel.exit().remove();
-    bSel.enter().append("circle").attr("class", "p")
-      .merge(bSel)
-      .attr("cx", (d) => d.x).attr("cy", (d) => d.y).attr("r", (d) => d.r)
-      .attr("fill", "#3f8fd6");
-
-    const sSel = this.streakLayer.selectAll(".p").data(streaks, (p) => p.id);
+    const sSel = this.streakLayer.selectAll(".p").data(particles, (p) => p.id);
     sSel.exit().remove();
     sSel.enter().append("line").attr("class", "p")
       .merge(sSel)
@@ -849,14 +819,13 @@ function updateShape(g, d, editable) {
 
   const mat = materialOf(d.material);
   const fillOpacity = mat.fillOpacity ?? 1;
-  const isFluid = !!mat.isFluid;
 
   g.select(".shape")
     .attr("fill", mat.color)
     .attr("fill-opacity", fillOpacity)
-    .attr("stroke", isFluid ? "none" : mat.strokeColor)
-    .attr("stroke-width", isFluid ? 0 : 2)
-    .attr("stroke-dasharray", d.fixed && !isFluid ? null : (isFluid ? null : "0"));
+    .attr("stroke", mat.strokeColor)
+    .attr("stroke-width", 2)
+    .attr("stroke-dasharray", d.fixed ? null : "0");
 
   switch (d.type) {
     case "ball": {

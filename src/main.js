@@ -18,7 +18,8 @@ import { SoundMode } from "./sound.js";
 import { SustainabilityMode } from "./sustainability.js";
 import { traceLightRays } from "./lightOptics.js";
 import { openQuiz } from "./quiz.js";
-import { initAuthUI, openSavesPanel, sendFeedback, fetchCommunitySimById, verifyUnlockCode } from "./auth.js";
+import { initAuthUI, openSavesPanel, sendFeedback, fetchCommunitySimById, verifyUnlockCode, escapeHtml } from "./auth.js";
+import { difficultyBadgeHtml } from "./challengeTiers.js";
 import { initClassroomUI } from "./classroom.js";
 import { initDashboardUI, registerShareApplier } from "./dashboard.js";
 import { initAdminUI } from "./admin.js";
@@ -86,10 +87,15 @@ function migrateRopeSpecs(objects) {
   }
 }
 
-// The circuitry feature (wire/battery/lightbulb/switch/resistor/transistor,
-// and the old always-static circuit motor) was removed — drop any of those
+// The circuitry feature (battery/lightbulb/switch/resistor/transistor, and
+// the old always-static circuit motor) was removed — drop any of those
 // types left over in an older save rather than rendering broken objects.
-const REMOVED_TYPES = new Set(["wire", "battery", "lightbulb", "switchComp", "resistor", "transistor", "motor", "track"]);
+// NOTE: "wire" is NOT in this set even though the old circuitry feature had
+// one — that identifier was later reused for the current button/bomb/cannon
+// wiring feature (see physics.js's _computeWireLinks), which is very much
+// alive, so filtering it here would silently delete a real, working object
+// out of anyone's saved world every time it loads.
+const REMOVED_TYPES = new Set(["battery", "lightbulb", "switchComp", "resistor", "transistor", "motor", "track"]);
 function dropRemovedTypes(objects) {
   return objects.filter((spec) => !REMOVED_TYPES.has(spec.type));
 }
@@ -489,11 +495,11 @@ function startParticleLoop() {
     particleClock += 1;
     // Checking `sim` here (not state.playing) matters specifically for
     // Pause: state.playing goes false on pause too, and this decorative
-    // loop used to read that as "back to editing," redrawing wind/water
-    // bubbles at their original blueprint positions and stomping the
-    // frozen paused frame the real sim had just drawn — visibly "jumping"
-    // wind/water back on every pause. `sim` staying alive (just not
-    // running) is what actually distinguishes paused from truly stopped.
+    // loop used to read that as "back to editing," redrawing wind streaks
+    // at their original blueprint positions and stomping the frozen paused
+    // frame the real sim had just drawn — visibly "jumping" wind back on
+    // every pause. `sim` staying alive (just not running) is what actually
+    // distinguishes paused from truly stopped.
     const items = sim ? null : state.objects;
     if (items) window._renderer.renderParticles(buildParticles(items, particleClock));
     particleRafId = requestAnimationFrame(loop);
@@ -508,16 +514,6 @@ function stopParticleLoop() {
 function buildParticles(items, clock) {
   const particles = [];
   for (const it of items) {
-    if (it.material === "water") {
-      const w = it.width ?? it.radius * 2 ?? 100, h = it.height ?? it.radius * 2 ?? 100;
-      const count = Math.max(3, Math.round((w * h) / 9000));
-      for (let i = 0; i < count; i++) {
-        const seed = hashSeed(it.id, i);
-        const cx = it.x - w / 2 + ((seed * 97) % w);
-        const cycle = ((clock * 0.6 + seed * 37) % h);
-        particles.push({ id: `${it.id}_b${i}`, kind: "bubble", x: cx, y: it.y + h / 2 - cycle, r: 2 + (seed % 3), opacity: 0.35 });
-      }
-    }
     if (it.type === "fan") {
       const w = it.width, h = it.height, range = it.range ?? 400;
       const rad = (it.rotation || 0) * Math.PI / 180;
@@ -968,16 +964,28 @@ function wireChallenges() {
       info.className = "info";
       const name = document.createElement("div");
       name.className = "name";
-      name.textContent = c.name + (state.completedChallenges.has(c.id) ? " ✓" : "");
+      name.innerHTML = `${escapeHtml(c.name)}${c.difficulty ? " " + difficultyBadgeHtml(c.difficulty) : ""}${state.completedChallenges.has(c.id) ? " ✓" : ""}`;
       const concept = document.createElement("div");
       concept.className = "concept-tag";
       concept.textContent = c.concept;
       const desc = document.createElement("div");
       desc.className = "desc";
-      desc.textContent = c.description;
+      desc.textContent = c.objective;
       info.appendChild(name);
       info.appendChild(concept);
       info.appendChild(desc);
+      if (c.startingState) {
+        const starting = document.createElement("div");
+        starting.className = "challenge-hint-text";
+        starting.innerHTML = `<strong>Starting state:</strong> ${escapeHtml(c.startingState)}`;
+        info.appendChild(starting);
+      }
+      if (c.successCondition) {
+        const success = document.createElement("div");
+        success.className = "challenge-hint-text";
+        success.innerHTML = `<strong>Success:</strong> ${escapeHtml(c.successCondition)}`;
+        info.appendChild(success);
+      }
       if (c.hint) {
         const hintToggle = document.createElement("button");
         hintToggle.className = "challenge-hint-toggle";
@@ -991,6 +999,20 @@ function wireChallenges() {
         });
         info.appendChild(hintToggle);
         info.appendChild(hintText);
+      }
+      if (c.explanation) {
+        const expToggle = document.createElement("button");
+        expToggle.className = "challenge-hint-toggle";
+        expToggle.textContent = "Why this works";
+        const expText = document.createElement("div");
+        expText.className = "challenge-hint-text hidden";
+        expText.innerHTML = `${escapeHtml(c.explanation)}${c.source ? `<br><em>${escapeHtml(c.source)}</em>` : ""}`;
+        expToggle.addEventListener("click", () => {
+          expText.classList.toggle("hidden");
+          expToggle.textContent = expText.classList.contains("hidden") ? "Why this works" : "Hide explanation";
+        });
+        info.appendChild(expToggle);
+        info.appendChild(expText);
       }
       const btn = document.createElement("button");
       btn.className = "primary";

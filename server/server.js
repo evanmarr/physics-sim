@@ -34,6 +34,11 @@ const PORT = process.env.PORT ? Number(process.env.PORT) : 5173;
 // roles/permissions system in this app to build a real admin UI on top of
 // yet. Set ADMIN_EMAILS="a@x.com,b@y.com" in the environment to grant it.
 const ADMIN_EMAILS = new Set((process.env.ADMIN_EMAILS || "").split(",").map((e) => e.trim().toLowerCase()).filter(Boolean));
+// Second factor on top of ADMIN_EMAILS for actually opening the admin
+// panel — an allowlisted email gets you the menu entry, this code gets you
+// past it. Static by design (not per-admin/per-environment) since it's a
+// shared team passcode, not an account credential.
+const ADMIN_ACCESS_CODE = "624627";
 
 const MAX_WORLDS = 6;
 const MAX_MATH_ITEMS = 6;
@@ -575,7 +580,17 @@ export async function handleApi(req, res, url) {
   // same as walking into a gallery. Publishing/remixing/favoriting/
   // reporting (below, past the session gate) does need one.
   if (parts[1] === "community-sims") {
-    if (parts.length === 2 && req.method === "GET") {
+    // Must be checked before the generic listing below: both are
+    // `GET /community-sims` with no extra path segment, and the plain
+    // listing branch would otherwise match `?mine=1` first and always win,
+    // permanently shadowing the "my favorites" branch (further down, past
+    // the session gate) that's supposed to handle it — every viewer's own
+    // favorited-sims lookup would silently get back a list of all public
+    // sims instead. The real handler still lives past the session gate
+    // since it needs `email`; this only skips the wrong one here.
+    if (parts.length === 2 && req.method === "GET" && url.searchParams.get("mine") === "1") {
+      // fall through past this block without returning
+    } else if (parts.length === 2 && req.method === "GET") {
       const kind = url.searchParams.get("kind") || undefined;
       const subject = url.searchParams.get("subject") || undefined;
       return sendJson(res, 200, { sims: await db.listCommunitySims({ kind, subject }) });
@@ -702,6 +717,24 @@ export async function handleApi(req, res, url) {
   if (parts[1] === "admin" && parts[2] === "community-sims" && req.method === "GET") {
     if (!ADMIN_EMAILS.has(email)) return sendJson(res, 403, { error: "Not allowed." });
     return sendJson(res, 200, { sims: await db.listCommunitySimsForAdmin() });
+  }
+
+  // The second-factor code gate in front of the admin panel (see
+  // src/admin.js) — same failed-attempt throttling as login/unlock-code,
+  // keyed per account so guessing against one admin's session can't be
+  // used to brute-force another's.
+  if (parts[1] === "admin" && parts[2] === "verify-code" && req.method === "POST") {
+    if (!ADMIN_EMAILS.has(email)) return sendJson(res, 403, { error: "Not allowed." });
+    const body = await readJsonBody(req);
+    const code = String(body.code || "");
+    const throttleKey = `admin-code:${email}`;
+    if (await isLockedOut(throttleKey)) return sendJson(res, 429, { error: "Too many attempts. Try again in a few minutes." });
+    if (code !== ADMIN_ACCESS_CODE) {
+      await recordFailedLogin(throttleKey);
+      return sendJson(res, 200, { ok: false });
+    }
+    await clearFailedLogins(throttleKey);
+    return sendJson(res, 200, { ok: true });
   }
 
   if (parts[1] === "shared-items") {

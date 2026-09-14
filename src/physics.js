@@ -8,7 +8,6 @@ const { Engine, World, Composite, Bodies, Body, Constraint, Events, Vector } = M
 const RAD = Math.PI / 180;
 const DEG = 180 / Math.PI;
 const DENSITY_SCALE = 0.001;
-const BUOYANCY_DRAG = 0.16;
 const BOMB_FORCE_SCALE = 0.02;
 // Much smaller than BOMB_FORCE_SCALE: a bomb's force is a one-off impulse,
 // but a fan applies its force every single tick a body stays in range, so it
@@ -31,8 +30,6 @@ const BUTTON_COOLDOWN_MS = 700;
 const SPRING_COOLDOWN_MS = 350;
 const PIVOT_ANGULAR_DAMPING = 0.25;
 const MAX_BODY_SPEED = 75; // world units/step — see _clampFastBodies
-const WATER_PARTICLE_RADIUS = 5;
-const WATER_PARTICLE_MAX = 600; // a safety ceiling for extreme boards, not the normal count — see _buildWaterParticles
 const WIND_PARTICLE_RADIUS = 3;
 const WIND_PARTICLE_LIFESPAN_MS = 2200;
 const WIND_SPAWN_EVERY_N_TICKS = 2;
@@ -99,7 +96,6 @@ export class PhysicsSim {
     // covering barely 30% of their normal distance.
     this.simTime = 0;
     this.pivotHostBodies = []; // bodies pivoted on a ball bearing, for settling damping
-    this.waterParticles = []; // real dynamic bodies that settle/collide like granular liquid
     this.windParticles = []; // real dynamic bodies, pushed by fan force fields, that physically nudge whatever they hit
     this._windNoCollideGroup = Body.nextGroup(true); // wind particles pass through each other, but not through real objects
     this._fanTick = 0;
@@ -246,67 +242,6 @@ export class PhysicsSim {
       if (spec.type === "rope") this._buildRope(spec, specById);
     }
 
-    // water: fill the zone with real small dynamic bodies (the standard
-    // "granular liquid" approximation — cheap rigid circles that collide
-    // with each other and anything that falls in, so it actually splashes
-    // and settles instead of just animating bubble sprites).
-    for (const spec of this.specs) {
-      if (spec.type === "board" && materialOf(spec.material).isFluid) {
-        this._buildWaterParticles(spec);
-      }
-    }
-  }
-
-  _buildWaterParticles(spec) {
-    const world = this.engine.world;
-    const w = spec.width, h = spec.height;
-    const r = WATER_PARTICLE_RADIUS;
-    // Fills the *whole* board, not just a fixed-size slab near the bottom —
-    // a bigger board (more columns and/or rows fit) genuinely gets more
-    // particles, proportional to its area. WATER_PARTICLE_MAX only kicks
-    // in as a performance ceiling for an extreme board, at which point it
-    // truncates back to filling from the bottom up, same as before.
-    const cols = Math.max(2, Math.floor(w / (r * 2.2)));
-    const rowsFit = Math.max(2, Math.floor(h / (r * 2.1)));
-    const total = Math.min(WATER_PARTICLE_MAX, cols * rowsFit);
-    const rows = Math.max(1, Math.min(rowsFit, Math.ceil(total / cols)));
-    let count = 0;
-    for (let ry = 0; ry < rows && count < total; ry++) {
-      for (let cx = 0; cx < cols && count < total; cx++) {
-        const jitterX = (Math.random() - 0.5) * r * 0.6;
-        const jitterY = (Math.random() - 0.5) * r * 0.6;
-        const px = spec.x - w / 2 + r * 1.1 + (cols > 1 ? cx * (w - r * 2.2) / (cols - 1) : 0) + jitterX;
-        const py = spec.y + h / 2 - r * 1.1 - ry * r * 2.1 + jitterY;
-        const body = Bodies.circle(px, py, r, {
-          // Dialed back down from a stiffer, more-viscous tune — the gooey
-          // render filter (see render.js's #water-goo) now absorbs the
-          // small per-particle jitter that low friction used to expose, so
-          // this can flow much more freely and still read as calm water.
-          friction: 0.08,
-          frictionAir: 0.025,
-          restitution: 0,
-          density: 0.9 * DENSITY_SCALE,
-          label: `waterParticle:${spec.id}`,
-        });
-        body.plugin = {
-          gameId: makeId("wp"),
-          material: "waterParticleVisual", // deliberately not "water" — keeps it out of the buoyancy-source filter
-          gameArea: Math.PI * r * r,
-          transient: true,
-          render: { hidden: true },
-        };
-        Composite.add(world, body);
-        this.waterParticles.push(body);
-        count++;
-      }
-    }
-    // No invisible containment walls — these are real, ungated particles.
-    // A "water" board still marks a buoyancy field (see _applyBuoyancy) for
-    // anything that swims through that footprint, but the particles
-    // themselves just fall under gravity and collide normally with
-    // whatever's actually there. Pour it into a box built from real boards
-    // and it stays put; pour it into empty air and it falls and spreads,
-    // same as real water would.
   }
 
   _buildRope(spec, specById) {
@@ -439,7 +374,6 @@ export class PhysicsSim {
     for (const spec of specById.values()) {
       if (spec.id === bearing.id) continue;
       if (!allowedTypes.has(spec.type)) continue;
-      if (materialOf(spec.material).isFluid) continue;
       if (pointInShape(bearing.x, bearing.y, spec)) return spec;
     }
     return null;
@@ -454,7 +388,6 @@ export class PhysicsSim {
     for (const spec of specById.values()) {
       if (spec.id === bearing.id) continue;
       if (!allowedTypes.has(spec.type)) continue;
-      if (materialOf(spec.material).isFluid) continue;
       if (pointInShape(bearing.x, bearing.y, spec)) hosts.push(spec);
     }
     return hosts;
@@ -493,10 +426,8 @@ export class PhysicsSim {
 
   _createBody(spec, forceDynamic = false, noCollideGroup = null) {
     const mat = materialOf(spec.material);
-    const isFluid = !!mat.isFluid;
     const common = {
-      isStatic: isFluid ? true : (forceDynamic ? false : !!spec.fixed),
-      isSensor: isFluid,
+      isStatic: forceDynamic ? false : !!spec.fixed,
       angle: (spec.rotation || 0) * RAD,
       friction: effectiveFriction(spec, mat),
       frictionAir: mat.frictionAir ?? 0.01,
@@ -588,11 +519,7 @@ export class PhysicsSim {
       gameArea: areaOf(spec),
       shattered: false,
       transient: false,
-      // A fluid zone is now entirely represented by its particles (see
-      // _buildWaterParticles) — this body still exists as the invisible
-      // sensor _applyBuoyancy sweeps for, but drawing it too would double
-      // it up as a solid rectangle sitting behind/under the particles.
-      render: isFluid ? { hidden: true } : {
+      render: {
         type: spec.type,
         material: spec.material,
         width: spec.width, height: spec.height, radius: spec.radius,
@@ -620,12 +547,11 @@ export class PhysicsSim {
         this._handlePair(pair, "active");
       }
     });
-    // Continuous field forces (buoyancy) must be applied in 'beforeUpdate',
-    // not from collision events: Matter integrates position/consumes forces
+    // Continuous field forces (fans) must be applied in 'beforeUpdate', not
+    // from collision events: Matter integrates position/consumes forces
     // before collision events fire each step, so a force added later is
     // effectively dropped rather than lagged. beforeUpdate runs first.
     Events.on(this.engine, "beforeUpdate", () => {
-      this._applyBuoyancy();
       this._applyFans();
       this._applyMagnets();
       this._dampPivots();
@@ -793,28 +719,6 @@ export class PhysicsSim {
     }
   }
 
-  // Buoyancy/drag is driven by actual nearby water *particles*, not the
-  // original water zone's footprint — water that's flowed, splashed, or
-  // drained away from where it was poured no longer acts on anything back
-  // at that empty spot, and conversely water that's spread somewhere new
-  // does. An object with no particles touching it gets no force at all
-  // (that's the "only act slowly if in contact with water particles" bit —
-  // no lingering drag once it's actually clear of the water).
-  _applyBuoyancy() {
-    if (!this.waterParticles.length) return;
-    const margin = 6; // small contact tolerance, not a hair-trigger on/off
-    for (const body of Composite.allBodies(this.engine.world)) {
-      if (body.isStatic || body.isSensor) continue;
-      if (body.plugin?.material === "waterParticleVisual") continue; // water doesn't get buoyancy from itself
-      const b = body.bounds;
-      const nearby = this.waterParticles.filter((p) =>
-        p.position.x >= b.min.x - margin && p.position.x <= b.max.x + margin &&
-        p.position.y >= b.min.y - margin && p.position.y <= b.max.y + margin
-      );
-      if (nearby.length) this._checkWaterParticles(body, nearby);
-    }
-  }
-
   _handlePair(pair, phase) {
     const a = pair.bodyA, b = pair.bodyB;
     if (phase === "start" && a.plugin?.gameId && b.plugin?.gameId) {
@@ -893,7 +797,7 @@ export class PhysicsSim {
     if (phase !== "start") return;
     if (!body.plugin || body.plugin.material !== "glass" || body.plugin.shattered) return;
     if (body.isSensor) return; // a sensor (portal, lightSource, cannon catch zone...) never physically breaks
-    if (other.isSensor) return; // water, cannon catch zones, buttons — not a hard impact
+    if (other.isSensor) return; // cannon catch zones, buttons — not a hard impact
     // Flying shards (or another glass object) hitting this one shouldn't
     // chain-shatter it — only a non-glass impact, or a bomb blast
     // (handled directly in _doDetonate), should break glass.
@@ -933,27 +837,6 @@ export class PhysicsSim {
     body.plugin.detonating = true;
     const bombId = body.plugin.gameId;
     setTimeout(() => this.pending.push({ type: "detonate", bombId }), 90);
-  }
-
-  _checkWaterParticles(body, nearby) {
-    const objH = body.bounds.max.y - body.bounds.min.y || 1;
-    // The local water "surface" is however high the nearest particles
-    // actually reach right now, not a fixed zone boundary.
-    const waterTopY = Math.min(...nearby.map((p) => p.position.y));
-    const submerged = clamp(body.bounds.max.y - waterTopY, 0, objH);
-    const fraction = clamp(submerged / objH, 0, 1);
-    if (fraction <= 0) return;
-
-    const g = this.engine.gravity;
-    const effGravity = g.y * g.scale;
-    const waterDensity = materialOf("water").density * DENSITY_SCALE;
-    const area = body.plugin?.gameArea || 1000;
-    const buoyantMass = waterDensity * fraction * area;
-    const forceY = -buoyantMass * effGravity;
-    Body.applyForce(body, body.position, { x: 0, y: forceY });
-
-    const drag = 1 - BUOYANCY_DRAG * fraction;
-    Body.setVelocity(body, { x: body.velocity.x * drag, y: body.velocity.y * drag });
   }
 
   processPending() {
@@ -1250,17 +1133,14 @@ export class PhysicsSim {
     this.start();
   }
 
-  // Real physics-driven water/wind particles, in the same {id,kind,x,y,...}
-  // shape the renderer's particle layer already expects — positions come
-  // straight from the Matter bodies built in _buildWaterParticles /
-  // _spawnWindParticle, not from a decorative animation formula.
+  // Real physics-driven wind particles, in the same {id,kind,x,y,...} shape
+  // the renderer's particle layer already expects — positions come straight
+  // from the Matter bodies built in _spawnWindParticle, not from a
+  // decorative animation formula.
   collectParticleItems() {
     const now = this.simTime;
     this.windParticles = this.windParticles.filter((b) => now - b.plugin.spawnedAt <= b.plugin.lifespanMs);
     const items = [];
-    for (const body of this.waterParticles) {
-      items.push({ id: body.plugin.gameId, kind: "bubble", x: body.position.x, y: body.position.y, r: WATER_PARTICLE_RADIUS, opacity: 0.6 });
-    }
     for (const body of this.windParticles) {
       const vx = body.velocity.x, vy = body.velocity.y;
       items.push({

@@ -1,24 +1,44 @@
 // Admin-only panel for manually curating Featured Creator Worlds. Visibility
 // is entirely a convenience — the server re-checks ADMIN_EMAILS on every
 // request here regardless of whether this button is even shown.
-import { onAuthChange, fetchAdminCommunitySims, setSimFeatured, escapeHtml } from "./auth.js";
-import { alertPopup } from "./popup.js";
+import { onAuthChange, fetchAdminCommunitySims, setSimFeatured, verifyAdminCode, escapeHtml } from "./auth.js";
+import { alertPopup, promptPopup } from "./popup.js";
 
 let modal, box;
+// Verified once per page load, not persisted anywhere — closing/reopening
+// the tab (or just this modal, if you like) never skips the code again.
+let codeVerified = false;
 
 export function initAdminUI() {
   modal = document.getElementById("admin-modal");
   box = document.getElementById("admin-modal-box");
   const btn = document.getElementById("admin-btn");
 
-  btn.addEventListener("click", () => {
+  btn.addEventListener("click", async () => {
+    if (!codeVerified) {
+      const ok = await requireAdminCode();
+      if (!ok) return;
+    }
     modal.classList.remove("hidden");
     render();
   });
 
   onAuthChange((u) => {
     btn.classList.toggle("hidden", !u?.isAdmin);
+    if (!u?.isAdmin) codeVerified = false;
   });
+}
+
+// A wrong or cancelled code just leaves the panel closed — same as never
+// having clicked the button, not an error state of its own.
+async function requireAdminCode() {
+  const code = await promptPopup("Enter the admin access code:", { title: "Admin", placeholder: "6-digit code", maxLength: 6 });
+  if (code === null) return false;
+  if (!/^\d{6}$/.test(code.trim())) { await alertPopup("Enter exactly 6 digits.", { title: "Invalid code" }); return false; }
+  const result = await verifyAdminCode(code.trim());
+  if (result?.error || !result?.ok) { await alertPopup("That code isn't right.", { title: "Couldn't verify" }); return false; }
+  codeVerified = true;
+  return true;
 }
 
 async function render() {

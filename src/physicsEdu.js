@@ -39,19 +39,6 @@ export function physicsMath(spec) {
   const restitution = effectiveRestitution(spec, mat);
   const lines = [];
 
-  if (mat.isFluid) {
-    lines.push({
-      formula: "F_buoyancy = ρ_fluid · V_submerged · g",
-      note: `Archimedes' principle: this pushes up on anything submerged in it, regardless of the object's own material.`,
-    });
-    lines.push({
-      formula: `ρ_water = ${fmt(density, 2)}`,
-      note: `An object floats if its own density is less than this, and sinks if it's greater — try comparing to the balls' densities below.`,
-      edit: { key: "densityOverride", value: density, min: 0.05, max: 5, step: 0.05 },
-    });
-    return lines;
-  }
-
   const area = areaOf(spec);
   const mass = density * area * 1e-3; // same 0.001 scale physics.js uses
   lines.push({
