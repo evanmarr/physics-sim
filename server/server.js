@@ -38,7 +38,7 @@ const ADMIN_EMAILS = new Set((process.env.ADMIN_EMAILS || "").split(",").map((e)
 // panel — an allowlisted email gets you the menu entry, this code gets you
 // past it. Static by design (not per-admin/per-environment) since it's a
 // shared team passcode, not an account credential.
-const ADMIN_ACCESS_CODE = "624627";
+const ADMIN_ACCESS_CODE = "123456";
 
 const MAX_WORLDS = 6;
 const MAX_MATH_ITEMS = 6;
@@ -244,13 +244,19 @@ async function readJsonBody(req) {
 
 // Defense-in-depth against cross-site requests riding a same-site cookie
 // policy loophole: if the browser sent an Origin header for a mutating
-// request, it must match this server's own host.
+// request, it must match this server's own host. On Vercel (and behind most
+// reverse proxies), the inbound `host` header a serverless function actually
+// sees isn't guaranteed to be the same string the browser's Origin reflects
+// (edge routing can present an internal/deployment hostname) — the
+// `x-forwarded-host` header is the standard place a proxy records the
+// original public hostname, so a request is accepted if it matches either.
 function sameOriginOk(req) {
   const origin = req.headers.origin;
   if (!origin) return true;
   try {
     const originHost = new URL(origin).host;
-    return originHost === req.headers.host;
+    const forwardedHost = req.headers["x-forwarded-host"];
+    return originHost === req.headers.host || (!!forwardedHost && originHost === forwardedHost);
   } catch { return false; }
 }
 

@@ -281,7 +281,15 @@ button:disabled { opacity: .4; cursor: default; }
   position: absolute;
   top: 52px; left: 0; right: 0; bottom: 0;
   overflow-y: auto;
-  background: var(--bg);
+  /* A clean dark gradient base (radial washes of the brand cyan/purple/
+     green, barely-there) sits under the animated particle canvas and every
+     card — subtle enough not to compete with either, present enough to
+     read as a designed background rather than a flat fill. */
+  background:
+    radial-gradient(ellipse 60% 50% at 15% 0%, color-mix(in srgb, var(--cool-1) 10%, transparent), transparent 70%),
+    radial-gradient(ellipse 60% 50% at 85% 15%, color-mix(in srgb, var(--cool-2) 10%, transparent), transparent 70%),
+    radial-gradient(ellipse 70% 60% at 50% 100%, color-mix(in srgb, var(--cool-3) 8%, transparent), transparent 70%),
+    var(--bg);
 }
 .home-bg { position: fixed; inset: 0; width: 100%; height: 100%; opacity: 0.8; pointer-events: none; z-index: 0; }
 .home-wrap { position: relative; z-index: 1; max-width: 900px; margin: 0 auto; padding: 60px 24px 80px; }
@@ -305,6 +313,43 @@ button:disabled { opacity: .4; cursor: default; }
 }
 .home-slogan { font-size: 17px; font-weight: 600; color: var(--text); margin: 0 0 10px; }
 .home-tagline { font-size: 15px; color: var(--text-dim); max-width: 560px; margin: 0 auto; line-height: 1.6; }
+
+.home-hero-ctas { display: flex; justify-content: center; flex-wrap: wrap; gap: 12px; margin-top: 22px; }
+.home-cta { border-radius: 10px; padding: 12px 22px; font-size: 14.5px; font-weight: 700; cursor: pointer; border: 1px solid transparent; transition: transform .12s, filter .12s; }
+.home-cta:hover { transform: translateY(-2px); }
+.home-cta-primary { background: linear-gradient(100deg, var(--cool-1), var(--cool-2)); color: #0b1220; }
+.home-cta-primary:hover { filter: brightness(1.08); }
+.home-cta-secondary { background: transparent; border-color: var(--border); color: var(--text); }
+.home-cta-secondary:hover { border-color: var(--cool-1); }
+.home-cta-surprise { background: var(--panel-alt); border-color: var(--border); color: var(--cool-3); }
+.home-cta-surprise:hover { border-color: var(--cool-3); }
+
+/* Rails: a heading plus a horizontally-scrolling, snap-scrolled row of
+   cards — the same "shelf" pattern a modern streaming/app-store home page
+   uses for things like "Continue Watching" or "Featured," so all of
+   Kinetic's own home sections (real user data or curated content) read as
+   one consistent family instead of a grid grab-bag. */
+.home-rails { display: flex; flex-direction: column; gap: 34px; margin-bottom: 48px; }
+.home-section-title { font-size: 15px; font-weight: 700; margin: 0 0 14px; color: var(--text); }
+.home-rail-track {
+  display: flex; gap: 14px; overflow-x: auto; padding-bottom: 6px;
+  scroll-snap-type: x proximity;
+}
+.home-rail-card {
+  flex: 0 0 auto; scroll-snap-align: start;
+  width: 200px; background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+  padding: 12px; text-align: left; cursor: pointer; display: flex; flex-direction: column; gap: 6px;
+  transition: transform .12s, border-color .12s;
+}
+.home-rail-card:hover { transform: translateY(-3px); border-color: var(--cool-2); }
+.home-rail-thumb { width: 100%; height: 100px; border-radius: 8px; object-fit: cover; background: var(--panel-alt); display: block; }
+.home-rail-thumb-blank { background: linear-gradient(135deg, color-mix(in srgb, var(--cool-1) 18%, var(--panel-alt)), color-mix(in srgb, var(--cool-2) 18%, var(--panel-alt))); }
+.home-rail-card-title { font-size: 13.5px; font-weight: 700; color: var(--text); }
+.home-rail-card-sub { font-size: 11.5px; color: var(--text-dim); line-height: 1.4; }
+.home-rail-card-badge { margin-bottom: 2px; }
+.home-rail-card-recent { width: 150px; justify-content: center; min-height: 48px; }
+
+.home-all-sandboxes { scroll-margin-top: 20px; }
 .home-cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; margin-bottom: 56px; }
 /* A lone card left over in the last row of a 4-column grid sits centered
    instead of stranded on the left. */
@@ -329,6 +374,24 @@ button:disabled { opacity: .4; cursor: default; }
 .home-about { border-top: 1px solid var(--border); padding-top: 32px; }
 .home-about h2 { font-size: 15px; margin: 0 0 8px; }
 .home-about p { font-size: 13px; color: var(--text-dim); line-height: 1.65; margin: 0 0 24px; }
+
+@media (max-width: 860px) {
+  .home-cards { grid-template-columns: repeat(2, 1fr); }
+  .home-cards > .home-card:last-child:nth-child(4n+1),
+  .home-cards > .home-card:nth-last-child(2):nth-child(4n+1),
+  .home-cards > .home-card:nth-last-child(1):nth-child(4n+2) { grid-column: auto; }
+  .home-rail-card { width: 170px; }
+}
+@media (max-width: 520px) {
+  .home-wrap { padding: 36px 16px 60px; }
+  .home-hero h1 { font-size: 32px; }
+  .home-slogan { font-size: 15.5px; }
+  .home-tagline { font-size: 13.5px; }
+  .home-cards { grid-template-columns: 1fr; }
+  .home-cta { flex: 1 1 auto; padding: 12px 16px; }
+  .home-rail-card { width: 150px; }
+  .home-rail-thumb { height: 84px; }
+}
 
 #palette {
   width: 168px;

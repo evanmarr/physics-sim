@@ -418,12 +418,14 @@ export async function openSavesPanel({ kind, title, itemNoun, serialize, apply, 
     box.querySelectorAll(".saves-overwrite").forEach((btn) => btn.addEventListener("click", async () => {
       const item = items.find((it) => it.id === btn.dataset.id);
       if (!(await confirmPopup(`Overwrite "${item.name}" with the current one?`, { confirmLabel: "Overwrite" }))) return;
-      await updateSavedItem(kind, item.id, item.name, serialize(), getSnapshot?.());
+      const result = await updateSavedItem(kind, item.id, item.name, serialize(), getSnapshot?.());
+      if (result?.error) { await alertPopup(result.error, { title: "Couldn't overwrite" }); return; }
       render();
     }));
     box.querySelectorAll(".saves-delete").forEach((btn) => btn.addEventListener("click", async () => {
       if (!(await confirmPopup("Delete this save? This can't be undone.", { title: "Delete save", confirmLabel: "Delete", danger: true }))) return;
-      await deleteSavedItem(kind, btn.dataset.id);
+      const result = await deleteSavedItem(kind, btn.dataset.id);
+      if (result?.error) { await alertPopup(result.error, { title: "Couldn't delete" }); return; }
       render();
     }));
     box.querySelectorAll(".saves-publish").forEach((btn) => btn.addEventListener("click", async () => {
@@ -517,7 +519,8 @@ export async function openSavesPanel({ kind, title, itemNoun, serialize, apply, 
     }));
     box.querySelectorAll(".community-unpublish").forEach((btn) => btn.addEventListener("click", async () => {
       if (!(await confirmPopup("Unpublish this from Community Sims? Your own saved copy (if any) is unaffected.", { confirmLabel: "Unpublish", danger: true }))) return;
-      await unpublishSim(btn.dataset.id);
+      const result = await unpublishSim(btn.dataset.id);
+      if (result?.error) { await alertPopup(result.error, { title: "Couldn't unpublish" }); return; }
       render();
     }));
   }

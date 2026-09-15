@@ -18,7 +18,7 @@ import { SoundMode } from "./sound.js";
 import { SustainabilityMode } from "./sustainability.js";
 import { traceLightRays } from "./lightOptics.js";
 import { openQuiz } from "./quiz.js";
-import { initAuthUI, openSavesPanel, sendFeedback, fetchCommunitySimById, verifyUnlockCode, escapeHtml } from "./auth.js";
+import { initAuthUI, openSavesPanel, sendFeedback, fetchCommunitySimById, verifyUnlockCode, escapeHtml, getUser, onAuthChange, fetchFeaturedSims, fetchCommunitySims, fetchMyFavoriteIds, fetchItems } from "./auth.js";
 import { difficultyBadgeHtml } from "./challengeTiers.js";
 import { initClassroomUI } from "./classroom.js";
 import { initDashboardUI, registerShareApplier } from "./dashboard.js";
@@ -551,15 +551,7 @@ async function _openSharedSimFromUrl() {
   const id = new URLSearchParams(location.search).get("sim");
   if (!id) return;
   history.replaceState(null, "", location.pathname);
-  try {
-    const sim = await fetchCommunitySimById(id);
-    if (!sim) { showToast("That shared sim couldn't be found — it may have been unpublished."); return; }
-    if (sim.kind === "worlds") { window._setMode("physics"); applyPhysicsWorldData(window._renderer, sim.data, { kind: "community-sim", id: sim.id, hasLock: sim.hasLock }); }
-    else if (sim.kind === "math-items") { window._setMode("mathematics"); mathematicsMode.applySavedData(sim.data); }
-    showToast(`Opened "${sim.name}" by ${sim.creatorName}`);
-  } catch {
-    showToast("Couldn't load that shared sim.");
-  }
+  await openCommunitySimById(id);
 }
 
 function applyPhysicsWorldData(renderer, data, lockMeta = null) {
@@ -1057,6 +1049,70 @@ const HOME_SECTIONS = [
   { mode: "sustainability", title: "Sustainability", blurb: "Run a city — route energy, manage pollution, and grow your population without wrecking either.", kind: "sustainability", hues: [150, 210] },
 ];
 
+// A few of Physics's own easier challenge scenes, reused as one-click
+// "starting points" on the home page — real, already-verified contraptions
+// rather than an empty canvas, but framed as something to tweak and explore
+// instead of a puzzle to solve.
+const HOME_TEMPLATE_IDS = ["float_test", "fan_lift", "glass_breaker"];
+
+// Recently-viewed sections: purely local (per-browser) navigation history,
+// not anything the server tracks — just enough to let "pick back up where
+// you left off" mean something without inventing fake activity data.
+const RECENTLY_VIEWED_KEY = "kinetic-recently-viewed-v1";
+function loadRecentlyViewed() {
+  try { return JSON.parse(localStorage.getItem(RECENTLY_VIEWED_KEY)) || []; } catch { return []; }
+}
+function recordRecentlyViewed(mode) {
+  const section = HOME_SECTIONS.find((s) => s.mode === mode);
+  if (!section) return; // "home" itself, or anything not a real launcher section
+  const list = loadRecentlyViewed().filter((r) => r.mode !== mode);
+  list.unshift({ mode, title: section.title, ts: Date.now() });
+  try { localStorage.setItem(RECENTLY_VIEWED_KEY, JSON.stringify(list.slice(0, 8))); } catch { /* private browsing, quota, etc. — just skip persisting */ }
+}
+
+// Same challenge deterministically for everyone, all day — a hash of
+// today's UTC date selects the index, so it rotates once every 24 hours
+// without needing a server-side scheduler or any stored state.
+function dailyChallenge() {
+  if (!CHALLENGES.length) return null;
+  const today = new Date().toISOString().slice(0, 10);
+  let h = 0;
+  for (let i = 0; i < today.length; i++) h = (h * 31 + today.charCodeAt(i)) | 0;
+  return CHALLENGES[Math.abs(h) % CHALLENGES.length];
+}
+
+// Shared by the home page's Daily Challenge/Templates cards and (via a
+// small wrapper) the Physics Challenges modal's own Load button — one
+// definition of "what loading a challenge actually does."
+function openPhysicsChallengeById(id) {
+  const c = findChallenge(id);
+  if (!c) return;
+  window._setMode("physics");
+  pushUndoNow();
+  state.objects = c.build();
+  state.activeChallengeId = c.id;
+  state.selectedIds = new Set();
+  state.selectedId = null;
+  renderAll();
+  renderPanelUI();
+  scheduleSave();
+}
+
+// Shared by the home page's sim cards and the ?sim=<id> share-link opener
+// (see _openSharedSimFromUrl) — one definition of "what opening a
+// published Community Sim actually does."
+async function openCommunitySimById(id) {
+  try {
+    const sim = await fetchCommunitySimById(id);
+    if (!sim) { showToast("That sim couldn't be found — it may have been unpublished."); return; }
+    if (sim.kind === "worlds") { window._setMode("physics"); applyPhysicsWorldData(window._renderer, sim.data, { kind: "community-sim", id: sim.id, hasLock: sim.hasLock }); }
+    else if (sim.kind === "math-items") { window._setMode("mathematics"); mathematicsMode.applySavedData(sim.data); }
+    showToast(`Opened "${sim.name}" by ${sim.creatorName}`);
+  } catch {
+    showToast("Couldn't load that sim.");
+  }
+}
+
 function buildHomePage(root, onNavigate) {
   root.innerHTML = `
     <canvas class="home-bg" aria-hidden="true"></canvas>
@@ -1069,8 +1125,17 @@ function buildHomePage(root, onNavigate) {
         <p class="home-tagline">Real simulations, not animations — physics, chemistry, astronomy,
           mathematics, economics, zoology, sound, a city to run sustainably, a whiteboard for your own
           ideas, and the history and security behind them all. Pick a section to start.</p>
+        <div class="home-hero-ctas">
+          <button class="home-cta home-cta-primary" id="home-cta-create">Create</button>
+          <button class="home-cta home-cta-secondary" id="home-cta-explore">Explore</button>
+          <button class="home-cta home-cta-surprise" id="home-cta-surprise">🎲 Surprise Me</button>
+        </div>
       </div>
-      <div class="home-cards"></div>
+      <div class="home-rails"></div>
+      <div class="home-all-sandboxes">
+        <h2 class="home-section-title">All Sandboxes</h2>
+        <div class="home-cards"></div>
+      </div>
     </div>
   `;
   const grid = root.querySelector(".home-cards");
@@ -1087,6 +1152,157 @@ function buildHomePage(root, onNavigate) {
     buildHomeThumbnail(card.querySelector(".home-card-thumb"), section);
   }
   initHomeBackground(root.querySelector(".home-bg"), root);
+
+  root.querySelector("#home-cta-create").addEventListener("click", () => onNavigate("physics"));
+  root.querySelector("#home-cta-explore").addEventListener("click", () => {
+    root.querySelector(".home-all-sandboxes").scrollIntoView({ behavior: "smooth", block: "start" });
+  });
+  root.querySelector("#home-cta-surprise").addEventListener("click", () => surpriseMe(onNavigate));
+
+  buildHomeRails(root.querySelector(".home-rails"), onNavigate);
+  onAuthChange(() => buildHomeRails(root.querySelector(".home-rails"), onNavigate));
+}
+
+// A real random pick across whatever's actually available right now — the
+// 12 sandboxes always count, and once the Featured/Community rails have
+// loaded their random pool grows to include real published sims too, so
+// this stays an honest "surprise" instead of a fixed rotation.
+let _surprisePool = [];
+function surpriseMe(onNavigate) {
+  const pool = [...HOME_SECTIONS.map((s) => ({ kind: "mode", mode: s.mode })), ..._surprisePool];
+  const pick = pool[Math.floor(Math.random() * pool.length)];
+  if (!pick) return;
+  if (pick.kind === "mode") onNavigate(pick.mode);
+  else if (pick.kind === "sim") openCommunitySimById(pick.id);
+  else if (pick.kind === "challenge") openPhysicsChallengeById(pick.id);
+}
+
+// The dynamic rails below the hero: some are always-available real content
+// (Daily Challenge, Featured Templates, Featured Creator Worlds, Community
+// Sims), others only make sense signed in (Continue Experimenting,
+// Favorites) and simply don't render when there's nothing real to show —
+// no placeholder/empty-state filler standing in for a section with no data.
+async function buildHomeRails(container, onNavigate) {
+  container.innerHTML = "";
+  _surprisePool = [];
+  const user = getUser();
+
+  const simCard = (sim) => {
+    const card = document.createElement("button");
+    card.className = "home-rail-card home-rail-card-sim";
+    card.innerHTML = `
+      ${sim.snapshot ? `<img class="home-rail-thumb" src="${sim.snapshot}" alt="" />` : `<div class="home-rail-thumb home-rail-thumb-blank"></div>`}
+      <div class="home-rail-card-title">${escapeHtml(sim.name)}</div>
+      <div class="home-rail-card-sub">by ${escapeHtml(sim.creatorName)}</div>
+    `;
+    card.addEventListener("click", () => openCommunitySimById(sim.id));
+    return card;
+  };
+
+  // Continue Experimenting — your own most-recently-updated Physics world.
+  if (user) {
+    try {
+      const items = await fetchItems("worlds");
+      if (items[0]) {
+        const item = items[0];
+        addRail(container, "Continue Experimenting", [(() => {
+          const card = document.createElement("button");
+          card.className = "home-rail-card home-rail-card-sim";
+          card.innerHTML = `
+            ${item.snapshot ? `<img class="home-rail-thumb" src="${item.snapshot}" alt="" />` : `<div class="home-rail-thumb home-rail-thumb-blank"></div>`}
+            <div class="home-rail-card-title">${escapeHtml(item.name)}</div>
+            <div class="home-rail-card-sub">Resume where you left off</div>
+          `;
+          card.addEventListener("click", () => { onNavigate("physics"); applyPhysicsWorldData(window._renderer, item.data, { kind: "worlds", id: item.id, hasLock: !!item.hasLock }); });
+          return card;
+        })()]);
+      }
+    } catch { /* not signed in / offline — just skip this rail */ }
+  }
+
+  // Favorites — the small number of Community Sims you've hearted, fetched
+  // individually by id since favoriting doesn't return full sim records.
+  if (user) {
+    try {
+      const ids = (await fetchMyFavoriteIds()).slice(0, 10);
+      const sims = (await Promise.all(ids.map((id) => fetchCommunitySimById(id).catch(() => null)))).filter(Boolean);
+      if (sims.length) addRail(container, "Favorites", sims.map(simCard));
+      _surprisePool.push(...sims.map((s) => ({ kind: "sim", id: s.id })));
+    } catch { /* ignore */ }
+  }
+
+  // Recently Viewed — this browser's own navigation history, not anything
+  // the server knows about.
+  const recent = loadRecentlyViewed();
+  if (recent.length) {
+    addRail(container, "Recently Viewed", recent.map((r) => {
+      const card = document.createElement("button");
+      card.className = "home-rail-card home-rail-card-recent";
+      card.innerHTML = `<div class="home-rail-card-title">${escapeHtml(r.title)}</div>`;
+      card.addEventListener("click", () => onNavigate(r.mode));
+      return card;
+    }));
+  }
+
+  // Featured Creator Worlds — hand-curated via the admin panel.
+  try {
+    const sims = await fetchFeaturedSims();
+    if (sims.length) addRail(container, "Featured Creator Worlds", sims.map(simCard));
+    _surprisePool.push(...sims.map((s) => ({ kind: "sim", id: s.id })));
+  } catch { /* ignore */ }
+
+  // Community Sims — everything published, most recent first.
+  try {
+    const sims = (await fetchCommunitySims()).slice(0, 10);
+    if (sims.length) addRail(container, "Community Sims", sims.map(simCard));
+    _surprisePool.push(...sims.map((s) => ({ kind: "sim", id: s.id })));
+  } catch { /* ignore */ }
+
+  // Daily Challenge — one real Physics challenge, the same one for
+  // everyone, that changes once every 24 hours (see dailyChallenge()).
+  const daily = dailyChallenge();
+  if (daily) {
+    const card = document.createElement("button");
+    card.className = "home-rail-card home-rail-card-challenge";
+    card.innerHTML = `
+      <div class="home-rail-card-badge">${difficultyBadgeHtml(daily.difficulty)}</div>
+      <div class="home-rail-card-title">${escapeHtml(daily.name)}</div>
+      <div class="home-rail-card-sub">${escapeHtml(daily.concept)}</div>
+    `;
+    card.addEventListener("click", () => openPhysicsChallengeById(daily.id));
+    addRail(container, "Daily Challenge", [card]);
+    _surprisePool.push({ kind: "challenge", id: daily.id });
+  }
+
+  // Featured Templates — a few of Physics's own easier scenes, reused as
+  // one-click starting points rather than a blank canvas.
+  const templates = HOME_TEMPLATE_IDS.map((id) => findChallenge(id)).filter(Boolean);
+  if (templates.length) {
+    addRail(container, "Featured Templates", templates.map((t) => {
+      const card = document.createElement("button");
+      card.className = "home-rail-card home-rail-card-challenge";
+      card.innerHTML = `
+        <div class="home-rail-card-title">${escapeHtml(t.name)}</div>
+        <div class="home-rail-card-sub">${escapeHtml(t.objective)}</div>
+      `;
+      card.addEventListener("click", () => openPhysicsChallengeById(t.id));
+      return card;
+    }));
+  }
+}
+
+function addRail(container, title, cards) {
+  const section = document.createElement("div");
+  section.className = "home-rail";
+  const heading = document.createElement("h2");
+  heading.className = "home-section-title";
+  heading.textContent = title;
+  const track = document.createElement("div");
+  track.className = "home-rail-track";
+  for (const card of cards) track.appendChild(card);
+  section.appendChild(heading);
+  section.appendChild(track);
+  container.appendChild(section);
 }
 
 // Ambient background: a living D3 force graph behind the *entire* home
@@ -1120,7 +1336,18 @@ function initHomeBackground(canvas, root) {
   }
 
   const n = 90;
-  const hues = ["125,211,252", "167,139,250", "52,211,153"]; // cool-1/2/3
+  // Reads the app's own --cool-1/2/3 brand variables (cyan/purple/green —
+  // #38bdf8/#8b5cf6/#10b981 in light mode, a softened variant in dark) so
+  // this stays in sync with the theme instead of a separately hardcoded copy.
+  const rootStyle = getComputedStyle(document.documentElement);
+  const hexToRgbTriplet = (hex) => {
+    const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex.trim());
+    return m ? `${parseInt(m[1], 16)},${parseInt(m[2], 16)},${parseInt(m[3], 16)}` : null;
+  };
+  const hues = ["--cool-1", "--cool-2", "--cool-3"]
+    .map((v) => hexToRgbTriplet(rootStyle.getPropertyValue(v)))
+    .filter(Boolean);
+  if (hues.length < 3) hues.push("125,211,252", "167,139,250", "52,211,153"); // fallback if the vars aren't defined for some reason
   const nodes = Array.from({ length: n }, () => ({
     x: Math.random() * width,
     y: Math.random() * height,
@@ -1406,6 +1633,7 @@ function wireModeTabs() {
     if (state.mode === mode) return;
     if (state.mode === "physics" && state.playing) togglePlay(window._renderer);
     state.mode = mode;
+    recordRecentlyViewed(mode);
 
     for (const [m, btn] of Object.entries(modeButtons)) btn.classList.toggle("active", mode === m);
     brandHomeBtn.classList.toggle("active", mode === "home");
