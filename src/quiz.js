@@ -1,5 +1,8 @@
 import { ELEMENTS, CATEGORY_LABELS, elementBySymbol, phaseAt, ROOM_TEMP_K, REACTION_TABLE } from "./chemistryData.js";
 import { MATERIALS, MATERIAL_LIST, materialOf } from "./materials.js";
+import { PLANETS, DWARF_PLANETS, MOONS, orbitalPeriodDays } from "./astronomyData.js";
+import { HISTORY_CATEGORIES } from "./historyData.js";
+import { CYBER_CATEGORIES, CYBER_ENTRIES } from "./cybersecurityData.js";
 
 function shuffle(arr) {
   const a = [...arr];
@@ -231,6 +234,174 @@ function buildPhysicsQuestions() {
   return { title: "Physics Quiz", questions: pick(questions, 12) };
 }
 
+// Data-driven from this sim's own real orbital-element table (the same
+// numbers that place every planet), plus a few concept questions grounded
+// in how the mode actually works.
+function buildAstronomyQuestions() {
+  const questions = [];
+
+  const byDistance = [...PLANETS].sort((a, b) => a.elements[0] - b.elements[0]);
+  const closest = byDistance[0], farthest = byDistance[byDistance.length - 1];
+  questions.push({
+    prompt: "Which planet orbits closest to the Sun?",
+    options: shuffle(pick(PLANETS.filter((p) => p !== closest), 3).map((p) => p.name).concat(closest.name)),
+    answer: closest.name,
+    explanation: `${closest.name} orbits at just ${closest.elements[0].toFixed(2)} AU from the Sun — the innermost planet.`,
+  });
+  questions.push({
+    prompt: "Which planet orbits farthest from the Sun?",
+    options: shuffle(pick(PLANETS.filter((p) => p !== farthest), 3).map((p) => p.name).concat(farthest.name)),
+    answer: farthest.name,
+    explanation: `${farthest.name} orbits at about ${farthest.elements[0].toFixed(1)} AU — the outermost of the 8 planets.`,
+  });
+
+  const byRadius = [...PLANETS].sort((a, b) => a.radiusKm - b.radiusKm);
+  const smallest = byRadius[0], largest = byRadius[byRadius.length - 1];
+  questions.push({
+    prompt: "Which is the largest planet in the solar system?",
+    options: shuffle(pick(PLANETS.filter((p) => p !== largest), 3).map((p) => p.name).concat(largest.name)),
+    answer: largest.name,
+    explanation: `${largest.name} has a radius of about ${largest.radiusKm.toLocaleString()} km — more than 11x Earth's.`,
+  });
+  questions.push({
+    prompt: "Which is the smallest planet in the solar system?",
+    options: shuffle(pick(PLANETS.filter((p) => p !== smallest), 3).map((p) => p.name).concat(smallest.name)),
+    answer: smallest.name,
+    explanation: `${smallest.name} has a radius of about ${smallest.radiusKm.toLocaleString()} km.`,
+  });
+
+  const retrograde = PLANETS.filter((p) => p.rotationHours < 0);
+  if (retrograde.length) {
+    const target = sample(retrograde);
+    questions.push({
+      prompt: "Which planet spins backwards (retrograde rotation) compared to most others?",
+      options: shuffle(pick(PLANETS.filter((p) => !retrograde.includes(p)), 3).map((p) => p.name).concat(target.name)),
+      answer: target.name,
+      explanation: `${target.name} rotates in the opposite direction to its orbit — this sim marks that with a negative rotation period.`,
+    });
+  }
+
+  const p1 = sample(PLANETS);
+  const years = orbitalPeriodDays(p1) / 365.25;
+  const fmtYears = (y) => (y < 2 ? y.toFixed(2) : String(Math.round(y)));
+  const wrongYears = [years * 0.5, years * 2, years * 3.3].map(fmtYears);
+  questions.push({
+    prompt: `About how many Earth years does ${p1.name} take to orbit the Sun once?`,
+    options: shuffle([fmtYears(years), ...wrongYears]),
+    answer: fmtYears(years),
+    explanation: `${p1.name} takes about ${fmtYears(years)} Earth years per orbit — from Kepler's third law (period² ∝ distance³).`,
+  });
+
+  const moon1 = sample(MOONS);
+  const otherHosts = [...new Set(MOONS.map((m) => m.host))].filter((h) => h !== moon1.host);
+  questions.push({
+    prompt: `Which planet does the moon ${moon1.name} orbit?`,
+    options: shuffle(pick(otherHosts, Math.min(3, otherHosts.length)).concat(moon1.host)),
+    answer: moon1.host,
+    explanation: `${moon1.name} is one of ${moon1.host}'s major moons.`,
+  });
+
+  const retroMoon = MOONS.find((m) => m.periodDays < 0);
+  if (retroMoon) {
+    questions.push({
+      prompt: "Which large moon orbits its planet backwards — a sign it was captured rather than formed in place?",
+      options: shuffle(pick(MOONS.filter((m) => m !== retroMoon), 3).map((m) => m.name).concat(retroMoon.name)),
+      answer: retroMoon.name,
+      explanation: `${retroMoon.name} orbits ${retroMoon.host} backwards relative to the planet's own spin and its other moons — strong evidence it's a captured object, not one that formed alongside ${retroMoon.host}.`,
+    });
+  }
+
+  const dp = sample(DWARF_PLANETS);
+  questions.push({
+    prompt: `${dp.name} is classified as a...`,
+    options: shuffle(["Dwarf planet", "Major planet", "Moon", "Asteroid"]),
+    answer: "Dwarf planet",
+    explanation: `${dp.name} is one of this sim's dwarf planets — round enough for its own gravity to pull it into a sphere, but it hasn't cleared its orbital neighborhood the way a major planet has.`,
+  });
+
+  questions.push({
+    prompt: "This sim positions every planet using...",
+    options: ["Real orbital elements and Kepler's equation, for the exact date shown", "A looping pre-recorded animation", "Random placement each time it loads", "A single fixed reference image"],
+    answer: "Real orbital elements and Kepler's equation, for the exact date shown",
+    explanation: "Positions are computed live from each planet's real orbital elements — scrubbing the date instantly recomputes where everything actually was or will be, not a canned animation.",
+  });
+  questions.push({
+    prompt: "Why are planet sizes and moon distances shown exaggerated instead of true-to-scale?",
+    options: ["At true scale, the inner planets and moons would be invisible specks", "To make the simulation run faster", "The real sizes aren't precisely known", "It's a rendering limit of the browser"],
+    answer: "At true scale, the inner planets and moons would be invisible specks",
+    explanation: "Real solar-system distances and sizes span such an enormous range that true-to-scale rendering would make almost everything too small to see or click on.",
+  });
+
+  return { title: "Astronomy Quiz", questions: pick(questions, 10) };
+}
+
+function firstPerson(people) {
+  return people.split(",")[0].split(" and ")[0].trim();
+}
+
+// Pulled straight from the History mode's own timeline entries.
+function buildHistoryQuestions() {
+  const questions = [];
+  const pool = HISTORY_CATEGORIES.flatMap((cat) => cat.entries.map((e) => ({ ...e, category: cat.label })));
+  const plainYear = pool.filter((e) => /^\d{3,4}$/.test(e.year));
+
+  for (const entry of shuffle(plainYear).slice(0, 6)) {
+    const year = parseInt(entry.year, 10);
+    const distractors = shuffle([
+      year - Math.floor(Math.random() * 40 + 10),
+      year + Math.floor(Math.random() * 40 + 10),
+      year + Math.floor(Math.random() * 90 + 50),
+    ]).map(String);
+    questions.push({
+      prompt: `In what year did this happen — "${entry.title}" (${entry.category})?`,
+      options: shuffle([entry.year, ...distractors]),
+      answer: entry.year,
+      explanation: `${entry.year}: ${entry.title}. ${entry.summary}`,
+    });
+  }
+
+  for (const entry of shuffle(pool).slice(0, 4)) {
+    const correctPerson = firstPerson(entry.people);
+    const distractors = pick(pool.filter((e) => firstPerson(e.people) !== correctPerson), 3).map((e) => firstPerson(e.people));
+    questions.push({
+      prompt: `Who is credited with this, in ${entry.year}: "${entry.title}"?`,
+      options: shuffle([correctPerson, ...distractors]),
+      answer: correctPerson,
+      explanation: `${entry.people} — ${entry.summary}`,
+    });
+  }
+
+  return { title: "History Quiz", questions: shuffle(questions) };
+}
+
+// Pulled straight from Cybersecurity mode's own searchable entry list.
+function buildCybersecurityQuestions() {
+  const questions = [];
+  const categoryLabel = (key) => CYBER_CATEGORIES.find((c) => c.key === key)?.label ?? key;
+
+  for (const entry of shuffle(CYBER_ENTRIES).slice(0, 6)) {
+    const otherLabels = CYBER_CATEGORIES.filter((c) => c.key !== entry.category).map((c) => c.label);
+    questions.push({
+      prompt: `What kind of entry is "${entry.name}" (${entry.year})?`,
+      options: shuffle([categoryLabel(entry.category), ...otherLabels]),
+      answer: categoryLabel(entry.category),
+      explanation: `${entry.name} — ${entry.summary}`,
+    });
+  }
+
+  for (const entry of shuffle(CYBER_ENTRIES).slice(0, 6)) {
+    const distractors = pick(CYBER_ENTRIES.filter((e) => e.id !== entry.id), 3).map((e) => e.name);
+    questions.push({
+      prompt: entry.summary,
+      options: shuffle([entry.name, ...distractors]),
+      answer: entry.name,
+      explanation: `${entry.name} (${entry.year}) — ${entry.detail}`,
+    });
+  }
+
+  return { title: "Cybersecurity Quiz", questions: pick(questions, 10) };
+}
+
 // ---- Runner ----
 
 let state = null;
@@ -238,6 +409,9 @@ let state = null;
 function bankFor(mode) {
   if (mode === "chemistry") return buildChemistryQuestions();
   if (mode === "physics") return buildPhysicsQuestions();
+  if (mode === "astronomy") return buildAstronomyQuestions();
+  if (mode === "history") return buildHistoryQuestions();
+  if (mode === "cybersecurity") return buildCybersecurityQuestions();
   return null;
 }
 

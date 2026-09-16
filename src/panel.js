@@ -1,8 +1,9 @@
 import { MATERIAL_LIST, materialOf } from "./materials.js";
 import { OBJECT_DEFS } from "./objectTypes.js";
 import { physicsMath } from "./physicsEdu.js";
+import { distanceUnitScale, distanceUnitSuffix, weightUnitScale, weightUnitSuffix } from "./units.js";
 
-const ROTATABLE = new Set(["board", "triangle", "cannon", "button", "springPad", "fan"]);
+const ROTATABLE = new Set(["board", "triangle", "cannon", "button", "springPad", "fan", "lens", "lightSource", "mirror", "portal"]);
 
 export function renderPanel(container, spec, state, handlers) {
   container.innerHTML = "";
@@ -31,10 +32,33 @@ export function renderPanel(container, spec, state, handlers) {
 
   const set = (patch) => handlers.onChange(spec.id, patch);
 
+  // Locking protects an object from drag/delete/panel edits everywhere else
+  // (render.js's drag behavior, main.js's delete handlers) — the checkbox
+  // here is the ONE way back out. Locking itself is always free; unlocking
+  // is free too UNLESS this world came from a published/remixed Community
+  // Sim that had a 6-digit code set on it, in which case handlers.onUnlock
+  // (wired in main.js) prompts for that code before it's allowed through.
+  container.appendChild(checkboxField(spec.locked ? "🔒 Locked" : "Locked (protect from editing)", spec.locked, async (checked) => {
+    if (checked) { set({ locked: true }); renderPanel(container, spec, state, handlers); return; }
+    const ok = await handlers.onUnlock(spec);
+    if (ok) set({ locked: false });
+    renderPanel(container, spec, state, handlers);
+  }));
+  if (spec.locked) {
+    container.appendChild(helpText("This object can't be moved, deleted, or edited while locked. Uncheck Locked above to change it."));
+    return;
+  }
+
+  // Read once per render — switching units (see the topbar toggle) just
+  // re-renders whatever panel is showing, so this always reflects the
+  // current choice without the fields needing to watch it themselves.
+  const distScale = distanceUnitScale(), distUnit = distanceUnitSuffix();
+  const weightScale = weightUnitScale(), weightUnit = weightUnitSuffix();
+
   // position
   container.appendChild(fieldRow([
-    numberField("X", spec.x, (v) => set({ x: v })),
-    numberField("Y", spec.y, (v) => set({ y: v })),
+    numberField("X", spec.x, (v) => set({ x: v }), -4000, 4000, 1, distScale, distUnit),
+    numberField("Y", spec.y, (v) => set({ y: v }), -4000, 4000, 1, distScale, distUnit),
   ]));
 
   if (ROTATABLE.has(spec.type)) {
@@ -44,22 +68,55 @@ export function renderPanel(container, spec, state, handlers) {
   const fields = def.fields || [];
 
   if (fields.includes("radius")) {
-    container.appendChild(sliderField("Radius", spec.radius, 6, 90, 1, (v) => set({ radius: v })));
+    container.appendChild(sliderField("Radius", spec.radius, 6, 90, 1, (v) => set({ radius: v }), null, distScale, distUnit));
   }
-  if (fields.includes("size")) {
-    container.appendChild(sliderField("Size", spec.size ?? 130, 30, 400, 5, (v) => set({ size: v })));
+  if (fields.includes("holeRatio")) {
+    container.appendChild(sliderField("Center Hole", spec.holeRatio ?? 0, 0, 0.85, 0.01, (v) => set({ holeRatio: v })));
+    container.appendChild(helpText(
+      "0 is a normal solid ball. Turning this up opens a real hole through the middle — the physical collision shape has the hole too, so a small enough object can actually pass through it, not just look like it can."
+    ));
   }
   if (fields.includes("width") || fields.includes("height")) {
     container.appendChild(fieldRow([
-      fields.includes("width") ? sliderField("Width", spec.width, 10, 600, 5, (v) => set({ width: v })) : null,
-      fields.includes("height") ? sliderField("Height", spec.height, 10, 400, 5, (v) => set({ height: v })) : null,
+      fields.includes("width") ? sliderField("Width", spec.width, 10, 600, 5, (v) => set({ width: v }), null, distScale, distUnit) : null,
+      fields.includes("height") ? sliderField("Height", spec.height, 10, 400, 5, (v) => set({ height: v }), null, distScale, distUnit) : null,
     ].filter(Boolean)));
   }
   if (fields.includes("material")) {
-    container.appendChild(materialField(spec.material, (v) => set({ material: v })));
+    // Unlike every slider/checkbox/number field above, a material swatch is
+    // a plain clicked <div> — nothing native keeps its own "selected" state
+    // in sync, and the Weight slider below needs to pick up the new
+    // material's default density too. So this one field needs a real
+    // re-render after the patch, not just the state write.
+    // A rope's tube rendering and physical behavior (see physics.js/render.js)
+    // was only ever tuned against rubber's own numbers — every other
+    // material's shatter/fluid/bounce behavior doesn't make sense stretched
+    // along a rope, so it's the one type this picker doesn't offer a choice
+    // for.
+    const materialOptions = spec.type === "rope" ? ["rubber"] : MATERIAL_LIST;
+    container.appendChild(materialField(spec.material, (v) => { set({ material: v }); renderPanel(container, spec, state, handlers); }, materialOptions));
+    if (spec.type === "triangle" && spec.material === "glass") {
+      container.appendChild(helpText(
+        "A glass Triangle acts as a real prism in Light Mode: it splits white light into a spectrum using real (if exaggerated for visibility) wavelength-dependent refraction — each color band bends by a slightly different amount, the same reason a real prism disperses light — not a painted rainbow effect. Rotate it to change how the spectrum spreads out."
+      ));
+    }
+    // Weight is just density with a friendlier name — mass = density × area,
+    // so at a fixed size this is exactly the knob that changes how much
+    // force it takes to move or stop the object. Overrides the material's
+    // own density until a different value is dragged in here again.
+    const mat = materialOf(spec.material);
+    container.appendChild(sliderField("Weight", spec.densityOverride ?? mat.density, 0.05, 15, 0.05, (v) => set({ densityOverride: v }), null, weightScale, weightUnit));
+    // Same value physicsEdu.js's "e (restitution)" formula line edits — this
+    // is just a friendlier, more discoverable name/location for the exact
+    // same override, for anyone who never opens the math panel.
+    container.appendChild(sliderField("Flexibility (bounciness)", spec.restitutionOverride ?? mat.restitution, 0, 1, 0.02, (v) => set({ restitutionOverride: v })));
   }
   if (fields.includes("fixed")) {
     container.appendChild(checkboxField("Fixed (ignores gravity/forces)", spec.fixed, (v) => set({ fixed: v })));
+  }
+  if (fields.includes("blocksMagnetism")) {
+    container.appendChild(checkboxField("Blocks magnetism", spec.blocksMagnetism, (v) => set({ blocksMagnetism: v })));
+    container.appendChild(helpText("Shields anything behind it from every magnet's pull/push — a real magnetic shield works the same way, by redirecting field lines through itself."));
   }
   if (fields.includes("startRotation")) {
     container.appendChild(sliderField("Rest Angle°", spec.startRotation, -180, 180, 1, (v) => set({ startRotation: v })));
@@ -70,9 +127,13 @@ export function renderPanel(container, spec, state, handlers) {
   if (fields.includes("power")) {
     const powerLabel = { bomb: "Blast Power", fan: "Wind Force", magnet: "Magnet Force" }[spec.type] || "Launch Power";
     const [min, max] = spec.type === "magnet" ? [-50, 50] : [4, 50];
-    container.appendChild(sliderField(powerLabel, spec.power, min, max, 1, (v) => set({ power: v })));
     if (spec.type === "magnet") {
-      container.appendChild(helpText(spec.power >= 0 ? "Positive force attracts metal objects." : "Negative force repels metal objects."));
+      const magnetText = (v) => (v >= 0 ? "Positive force attracts metal objects." : "Negative force repels metal objects.");
+      const magnetHelp = helpText(magnetText(spec.power));
+      container.appendChild(sliderField(powerLabel, spec.power, min, max, 1, (v) => set({ power: v }), (v) => { magnetHelp.textContent = magnetText(v); }));
+      container.appendChild(magnetHelp);
+    } else {
+      container.appendChild(sliderField(powerLabel, spec.power, min, max, 1, (v) => set({ power: v })));
     }
   }
   if (fields.includes("radiusOfEffect")) {
@@ -84,8 +145,12 @@ export function renderPanel(container, spec, state, handlers) {
   if (fields.includes("targetId")) {
     container.appendChild(targetField(spec, state, (v) => set({ targetId: v })));
   }
+  if (fields.includes("linkedId")) {
+    container.appendChild(portalLinkField(spec, state, (v) => set({ linkedId: v })));
+    container.appendChild(helpText("Anything that enters this portal comes out the linked one, and vice versa — you only need to set the link on one of the pair. Rotate a portal to aim which way things exit it."));
+  }
   if (fields.includes("length")) {
-    container.appendChild(sliderField("Length", spec.length, 60, 800, 10, (v) => set({ length: v })));
+    container.appendChild(sliderField("Length", spec.length, 60, 800, 10, (v) => set({ length: v }), null, distScale, distUnit));
   }
   if (fields.includes("thickness")) {
     container.appendChild(sliderField("Thickness", spec.thickness, 3, 30, 1, (v) => set({ thickness: v })));
@@ -102,8 +167,10 @@ export function renderPanel(container, spec, state, handlers) {
     container.appendChild(helpText("Pins that end to the chosen object's center — leave as (none) to have it hang or auto-anchor to whatever it's dropped on."));
   }
   if (fields.includes("curvature")) {
-    container.appendChild(sliderField("Curvature", spec.curvature, -1, 1, 0.05, (v) => set({ curvature: v })));
-    container.appendChild(helpText(spec.curvature >= 0 ? "Convex — bends light rays inward to a focus (converging)." : "Concave — spreads light rays outward (diverging)."));
+    const curvatureText = (v) => (v >= 0 ? "Convex — bends light rays inward to a focus (converging)." : "Concave — spreads light rays outward (diverging).");
+    const curvatureHelp = helpText(curvatureText(spec.curvature));
+    container.appendChild(sliderField("Curvature", spec.curvature, -1, 1, 0.05, (v) => set({ curvature: v }), (v) => { curvatureHelp.textContent = curvatureText(v); }));
+    container.appendChild(curvatureHelp);
   }
   if (fields.includes("beamWidth")) {
     container.appendChild(sliderField("Beam Width", spec.beamWidth, 20, 400, 10, (v) => set({ beamWidth: v })));
@@ -186,8 +253,13 @@ export function renderPhysicsMathPanel(container, spec, onClose, onEdit) {
       const resetBtn = document.createElement("button");
       resetBtn.className = "math-edit-reset";
       resetBtn.textContent = "↺";
-      resetBtn.title = "Reset to material default";
-      resetBtn.addEventListener("click", () => onEdit(edit.key, undefined));
+      // Density/friction/restitution are material *overrides* — undefined
+      // correctly falls back to the material preset (see effectiveDensity
+      // etc.). Type-specific values like a bomb's power aren't overrides of
+      // anything, so those edit descriptors carry an explicit resetValue
+      // instead of relying on undefined to mean something sensible.
+      resetBtn.title = edit.resetValue !== undefined ? "Reset to default" : "Reset to material default";
+      resetBtn.addEventListener("click", () => onEdit(edit.key, edit.resetValue));
       editRow.appendChild(input);
       editRow.appendChild(valSpan);
       editRow.appendChild(resetBtn);
@@ -212,29 +284,40 @@ function fieldRow(fields) {
   return row;
 }
 
-function numberField(label, value, onChange, min = -4000, max = 4000, step = 1) {
+// `unitScale` (raw units per 1 displayed unit — see units.js) and `unitSuffix`
+// (e.g. "m") are optional — omitted, a field behaves exactly as before.
+function numberField(label, value, onChange, min = -4000, max = 4000, step = 1, unitScale = 1, unitSuffix = "") {
   const wrap = document.createElement("div");
   wrap.className = "field";
   const l = document.createElement("label");
-  l.textContent = label;
+  l.textContent = unitSuffix ? `${label} (${unitSuffix})` : label;
   const input = document.createElement("input");
   input.type = "number";
-  input.value = Math.round(value * 100) / 100;
-  input.step = step;
-  input.min = min;
-  input.max = max;
-  input.addEventListener("change", () => onChange(parseFloat(input.value) || 0));
+  input.value = Math.round((value / unitScale) * 100) / 100;
+  input.step = step / unitScale;
+  input.min = min / unitScale;
+  input.max = max / unitScale;
+  input.addEventListener("change", () => onChange((parseFloat(input.value) || 0) * unitScale));
   wrap.appendChild(l);
   wrap.appendChild(input);
   return wrap;
 }
 
-function sliderField(label, value, min, max, step, onChange) {
+// onLiveChange (optional) fires synchronously on every drag tick, same as
+// the value label does — for a help/description line elsewhere in the
+// panel that depends on this value (e.g. "Convex"/"Concave" text), since
+// patchObject deliberately doesn't re-render the whole panel on every
+// slider tick (that would interrupt an in-progress drag).
+// `unitScale`/`unitSuffix` work like numberField's: the slider itself still
+// drags in raw units (so existing min/max/step tuning is untouched), but the
+// live readout next to the label shows the converted, human-scale number.
+function sliderField(label, value, min, max, step, onChange, onLiveChange, unitScale = 1, unitSuffix = "") {
   const wrap = document.createElement("div");
   wrap.className = "field";
   const l = document.createElement("label");
   const valSpan = document.createElement("span");
-  valSpan.textContent = Math.round(value * 10) / 10;
+  const format = (raw) => Math.round((raw / unitScale) * 10) / 10 + (unitSuffix ? ` ${unitSuffix}` : "");
+  valSpan.textContent = format(value);
   l.textContent = label + " ";
   l.appendChild(valSpan);
   const input = document.createElement("input");
@@ -242,8 +325,10 @@ function sliderField(label, value, min, max, step, onChange) {
   input.min = min; input.max = max; input.step = step;
   input.value = value;
   input.addEventListener("input", () => {
-    valSpan.textContent = input.value;
-    onChange(parseFloat(input.value));
+    valSpan.textContent = format(input.value);
+    const v = parseFloat(input.value);
+    onChange(v);
+    onLiveChange?.(v);
   });
   wrap.appendChild(l);
   wrap.appendChild(input);
@@ -266,7 +351,7 @@ function checkboxField(label, checked, onChange) {
   return wrap;
 }
 
-function materialField(current, onChange) {
+function materialField(current, onChange, options = MATERIAL_LIST) {
   const wrap = document.createElement("div");
   wrap.className = "field";
   const l = document.createElement("label");
@@ -274,7 +359,7 @@ function materialField(current, onChange) {
   wrap.appendChild(l);
   const row = document.createElement("div");
   row.className = "material-swatches";
-  MATERIAL_LIST.forEach((m) => {
+  options.forEach((m) => {
     const item = document.createElement("div");
     item.className = "material-option" + (m === current ? " selected" : "");
     item.title = materialOf(m).label;
@@ -337,6 +422,30 @@ function targetField(spec, state, onChange) {
       opt.value = o.id;
       opt.textContent = `${OBJECT_DEFS[o.type].label} (${o.id.split("_")[1]})`;
       if (spec.targetId === o.id) opt.selected = true;
+      select.appendChild(opt);
+    });
+  select.addEventListener("change", () => onChange(select.value || null));
+  wrap.appendChild(select);
+  return wrap;
+}
+
+function portalLinkField(spec, state, onChange) {
+  const wrap = document.createElement("div");
+  wrap.className = "field";
+  const l = document.createElement("label");
+  l.textContent = "Linked to";
+  wrap.appendChild(l);
+  const select = document.createElement("select");
+  const none = document.createElement("option");
+  none.value = ""; none.textContent = "(none)";
+  select.appendChild(none);
+  state.objects
+    .filter((o) => o.type === "portal" && o.id !== spec.id)
+    .forEach((o) => {
+      const opt = document.createElement("option");
+      opt.value = o.id;
+      opt.textContent = `Portal (${o.id.split("_")[1]})`;
+      if (spec.linkedId === o.id) opt.selected = true;
       select.appendChild(opt);
     });
   select.addEventListener("change", () => onChange(select.value || null));

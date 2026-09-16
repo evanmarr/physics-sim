@@ -101,7 +101,7 @@ export class ChemistryMode {
     this.mixPanel.appendChild(title);
 
     const hint = div("chem-hint");
-    hint.textContent = "Combinations are exact: water is H₂O only with a 2:1 ratio of hydrogen to oxygen, not any two elements. Each slot has its own temperature, which sets whether that element is solid, liquid, or gas.";
+    hint.innerHTML = "Combinations are exact: water is H₂O only with a 2:1 ratio of hydrogen to oxygen, not any two elements.<br>Each slot has its own temperature, which sets whether that element is solid, liquid, or gas.";
     this.mixPanel.appendChild(hint);
 
     this.slotsEl = div("chem-slots");
@@ -120,14 +120,14 @@ export class ChemistryMode {
 
     const waterBtn = document.createElement("button");
     waterBtn.className = "chem-water-btn";
-    waterBtn.textContent = "💧 Add Water (H₂O)";
+    waterBtn.textContent = "Add Water (H₂O)";
     waterBtn.title = "See how a metal reacts when dropped in water";
     waterBtn.addEventListener("click", () => this._addToMix(WATER_SYMBOL));
     this.mixPanel.appendChild(waterBtn);
 
     const reactBtn = document.createElement("button");
     reactBtn.className = "primary chem-react-btn";
-    reactBtn.textContent = "⚗ React!";
+    reactBtn.textContent = "React!";
     reactBtn.addEventListener("click", () => this._react());
     this.mixPanel.appendChild(reactBtn);
 
@@ -150,6 +150,7 @@ export class ChemistryMode {
     const el = elementBySymbol(symbol);
     if (!el) return;
     this.selectedSymbol = symbol;
+    this.inspectingIndex = null;
     this.atomViewer.showElement(el, CATEGORY_COLORS[el.category]);
     this.elementInfo.innerHTML = "";
     this.elementInfo.appendChild(elementInfoCard(el));
@@ -205,15 +206,73 @@ export class ChemistryMode {
     this.slotsEl.innerHTML = "";
     this.slots.forEach((entry, i) => {
       this.slotsEl.appendChild(mixSlot(entry, {
-        onClear: () => { this.slots[i] = null; this.resultEl.innerHTML = ""; this._renderSlots(); },
-        onTemp: (tempK) => { entry.tempK = tempK; this._renderSlots(); },
+        onClear: () => {
+          this.slots[i] = null;
+          this.resultEl.innerHTML = "";
+          if (this.inspectingIndex === i) this.inspectingIndex = null;
+          this._renderSlots();
+        },
+        onTemp: (tempK) => {
+          entry.tempK = tempK;
+          this._renderSlots();
+          // Live animation: if this is the slot currently shown in the
+          // viewer, re-drive it on every tick of the drag, not just when
+          // you release the slider — that's the whole point of watching
+          // temperature change something in real time.
+          if (this.inspectingIndex === i) this._showPhase(entry, i, false);
+        },
+        // Fires once a temperature change settles (a phase button, or
+        // letting go of the slider) — heating/cooling something in the
+        // bench can push a mix across a reaction threshold without an
+        // explicit "React!" click.
+        onTempCommit: () => this._react(),
+        onInspect: () => this._showPhase(entry, i),
       }));
     });
     this.addSlotBtn.disabled = this.slots.length >= MAX_SLOTS;
     this.removeSlotBtn.disabled = this.slots.length <= MIN_SLOTS;
   }
 
+  // Shows this slot's substance in the atom viewer as a small cluster of
+  // particles that actually *move* the way that phase does — a solid
+  // vibrating in a lattice, a liquid sliding around in a blob, a gas
+  // flying fast and bouncing off its container — instead of just a phase
+  // label. Motion intensity scales continuously with temperature *within*
+  // the current phase too (a solid right at its melting point visibly
+  // shakes harder than a solid near absolute zero), not just a jump at
+  // each phase boundary.
+  _showPhase(entry, index, resetCamera = true) {
+    if (!entry || entry.symbol === WATER_SYMBOL) return;
+    const el = elementBySymbol(entry.symbol);
+    if (!el) return;
+    this.inspectingIndex = index;
+    const phase = phaseAt(el, entry.tempK);
+    const [mp, bp] = meltingBoiling(el);
+    let heat;
+    if (phase === "solid") heat = mp > 0 ? entry.tempK / mp : 0.5;
+    else if (phase === "liquid") heat = bp > mp ? (entry.tempK - mp) / (bp - mp) : 0.5;
+    else heat = (entry.tempK - bp) / 1500; // gas has no upper bound — just keeps getting more energetic
+    heat = Math.max(0, Math.min(1, heat));
+    this.atomViewer.showPhaseCluster(14, phase, CATEGORY_COLORS[el.category], heat, resetCamera);
+    this.elementInfo.innerHTML = "";
+    const card = div("chem-info-card");
+    card.innerHTML = `
+      <div class="chem-info-title">${el.name} <span class="chem-info-sym">${el.symbol}</span></div>
+      <div class="chem-info-row"><span>Phase at ${entry.tempK} K</span><b>${phase}</b></div>
+    `;
+    this.elementInfo.appendChild(card);
+    const note = document.createElement("div");
+    note.className = "chem-molecule-note";
+    note.textContent = phase === "solid"
+      ? "Solid: particles are locked in place, just vibrating with heat."
+      : phase === "liquid"
+        ? "Liquid: particles stay close together but slide past each other freely."
+        : "Gas: particles move fast and independently, filling all the space they can.";
+    card.appendChild(note);
+  }
+
   _react() {
+    this.inspectingIndex = null;
     this.resultEl.innerHTML = "";
     const filled = this.slots.filter(Boolean);
     if (filled.length < 1) {
@@ -316,7 +375,7 @@ function elementInfoCard(el) {
   return card;
 }
 
-function mixSlot(entry, { onClear, onTemp }) {
+function mixSlot(entry, { onClear, onTemp, onTempCommit, onInspect }) {
   const slot = div("chem-slot" + (entry ? " filled" : ""));
   if (!entry) {
     slot.textContent = "empty";
@@ -329,6 +388,24 @@ function mixSlot(entry, { onClear, onTemp }) {
     const phase = phaseAt(el, entry.tempK);
     slot.style.borderColor = CATEGORY_COLORS[el.category];
     slot.innerHTML = `<span class="chem-slot-sym">${el.symbol}</span><span class="chem-slot-name">${el.name} · ${phase}</span>`;
+    slot.title = "Click to see this substance's particles move";
+    slot.addEventListener("click", () => onInspect?.());
+
+    const [mp, bp] = meltingBoiling(el);
+    const phaseRow = div("chem-slot-phase-row");
+    const PHASE_TARGET_K = { solid: Math.max(0, mp - 50), liquid: Math.round((mp + bp) / 2), gas: bp + 50 };
+    for (const p of ["solid", "liquid", "gas"]) {
+      const btn = document.createElement("button");
+      btn.className = "chem-phase-btn" + (phase === p ? " active" : "");
+      btn.textContent = p;
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        onTemp(PHASE_TARGET_K[p]);
+        onTempCommit?.();
+      });
+      phaseRow.appendChild(btn);
+    }
+    slot.appendChild(phaseRow);
 
     const tempRow = div("chem-slot-temp");
     const tempLabel = document.createElement("span");
@@ -345,6 +422,10 @@ function mixSlot(entry, { onClear, onTemp }) {
       tempLabel.textContent = `${tempInput.value} K`;
       onTemp(parseInt(tempInput.value, 10));
     });
+    // "change" fires once, when the slider is released — unlike "input"
+    // (which fires continuously while dragging), this is the right moment
+    // to re-run the reaction check without the 3D view jumping every tick.
+    tempInput.addEventListener("change", (e) => { e.stopPropagation(); onTempCommit?.(); });
     tempRow.appendChild(tempInput);
     tempRow.appendChild(tempLabel);
     slot.appendChild(tempRow);

@@ -1,3 +1,9 @@
 .DS_Store
 *.log
 node_modules/
+server/data.json
+server/data.json.tmp
+server/outbox/
+server/newsletter-log.txt
+.vercel
+.env*

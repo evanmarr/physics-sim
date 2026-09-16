@@ -1,4 +1,4 @@
-import { Renderer } from "./render.js";
+import { Renderer, openSpeedUnitMenu, currentSpeedUnitLabel } from "./render.js";
 import { renderPalette } from "./palette.js";
 import { renderPanel, renderPhysicsMathPanel } from "./panel.js";
 import { CHALLENGES, findChallenge, ChallengeTracker } from "./challenges.js";
@@ -8,25 +8,96 @@ import { loadState, saveState, clearSave } from "./storage.js";
 import { snap, WORLD } from "./world.js";
 import { ChemistryMode } from "./chemistry.js";
 import { AstronomyMode } from "./astronomy.js";
+import { HistoryMode } from "./history.js";
+import { CybersecurityMode } from "./cybersecurity.js";
+import { MathematicsMode } from "./mathematics.js";
+import { WhiteboardMode } from "./whiteboard.js";
+import { EconomicsMode } from "./economics.js";
+import { ZoologyMode } from "./zoology.js";
+import { SoundMode } from "./sound.js";
+import { SustainabilityMode } from "./sustainability.js";
 import { traceLightRays } from "./lightOptics.js";
 import { openQuiz } from "./quiz.js";
+import { initAuthUI, openSavesPanel, sendFeedback, fetchCommunitySimById, verifyUnlockCode, escapeHtml, getUser, onAuthChange, fetchFeaturedSims, fetchCommunitySims, fetchMyFavoriteIds, fetchItems } from "./auth.js";
+import { difficultyBadgeHtml } from "./challengeTiers.js";
+import { initClassroomUI } from "./classroom.js";
+import { initDashboardUI, registerShareApplier } from "./dashboard.js";
+import { initOnboarding } from "./onboarding.js";
+import { initTutorial } from "./tutorial.js";
+import { initDeviceMode, showPrompt as showDeviceModePrompt } from "./deviceMode.js";
+import { toggleUnitSystem, distanceUnitSuffix, weightUnitSuffix, gridSquareInUnits } from "./units.js";
+import { confirmPopup, alertPopup, promptPopup } from "./popup.js";
+import { startLoadingAnimation, finishLoading } from "./loading.js";
+import { generateSnapshot } from "./snapshot.js";
 
 const state = {
   objects: [],
-  selectedId: null,
+  selectedId: null, // set only when selectedIds has exactly one member — see syncSelectedId()
+  selectedIds: new Set(),
   playing: false,
   gravity: 1,
   completedChallenges: new Set(),
   activeChallengeId: null,
   mathPanelOpen: true,
   lightMode: false,
+  showMagneticField: false,
+  grabToolActive: false,
+  grabShape: "ball",
+  // Set whenever a world is loaded from somewhere that could carry a
+  // publish-time lock code (My Worlds, Community Sims Open, a shared link)
+  // — see requestUnlock() and panel.js's Locked checkbox. Null means
+  // "nothing here is tied to any code," so Locked objects unlock for free.
+  worldLock: null,
+  simSpeed: 1,
+  multiSelectMode: false, // mobile-only: tapping objects adds to selection instead of replacing it
 };
 
 let sim = null;
 let tracker = null;
-let clipboard = null; // in-app copy/paste buffer — a spec, not the OS clipboard
+let clipboard = null; // in-app copy/paste buffer — an array of specs, not the OS clipboard
 let chemistryMode = null;
 let astronomyMode = null;
+let historyMode = null;
+let cybersecurityMode = null;
+let mathematicsMode = null;
+let whiteboardMode = null;
+let economicsMode = null;
+let zoologyMode = null;
+let soundMode = null;
+let sustainabilityMode = null;
+
+// Old saves stored a rope as x/y + rotation + length; the current model is
+// two independent endpoints (x,y) and (x2,y2). Backfill x2/y2 from the old
+// fields so one saved before this change still loads with the same shape
+// instead of collapsing to a zero-length default.
+function migrateRopeSpecs(objects) {
+  for (const spec of objects) {
+    if (spec.type !== "rope") continue;
+    if (spec.x2 == null) {
+      const rad = (spec.rotation || 0) * (Math.PI / 180);
+      const length = spec.length ?? 240;
+      spec.x2 = spec.x + Math.cos(rad) * length;
+      spec.y2 = spec.y + Math.sin(rad) * length;
+    }
+    // Rope is now rubber-only (see panel.js) — force any older save's rope
+    // back to rubber rather than leaving it stuck on a material the picker
+    // can no longer set.
+    spec.material = "rubber";
+  }
+}
+
+// The circuitry feature (battery/lightbulb/switch/resistor/transistor, and
+// the old always-static circuit motor) was removed — drop any of those
+// types left over in an older save rather than rendering broken objects.
+// NOTE: "wire" is NOT in this set even though the old circuitry feature had
+// one — that identifier was later reused for the current button/bomb/cannon
+// wiring feature (see physics.js's _computeWireLinks), which is very much
+// alive, so filtering it here would silently delete a real, working object
+// out of anyone's saved world every time it loads.
+const REMOVED_TYPES = new Set(["battery", "lightbulb", "switchComp", "resistor", "transistor", "motor", "track"]);
+function dropRemovedTypes(objects) {
+  return objects.filter((spec) => !REMOVED_TYPES.has(spec.type));
+}
 
 function starterScene() {
   return [
@@ -34,19 +105,79 @@ function starterScene() {
   ];
 }
 
+// Every modal in the app (Quiz, Challenges, Sign in, My Worlds/Saves, the
+// custom confirm/alert popup, and each mode's own "X Challenges" dialog)
+// shares the same .modal (dimmed backdrop) / .modal-box (content) markup —
+// one delegated listener here closes any of them on a backdrop click
+// (clicking the box itself never bubbles a click whose target IS .modal),
+// so newly-added modals get this for free without their own wiring.
+document.addEventListener("click", (e) => {
+  if (e.target.classList?.contains("modal") && !e.target.classList.contains("hidden")) {
+    e.target.classList.add("hidden");
+  }
+});
+
 function boot() {
+  initDeviceMode();
   const saved = loadState();
   if (saved && saved.objects.length) {
     Object.assign(state, saved);
   } else {
     state.objects = starterScene();
   }
+  state.objects = dropRemovedTypes(state.objects);
+  migrateRopeSpecs(state.objects);
 
   const svg = document.getElementById("canvas");
   const renderer = new Renderer(svg, {
-    onSelect: (id) => { if (!state.playing) { state.selectedId = id; renderAll(); renderPanelUI(); } },
-    onMove: (id, x, y) => { patchObject(id, { x, y }); renderPanelUI(); },
+    onSelect: (id, shiftKey) => {
+      if (state.playing) return;
+      if (id == null) state.selectedIds = new Set();
+      else if (shiftKey || state.multiSelectMode) {
+        if (state.selectedIds.has(id)) state.selectedIds.delete(id);
+        else state.selectedIds.add(id);
+      } else {
+        state.selectedIds = new Set([id]);
+      }
+      syncSelectedId();
+      renderAll();
+      renderPanelUI();
+    },
+    onMultiSelect: (ids) => {
+      if (state.playing) return;
+      ids.forEach((id) => state.selectedIds.add(id));
+      syncSelectedId();
+      renderAll();
+      renderPanelUI();
+    },
+    onMoveMany: (moves) => {
+      moves.forEach(({ id, ...patch }) => patchObjectSilent(id, patch));
+      renderAll();
+      scheduleSave();
+    },
+    onRotateMany: (moves) => {
+      moves.forEach(({ id, ...patch }) => patchObjectSilent(id, patch));
+      renderAll();
+      scheduleSave();
+    },
     onRotate: (id, deg) => { patchObject(id, { rotation: deg }); renderPanelUI(); },
+    onEndpointMove: (id, { x, y, x2, y2 }) => { patchObject(id, { x, y, x2, y2 }); },
+    // Hovering to right-click doesn't exist on a touchscreen, so mobile mode
+    // gets its own gesture for the same jobs: double-tap an object for a
+    // Copy menu, double-tap empty space for a Paste menu.
+    onObjectDblClick: (id, clientX, clientY) => {
+      if (state.playing || document.documentElement.dataset.device !== "mobile") return;
+      state.selectedIds = new Set([id]);
+      syncSelectedId();
+      renderAll();
+      renderPanelUI();
+      showTouchMenu(clientX, clientY, [{ label: "Copy", onClick: copySelected }]);
+    },
+    onEmptyDblClick: (worldX, worldY, clientX, clientY) => {
+      if (state.playing || document.documentElement.dataset.device !== "mobile" || !clipboard?.length) return;
+      showTouchMenu(clientX, clientY, [{ label: "Paste", onClick: () => pasteClipboardAt(worldX, worldY) }]);
+    },
+    onLockedEditAttempt: () => showToast("Locked — uncheck Locked in the panel to edit"),
   });
   window._renderer = renderer;
 
@@ -66,9 +197,10 @@ function boot() {
 
 function renderAll() {
   const items = state.objects.map(specToRenderItem);
-  window._renderer.render(items, { editable: !state.playing, selectedId: state.selectedId });
+  window._renderer.render(items, { editable: !state.playing, selectedId: state.selectedId, selectedIds: state.selectedIds });
   updateTrajectoryPreview();
   updateLightRays(items);
+  updateMagneticField(items);
 }
 
 function specToRenderItem(s) {
@@ -78,9 +210,105 @@ function specToRenderItem(s) {
 function patchObject(id, patch) {
   const spec = state.objects.find((o) => o.id === id);
   if (!spec) return;
+  markUndo();
   Object.assign(spec, patch);
   renderAll();
   scheduleSave();
+}
+
+// Same as patchObject but skips the render/save — for batch updates (e.g.
+// dragging a multi-selection) where the caller renders once at the end.
+function patchObjectSilent(id, patch) {
+  const spec = state.objects.find((o) => o.id === id);
+  if (!spec) return;
+  markUndo();
+  Object.assign(spec, patch);
+}
+
+// ---- Undo (physics mode) ----
+// Every edit that mutates state.objects/gravity funnels through here.
+// Continuous bursts (dragging a slider, dragging an object) are coalesced
+// into a single undo step by capturing the "before" snapshot once and only
+// committing it after things go quiet for a moment — same debounce idea as
+// scheduleSave, so an undo reverts a whole drag, not one pixel of it.
+const MAX_UNDO = 50;
+let undoStack = [];
+let redoStack = [];
+let pendingUndoSnapshot = null;
+let undoCommitTimer = null;
+
+function snapshotForUndo() {
+  return { objects: JSON.parse(JSON.stringify(state.objects)), gravity: state.gravity };
+}
+
+function commitPendingUndo() {
+  clearTimeout(undoCommitTimer);
+  if (!pendingUndoSnapshot) return;
+  undoStack.push(pendingUndoSnapshot);
+  if (undoStack.length > MAX_UNDO) undoStack.shift();
+  pendingUndoSnapshot = null;
+  updateUndoButton();
+}
+
+function markUndo() {
+  if (!pendingUndoSnapshot) { pendingUndoSnapshot = snapshotForUndo(); redoStack = []; }
+  clearTimeout(undoCommitTimer);
+  undoCommitTimer = setTimeout(commitPendingUndo, 400);
+}
+
+// For one-shot actions (delete, paste, clear, load) — commits immediately
+// as its own step, so it doesn't get merged into an unrelated pending drag.
+function pushUndoNow() {
+  commitPendingUndo();
+  undoStack.push(snapshotForUndo());
+  if (undoStack.length > MAX_UNDO) undoStack.shift();
+  redoStack = [];
+  updateUndoButton();
+}
+
+function applySnapshot(snap) {
+  state.objects = snap.objects;
+  state.gravity = snap.gravity;
+  document.getElementById("gravity-slider").value = state.gravity;
+  document.getElementById("gravity-val").textContent = state.gravity.toFixed(1);
+  if (sim) sim.setGravity(state.gravity);
+  state.selectedIds = new Set();
+  state.selectedId = null;
+  renderAll();
+  renderPanelUI();
+  scheduleSave();
+  updateUndoButton();
+}
+
+function undo() {
+  if (state.playing) return;
+  commitPendingUndo();
+  const snap = undoStack.pop();
+  if (!snap) return;
+  redoStack.push(snapshotForUndo());
+  applySnapshot(snap);
+}
+
+function redo() {
+  if (state.playing) return;
+  const snap = redoStack.pop();
+  if (!snap) return;
+  undoStack.push(snapshotForUndo());
+  applySnapshot(snap);
+}
+
+function updateUndoButton() {
+  const undoBtn = document.getElementById("undo-btn");
+  if (undoBtn) undoBtn.disabled = undoStack.length === 0;
+  const redoBtn = document.getElementById("redo-btn");
+  if (redoBtn) redoBtn.disabled = redoStack.length === 0;
+}
+
+// state.selectedId mirrors state.selectedIds only when it's a single
+// object — that's the only case the property panel and rotate handle
+// know how to show.
+function syncSelectedId() {
+  state.selectedId = state.selectedIds.size === 1 ? [...state.selectedIds][0] : null;
 }
 
 let saveTimer = null;
@@ -100,10 +328,29 @@ function renderPanelUI() {
   renderPanel(document.getElementById("prop-panel"), spec, state, {
     onChange: (id, patch) => { patchObject(id, patch); },
     onDelete: (id) => { deleteObject(id); },
+    onUnlock: () => requestUnlock(),
     mathPanelOpen: state.mathPanelOpen,
     onOpenMath: () => { state.mathPanelOpen = true; renderMathPanelUI(); renderPanelUI(); },
   });
   renderMathPanelUI();
+  const joinBtn = document.getElementById("join-btn");
+  if (joinBtn) joinBtn.disabled = state.selectedIds.size < 2 || state.playing;
+}
+
+// The one path that clears a Locked checkbox — free when this world was
+// never tied to a publish-time code (state.worldLock is null/hasLock false),
+// otherwise prompts for the 6-digit code once per world-load and remembers
+// a correct entry for the rest of the session (state.worldLock.verified).
+async function requestUnlock() {
+  if (!state.worldLock?.hasLock) return true;
+  if (state.worldLock.verified) return true;
+  const code = await promptPopup("Enter the 6-digit code to unlock objects in this world:", { title: "Locked", placeholder: "123456", maxLength: 6 });
+  if (code === null) return false;
+  if (!/^\d{6}$/.test(code.trim())) { await alertPopup("Enter exactly 6 digits.", { title: "Invalid code" }); return false; }
+  const result = await verifyUnlockCode(state.worldLock.kind, state.worldLock.id, code.trim());
+  if (!result?.ok) { await alertPopup("That code isn't right.", { title: "Couldn't unlock" }); return false; }
+  state.worldLock.verified = true;
+  return true;
 }
 
 function renderMathPanelUI() {
@@ -120,34 +367,110 @@ function renderMathPanelUI() {
 }
 
 function deleteObject(id) {
+  const spec = state.objects.find((o) => o.id === id);
+  if (spec?.locked) { showToast("Locked — uncheck Locked in the panel to edit"); return; }
+  pushUndoNow();
   state.objects = state.objects.filter((o) => o.id !== id);
   state.objects.forEach((o) => { if (o.targetId === id) o.targetId = null; });
-  if (state.selectedId === id) state.selectedId = null;
+  state.selectedIds.delete(id);
+  syncSelectedId();
   renderAll();
   renderPanelUI();
   scheduleSave();
 }
 
+// Flexible/routing objects, not solid rigid shapes — welding one to
+// something else doesn't mean anything physically, so Join refuses rather
+// than silently doing something nonsensical.
+const JOIN_INCOMPATIBLE_TYPES = new Set(["rope", "wire"]);
+
+function joinSelected() {
+  if (state.selectedIds.size < 2 || state.playing) return;
+  const specs = state.objects.filter((o) => state.selectedIds.has(o.id));
+  if (specs.some((o) => o.locked)) { showToast("Locked — uncheck Locked in the panel to edit"); return; }
+  const bad = specs.filter((o) => JOIN_INCOMPATIBLE_TYPES.has(o.type));
+  if (bad.length) {
+    const labels = [...new Set(bad.map((o) => OBJECT_DEFS[o.type].label))].join(", ");
+    showToast(`Can't join ${labels} — not a rigid shape.`);
+    return;
+  }
+  pushUndoNow();
+  const groupId = makeId("join");
+  for (const spec of specs) spec.joinGroup = groupId;
+  renderAll();
+  renderPanelUI();
+  scheduleSave();
+  showToast(`Joined ${specs.length} objects`);
+}
+
+function deleteSelected() {
+  if (!state.selectedIds.size) return;
+  const locked = state.objects.filter((o) => state.selectedIds.has(o.id) && o.locked);
+  const ids = new Set([...state.selectedIds].filter((id) => !locked.some((o) => o.id === id)));
+  if (!ids.size) { showToast("Locked — uncheck Locked in the panel to edit"); return; }
+  pushUndoNow();
+  state.objects = state.objects.filter((o) => !ids.has(o.id));
+  state.objects.forEach((o) => { if (o.targetId && ids.has(o.targetId)) o.targetId = null; });
+  state.selectedIds = new Set();
+  syncSelectedId();
+  renderAll();
+  renderPanelUI();
+  scheduleSave();
+  if (locked.length) showToast(`Deleted ${ids.size} — ${locked.length} locked object${locked.length === 1 ? "" : "s"} skipped`);
+}
+
 // ---- Cannon predicted-trajectory preview ----
+// Stepping a real physics engine (~10-15ms) is far more than the old
+// hand-rolled formula cost, and the Fire Angle/Power sliders call this on
+// every single `input` event while being dragged — debounce so a drag
+// doesn't chain dozens of these back to back and visibly lag, while still
+// updating promptly (60ms) once the user pauses or releases.
+let trajectoryDebounce = null;
 function updateTrajectoryPreview() {
+  clearTimeout(trajectoryDebounce);
   if (state.playing) return;
   const spec = state.objects.find((o) => o.id === state.selectedId);
   if (!spec || spec.type !== "cannon") { window._renderer.renderTrajectory(null); return; }
-  const rad = (spec.launchRotation ?? 0) * Math.PI / 180;
-  const speed = spec.power ?? 22;
-  const muzzleDist = spec.width / 2 + 20;
-  let x = spec.x + Math.cos(rad) * muzzleDist;
-  let y = spec.y + Math.sin(rad) * muzzleDist;
-  let vx = Math.cos(rad) * speed, vy = Math.sin(rad) * speed;
-  const g = state.gravity * 0.001; // matches PhysicsSim's DENSITY_SCALE-consistent gravity units
-  const points = [{ x, y }];
-  for (let t = 0; t < 220; t++) {
-    vy += g;
-    x += vx; y += vy;
-    if (t % 4 === 0) points.push({ x, y });
-    if (y > WORLD.maxY || x < WORLD.minX || x > WORLD.maxX) break;
+  trajectoryDebounce = setTimeout(() => {
+    window._renderer.renderTrajectory(simulateCannonTrajectory(spec, state.gravity, state.objects));
+  }, 60);
+}
+
+// Runs a real, throwaway headless physics step-through of what firing this
+// cannon would actually do — same gravity, same air friction, and (by
+// including every other object currently in the scene, not just the
+// cannon) the same collisions — instead of a hand-rolled kinematic formula.
+// That formula used to guess gravity's per-tick effect as `gravity * 0.001`,
+// off by roughly 280x from what Matter's own force/deltaTimeSquared
+// integration actually produces (so the dashed line showed the ball
+// climbing forever and never arcing back down), ignored air friction
+// entirely, and never knew about anything else in the scene, so a shot that
+// would really bounce off a board just drew straight through it. Reusing
+// PhysicsSim's own _doCannonFire and stepping its engine directly
+// guarantees the preview always matches whatever the real simulation does,
+// since there's only one implementation instead of two.
+function simulateCannonTrajectory(spec, gravity, allSpecs) {
+  const sim = new PhysicsSim(allSpecs.map((s) => ({ ...s })), gravity, {});
+  // The preview can't know in advance which ball (radius/material) will
+  // actually be caught and fired — a default 26-radius rubber ball, same as
+  // the palette's own default Ball, is a reasonable stand-in. _doCannonFire
+  // only reads .plugin.render off this and never needs it added to the
+  // world itself.
+  const dummyBall = Matter.Bodies.circle(spec.x, spec.y, 26, {});
+  dummyBall.plugin = { render: { radius: 26, material: "rubber" } };
+  sim._doCannonFire(spec.id, dummyBall);
+  const fired = Matter.Composite.allBodies(sim.engine.world).find((b) => b.label?.startsWith("ball:firedball"));
+  if (!fired) { sim.stop(); return null; }
+
+  const points = [{ x: fired.position.x, y: fired.position.y }];
+  for (let t = 0; t < 240; t++) {
+    sim._lastDelta = 16;
+    Matter.Engine.update(sim.engine, 16);
+    if (t % 4 === 0) points.push({ x: fired.position.x, y: fired.position.y });
+    if (fired.position.y > WORLD.maxY || fired.position.x < WORLD.minX || fired.position.x > WORLD.maxX) break;
   }
-  window._renderer.renderTrajectory(points);
+  sim.stop();
+  return points;
 }
 
 // ---- Light Mode ----
@@ -157,6 +480,11 @@ function updateLightRays(items) {
   window._renderer.renderLightRays(rays);
 }
 
+function updateMagneticField(items) {
+  if (!state.showMagneticField) { window._renderer.renderMagneticField([]); return; }
+  window._renderer.renderMagneticField(items.filter((it) => it.type === "magnet"));
+}
+
 // ---- Cosmetic water/wind particles (edit mode preview + during Play) ----
 let particleClock = 0;
 let particleRafId = null;
@@ -164,7 +492,14 @@ function startParticleLoop() {
   stopParticleLoop();
   const loop = () => {
     particleClock += 1;
-    const items = state.playing ? null : state.objects; // during Play, particles are driven by onFrame instead
+    // Checking `sim` here (not state.playing) matters specifically for
+    // Pause: state.playing goes false on pause too, and this decorative
+    // loop used to read that as "back to editing," redrawing wind streaks
+    // at their original blueprint positions and stomping the frozen paused
+    // frame the real sim had just drawn — visibly "jumping" wind back on
+    // every pause. `sim` staying alive (just not running) is what actually
+    // distinguishes paused from truly stopped.
+    const items = sim ? null : state.objects;
     if (items) window._renderer.renderParticles(buildParticles(items, particleClock));
     particleRafId = requestAnimationFrame(loop);
   };
@@ -178,16 +513,6 @@ function stopParticleLoop() {
 function buildParticles(items, clock) {
   const particles = [];
   for (const it of items) {
-    if (it.material === "water") {
-      const w = it.width ?? it.radius * 2 ?? 100, h = it.height ?? it.radius * 2 ?? 100;
-      const count = Math.max(3, Math.round((w * h) / 9000));
-      for (let i = 0; i < count; i++) {
-        const seed = hashSeed(it.id, i);
-        const cx = it.x - w / 2 + ((seed * 97) % w);
-        const cycle = ((clock * 0.6 + seed * 37) % h);
-        particles.push({ id: `${it.id}_b${i}`, kind: "bubble", x: cx, y: it.y + h / 2 - cycle, r: 2 + (seed % 3), opacity: 0.35 });
-      }
-    }
     if (it.type === "fan") {
       const w = it.width, h = it.height, range = it.range ?? 400;
       const rad = (it.rotation || 0) * Math.PI / 180;
@@ -217,23 +542,89 @@ function hashSeed(id, i) {
   return Math.abs(h) % 997;
 }
 
+// A scanned/clicked Community Sim share link (see auth.js's showShareLink)
+// lands here as ?sim=<id> — fetched and opened in the right mode, then the
+// param is stripped so refreshing/sharing the resulting URL from the
+// browser bar doesn't keep re-opening it.
+async function _openSharedSimFromUrl() {
+  const id = new URLSearchParams(location.search).get("sim");
+  if (!id) return;
+  history.replaceState(null, "", location.pathname);
+  await openCommunitySimById(id);
+}
+
+function applyPhysicsWorldData(renderer, data, lockMeta = null) {
+  if (state.playing) togglePlay(renderer);
+  pushUndoNow();
+  state.objects = dropRemovedTypes(data.objects || []);
+  migrateRopeSpecs(state.objects);
+  state.gravity = data.gravity ?? 1;
+  document.getElementById("gravity-slider").value = state.gravity;
+  document.getElementById("gravity-val").textContent = state.gravity.toFixed(1);
+  sim?.setGravity(state.gravity);
+  state.selectedIds = new Set();
+  state.selectedId = null;
+  state.activeChallengeId = null;
+  // Each freshly-loaded world gets its own lock context — a code entered to
+  // unlock the previous world's objects shouldn't carry over and silently
+  // unlock this one's too.
+  state.worldLock = lockMeta ? { ...lockMeta, verified: false } : null;
+  renderer.fitToObjects(state.objects);
+  renderAll();
+  renderPanelUI();
+  scheduleSave();
+}
+
 function wireTopbar(renderer) {
   const playBtn = document.getElementById("play-btn");
   playBtn.addEventListener("click", () => togglePlay(renderer));
+  document.getElementById("reset-btn").addEventListener("click", () => resetPhysics(renderer));
+  document.getElementById("grab-tool-btn").addEventListener("click", () => setGrabToolActive(!state.grabToolActive));
+  document.getElementById("grab-shape-select").addEventListener("change", (e) => {
+    state.grabShape = e.target.value;
+    if (state.grabToolActive && sim) { sim.disableGrabTool(); sim.enableGrabTool(state.grabShape); }
+  });
 
   const gravitySlider = document.getElementById("gravity-slider");
   const gravityVal = document.getElementById("gravity-val");
   gravitySlider.addEventListener("input", () => {
+    markUndo();
     state.gravity = parseFloat(gravitySlider.value);
     gravityVal.textContent = state.gravity.toFixed(1);
     if (sim) sim.setGravity(state.gravity);
     updateTrajectoryPreview();
   });
 
-  document.getElementById("clear-btn").addEventListener("click", () => {
+  const speedSlider = document.getElementById("speed-slider");
+  const speedVal = document.getElementById("speed-val");
+  speedSlider.addEventListener("input", () => {
+    state.simSpeed = parseFloat(speedSlider.value);
+    speedVal.textContent = state.simSpeed.toFixed(1);
+    if (sim) sim.setTimeScale(state.simSpeed);
+  });
+
+  document.getElementById("speed-reset-btn").addEventListener("click", () => {
+    state.simSpeed = 1;
+    speedSlider.value = 1;
+    speedVal.textContent = "1.0";
+    if (sim) sim.setTimeScale(1);
+  });
+
+  document.getElementById("gravity-reset-btn").addEventListener("click", () => {
+    markUndo();
+    state.gravity = 1;
+    gravitySlider.value = 1;
+    gravityVal.textContent = "1.0";
+    if (sim) sim.setGravity(state.gravity);
+    updateTrajectoryPreview();
+  });
+
+  document.getElementById("clear-btn").addEventListener("click", async () => {
     if (state.playing) togglePlay(renderer);
-    if (!confirm("Clear the whole workspace? This can't be undone.")) return;
+    if (!(await confirmPopup("Clear the whole workspace?", { title: "Clear workspace", confirmLabel: "Clear", danger: true }))) return;
+    pushUndoNow();
     state.objects = starterScene();
+    state.selectedIds = new Set();
     state.selectedId = null;
     state.activeChallengeId = null;
     renderAll();
@@ -241,16 +632,131 @@ function wireTopbar(renderer) {
     scheduleSave();
   });
 
+  document.getElementById("undo-btn").addEventListener("click", () => undo());
+  document.getElementById("redo-btn").addEventListener("click", () => redo());
+  document.getElementById("join-btn").addEventListener("click", () => joinSelected());
+
   document.getElementById("light-mode-btn").addEventListener("click", () => {
     state.lightMode = !state.lightMode;
     document.getElementById("light-mode-btn").classList.toggle("active", state.lightMode);
     renderAll();
   });
 
+  document.getElementById("field-mode-btn").addEventListener("click", () => {
+    state.showMagneticField = !state.showMagneticField;
+    document.getElementById("field-mode-btn").classList.toggle("active", state.showMagneticField);
+    renderAll();
+  });
+
   document.getElementById("quiz-btn").addEventListener("click", () => openQuiz(state.mode));
 
+  document.getElementById("my-worlds-btn").addEventListener("click", () => {
+    openSavesPanel({
+      kind: "worlds",
+      title: "My Physics Worlds",
+      itemNoun: "world",
+      serialize: () => ({ objects: state.objects, gravity: state.gravity }),
+      apply: (data, lockMeta) => applyPhysicsWorldData(renderer, data, lockMeta),
+      getSnapshot: () => generateSnapshot(state.objects),
+    });
+  });
+  registerShareApplier("worlds", (data) => { window._setMode("physics"); applyPhysicsWorldData(window._renderer, data); });
+  registerShareApplier("mathItems", (data) => { window._setMode("mathematics"); mathematicsMode.applySavedData(data); });
+  _openSharedSimFromUrl();
+
+  initAuthUI();
+  initClassroomUI();
+  initDashboardUI();
+  initOnboarding();
+  initTutorial();
+  document.getElementById("about-btn").addEventListener("click", () => document.getElementById("about-modal").classList.remove("hidden"));
+  document.getElementById("about-close").addEventListener("click", () => document.getElementById("about-modal").classList.add("hidden"));
+  document.getElementById("donate-btn").addEventListener("click", () => {
+    window.open("https://gl.me/u/GSNTMHh9xg5J", "_blank", "noopener");
+  });
+  wireFeedback();
+
+  wireMenu();
   wireTheme();
+  document.getElementById("device-mode-btn").addEventListener("click", () => showDeviceModePrompt(true));
+  wireUnitsToggle();
+  wireMobileEditControls();
   startParticleLoop();
+}
+
+function wireMobileEditControls() {
+  document.getElementById("mobile-copy-btn").addEventListener("click", copySelected);
+  document.getElementById("mobile-paste-btn").addEventListener("click", pasteClipboard);
+  const multiBtn = document.getElementById("mobile-multiselect-btn");
+  multiBtn.addEventListener("click", () => {
+    state.multiSelectMode = !state.multiSelectMode;
+    multiBtn.classList.toggle("active", state.multiSelectMode);
+  });
+}
+
+function wireUnitsToggle() {
+  const btn = document.getElementById("units-toggle-btn");
+  const badge = document.getElementById("grid-scale-badge");
+  function refresh() {
+    btn.textContent = `${distanceUnitSuffix()}/${weightUnitSuffix()}`;
+    const squares = gridSquareInUnits();
+    const shown = Number(squares.toFixed(2));
+    badge.textContent = `1 square = ${shown} ${distanceUnitSuffix()}`;
+  }
+  btn.addEventListener("click", () => {
+    toggleUnitSystem();
+    refresh();
+    renderPanelUI();
+  });
+  refresh();
+
+  // A moving object's own speed readout has always had its own unit
+  // choice (double-click the label in the canvas) — this button is just a
+  // second, reliable way into that same menu, since double-clicking a
+  // label that's actively moving is fiddly at best.
+  const speedBtn = document.getElementById("speed-unit-btn");
+  speedBtn.textContent = currentSpeedUnitLabel();
+  speedBtn.addEventListener("click", () => {
+    const rect = speedBtn.getBoundingClientRect();
+    openSpeedUnitMenu(rect.left + rect.width / 2, rect.bottom, (label) => { speedBtn.textContent = label; });
+  });
+}
+
+function wireFeedback() {
+  const modal = document.getElementById("feedback-modal");
+  const text = document.getElementById("feedback-text");
+  const open = () => { text.value = ""; modal.classList.remove("hidden"); text.focus(); };
+  const close = () => modal.classList.add("hidden");
+
+  document.getElementById("feedback-btn").addEventListener("click", open);
+  document.getElementById("feedback-cancel").addEventListener("click", close);
+  document.getElementById("feedback-submit").addEventListener("click", async () => {
+    const message = text.value.trim();
+    if (!message) { text.focus(); return; }
+    const result = await sendFeedback(message);
+    if (result.error) { await alertPopup(result.error, { title: "Couldn't send feedback" }); return; }
+    close();
+    showToast("Thanks — feedback sent.");
+  });
+}
+
+function wireMenu() {
+  const btn = document.getElementById("menu-btn");
+  const dropdown = document.getElementById("menu-dropdown");
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    dropdown.classList.toggle("hidden");
+  });
+  // Any button inside the menu closes it once clicked, same as the account
+  // dropdown — nobody wants it still hanging open over whatever just opened.
+  dropdown.addEventListener("click", (e) => {
+    if (e.target.closest("button")) dropdown.classList.add("hidden");
+  });
+  document.addEventListener("click", (e) => {
+    if (!dropdown.classList.contains("hidden") && !document.getElementById("menu-wrap").contains(e.target)) {
+      dropdown.classList.add("hidden");
+    }
+  });
 }
 
 function wireTheme() {
@@ -267,18 +773,43 @@ function wireTheme() {
 function applyTheme(theme) {
   if (theme === "dark") {
     document.documentElement.dataset.theme = "dark";
-    document.getElementById("theme-toggle").textContent = "☀";
+    document.getElementById("theme-toggle").textContent = "Light Mode";
   } else {
     delete document.documentElement.dataset.theme;
-    document.getElementById("theme-toggle").textContent = "🌙";
+    document.getElementById("theme-toggle").textContent = "Dark Mode";
   }
+  // The Particle Physics iframe demos default to a dark palette and only
+  // have a "light" override block (no bare/default light rules), so the
+  // light case needs an explicit data-theme="light" — deleting the
+  // attribute would just fall back to their dark default. Same-origin
+  // (served from this same app), so its document is reachable straight
+  // through contentDocument, no postMessage needed.
+  const particlesDoc = document.getElementById("particles-frame")?.contentDocument;
+  if (particlesDoc) particlesDoc.documentElement.dataset.theme = theme;
 }
 
+// Play/Pause toggle. Pausing freezes every body exactly where it is (the
+// sim itself stays alive underneath, just not ticking) so Play resumes
+// from that same frozen moment — it does NOT rewind to the blueprint.
+// That's what Reset is for (see resetPhysics below).
 function togglePlay(renderer) {
   const playBtn = document.getElementById("play-btn");
   const banner = document.getElementById("mode-banner");
 
-  if (!state.playing) {
+  if (state.playing) {
+    sim?.pause();
+    state.playing = false;
+    playBtn.textContent = "▶ Play";
+    playBtn.classList.remove("playing");
+    banner.textContent = "PAUSED — space to resume";
+  } else if (sim) {
+    sim.resume();
+    state.playing = true;
+    playBtn.textContent = "❚❚ Pause";
+    playBtn.classList.add("playing");
+    banner.textContent = "SIMULATING — space to pause";
+  } else {
+    state.selectedIds = new Set();
     state.selectedId = null;
     renderPanelUI();
     window._renderer.renderTrajectory(null);
@@ -289,24 +820,71 @@ function togglePlay(renderer) {
         renderer.render(items, { editable: false });
         checkChallengeFrame(items);
         if (state.lightMode) updateLightRays(items);
+        if (state.showMagneticField) updateMagneticField(items);
         window._renderer.renderParticles(sim.collectParticleItems());
+        window._renderer.renderRopeTubes(sim.collectRopePaths());
       },
       onEvent: (event) => handleSimEvent(event),
     });
+    sim.setTimeScale(state.simSpeed);
     sim.start();
+    if (state.grabToolActive) sim.enableGrabTool(state.grabShape);
     state.playing = true;
-    playBtn.textContent = "■ Stop";
+    playBtn.textContent = "❚❚ Pause";
     playBtn.classList.add("playing");
+    banner.textContent = "SIMULATING — space to pause";
     banner.classList.remove("hidden");
-  } else {
-    sim?.stop();
-    sim = null;
-    state.playing = false;
-    playBtn.textContent = "▶ Play";
-    playBtn.classList.remove("playing");
-    banner.classList.add("hidden");
-    renderAll();
   }
+}
+
+// Reset always reverts to the original blueprint and leaves it stopped —
+// unlike Play/Pause, it never resumes running on its own. Bound to both
+// the Reset button and the R key.
+function resetPhysics(renderer) {
+  sim?.stop();
+  sim = null;
+  state.playing = false;
+  const playBtn = document.getElementById("play-btn");
+  playBtn.textContent = "▶ Play";
+  playBtn.classList.remove("playing");
+  document.getElementById("mode-banner").classList.add("hidden");
+  window._renderer.renderRopeTubes([]);
+  window._renderer.renderParticles([]);
+  setGrabToolActive(false);
+  renderAll();
+}
+
+// Grab tool: while active during Play, the pointer drives a real Matter
+// body (see PhysicsSim.enableGrabTool) so moving the mouse can bump other
+// objects around with real momentum, not just a visual cursor.
+function setGrabToolActive(active) {
+  state.grabToolActive = active;
+  const btn = document.getElementById("grab-tool-btn");
+  btn.classList.toggle("active", active);
+  const svg = document.getElementById("canvas");
+  window._renderer.setGrabActive(active);
+  if (active) {
+    sim?.enableGrabTool(state.grabShape);
+    svg.addEventListener("pointerdown", onGrabPointerDown);
+    svg.addEventListener("pointermove", onGrabPointerMove);
+  } else {
+    sim?.disableGrabTool();
+    svg.removeEventListener("pointerdown", onGrabPointerDown);
+    svg.removeEventListener("pointermove", onGrabPointerMove);
+  }
+}
+
+// Captures the pointer to the canvas on touch-down so a fast finger swipe
+// that briefly slips past the SVG's edge keeps generating pointermove
+// events on it instead of silently losing tracking mid-drag.
+function onGrabPointerDown(ev) {
+  try { ev.currentTarget.setPointerCapture(ev.pointerId); } catch { /* ignore */ }
+}
+
+function onGrabPointerMove(ev) {
+  if (!sim) return;
+  const { x, y } = window._renderer.screenToWorld(ev.clientX, ev.clientY);
+  sim.setGrabTarget(x, y);
 }
 
 function handleSimEvent(event) {
@@ -326,6 +904,34 @@ function awardChallenge(challenge) {
     scheduleSave();
   }
   showToast(`Challenge complete: ${challenge.name}`);
+}
+
+// A tiny floating menu at a screen point — the touch equivalent of a
+// desktop right-click menu, used for double-tap copy/paste on mobile.
+let touchMenuEl = null;
+function showTouchMenu(clientX, clientY, items) {
+  touchMenuEl?.remove();
+  const menu = document.createElement("div");
+  menu.className = "touch-menu";
+  for (const item of items) {
+    const btn = document.createElement("button");
+    btn.textContent = item.label;
+    btn.addEventListener("click", () => { item.onClick(); closeTouchMenu(); });
+    menu.appendChild(btn);
+  }
+  menu.style.left = `${clientX}px`;
+  menu.style.top = `${clientY}px`;
+  document.body.appendChild(menu);
+  touchMenuEl = menu;
+  setTimeout(() => document.addEventListener("pointerdown", closeTouchMenuOutside, true), 0);
+}
+function closeTouchMenu() {
+  touchMenuEl?.remove();
+  touchMenuEl = null;
+  document.removeEventListener("pointerdown", closeTouchMenuOutside, true);
+}
+function closeTouchMenuOutside(e) {
+  if (!touchMenuEl?.contains(e.target)) closeTouchMenu();
 }
 
 function showToast(msg) {
@@ -348,23 +954,65 @@ function wireChallenges() {
       info.className = "info";
       const name = document.createElement("div");
       name.className = "name";
-      name.textContent = c.name + (state.completedChallenges.has(c.id) ? " ✓" : "");
+      name.innerHTML = `${escapeHtml(c.name)}${c.difficulty ? " " + difficultyBadgeHtml(c.difficulty) : ""}${state.completedChallenges.has(c.id) ? " ✓" : ""}`;
       const concept = document.createElement("div");
       concept.className = "concept-tag";
       concept.textContent = c.concept;
       const desc = document.createElement("div");
       desc.className = "desc";
-      desc.textContent = c.description;
+      desc.textContent = c.objective;
       info.appendChild(name);
       info.appendChild(concept);
       info.appendChild(desc);
+      if (c.startingState) {
+        const starting = document.createElement("div");
+        starting.className = "challenge-hint-text";
+        starting.innerHTML = `<strong>Starting state:</strong> ${escapeHtml(c.startingState)}`;
+        info.appendChild(starting);
+      }
+      if (c.successCondition) {
+        const success = document.createElement("div");
+        success.className = "challenge-hint-text";
+        success.innerHTML = `<strong>Success:</strong> ${escapeHtml(c.successCondition)}`;
+        info.appendChild(success);
+      }
+      if (c.hint) {
+        const hintToggle = document.createElement("button");
+        hintToggle.className = "challenge-hint-toggle";
+        hintToggle.textContent = "Show hint";
+        const hintText = document.createElement("div");
+        hintText.className = "challenge-hint-text hidden";
+        hintText.textContent = c.hint;
+        hintToggle.addEventListener("click", () => {
+          hintText.classList.toggle("hidden");
+          hintToggle.textContent = hintText.classList.contains("hidden") ? "Show hint" : "Hide hint";
+        });
+        info.appendChild(hintToggle);
+        info.appendChild(hintText);
+      }
+      if (c.explanation) {
+        const expToggle = document.createElement("button");
+        expToggle.className = "challenge-hint-toggle";
+        expToggle.textContent = "Why this works";
+        const expText = document.createElement("div");
+        expText.className = "challenge-hint-text hidden";
+        expText.innerHTML = `${escapeHtml(c.explanation)}${c.source ? `<br><em>${escapeHtml(c.source)}</em>` : ""}`;
+        expToggle.addEventListener("click", () => {
+          expText.classList.toggle("hidden");
+          expToggle.textContent = expText.classList.contains("hidden") ? "Why this works" : "Hide explanation";
+        });
+        info.appendChild(expToggle);
+        info.appendChild(expText);
+      }
       const btn = document.createElement("button");
       btn.className = "primary";
       btn.textContent = "Load";
-      btn.addEventListener("click", () => {
-        if (!confirm(`Load "${c.name}"? This replaces your current workspace.`)) return;
+      btn.addEventListener("click", async () => {
+        if (!(await confirmPopup(`Load "${c.name}"? This replaces your current workspace.`, { title: "Load challenge", confirmLabel: "Load" }))) return;
+        pushUndoNow();
         state.objects = c.build();
         state.activeChallengeId = c.id;
+        state.selectedIds = new Set();
         state.selectedId = null;
         renderAll();
         renderPanelUI();
@@ -380,22 +1028,615 @@ function wireChallenges() {
   document.getElementById("challenges-close").addEventListener("click", () => modal.classList.add("hidden"));
 }
 
+// The app's front door — a launcher card per section, in the same
+// hero-plus-grid shape as the Particle Physics gallery's own home page (and
+// reusing History's .home-card pattern), so all three read as one family
+// of "pick where to go" screens rather than one being a special case.
+const HOME_SECTIONS = [
+  { mode: "physics", title: "Physics", blurb: "Build contraptions with real 2D physics — ramps, cannons, springs, portals, and more.", kind: "physics", hues: [22, 205] },
+  { mode: "chemistry", title: "Chemistry", blurb: "Explore the periodic table, mix real reactions, and watch atoms bond in 3D.", kind: "chemistry", hues: [355, 150] },
+  { mode: "astronomy", title: "Astronomy", blurb: "Real orbital mechanics for the whole solar system, at any date you choose.", kind: "astronomy", hues: [45, 285] },
+  { mode: "history", title: "History", blurb: "Browse a timeline of landmark moments across physics, chemistry, and more.", kind: "history", hues: [35, 45] },
+  { mode: "cybersecurity", title: "Cybersecurity", blurb: "Search and filter well-documented malware, hackers, hacker groups, and breaches.", kind: "cybersecurity", hues: [0, 340] },
+  { mode: "particles", title: "Particle Physics", blurb: "A gallery of real D3 force simulations — drag anything you see.", kind: "particles", hues: [190, 270] },
+  { mode: "mathematics", title: "Mathematics", blurb: "A real graphing calculator — plot any expression, pan and zoom the graph.", kind: "mathematics", hues: [230, 350] },
+  { mode: "whiteboard", title: "Whiteboard", blurb: "A draw surface for sketching ideas and equations, plus a simple notebook for text notes.", kind: "whiteboard", hues: [160, 40] },
+  { mode: "economics", title: "Economics", blurb: "A real supply-and-demand market (with taxes and price controls) and a repeated Prisoner's Dilemma sandbox.", kind: "economics", hues: [140, 20] },
+  { mode: "zoology", title: "Zoology", blurb: "Explore food chains and energy pyramids, then build your own food web from real predator-prey relationships.", kind: "zoology", hues: [95, 30] },
+  { mode: "sound", title: "Sound", blurb: "Record your voice and watch the real waveform, or build your own tones with a live oscillator.", kind: "sound", hues: [260, 190] },
+  { mode: "sustainability", title: "Sustainability", blurb: "Run a city — route energy, manage pollution, and grow your population without wrecking either.", kind: "sustainability", hues: [150, 210] },
+];
+
+// A few of Physics's own easier challenge scenes, reused as one-click
+// "starting points" on the home page — real, already-verified contraptions
+// rather than an empty canvas, but framed as something to tweak and explore
+// instead of a puzzle to solve.
+const HOME_TEMPLATE_IDS = ["float_test", "fan_lift", "glass_breaker"];
+
+// Recently-viewed sections: purely local (per-browser) navigation history,
+// not anything the server tracks — just enough to let "pick back up where
+// you left off" mean something without inventing fake activity data.
+const RECENTLY_VIEWED_KEY = "kinetic-recently-viewed-v1";
+function loadRecentlyViewed() {
+  try { return JSON.parse(localStorage.getItem(RECENTLY_VIEWED_KEY)) || []; } catch { return []; }
+}
+function recordRecentlyViewed(mode) {
+  const section = HOME_SECTIONS.find((s) => s.mode === mode);
+  if (!section) return; // "home" itself, or anything not a real launcher section
+  const list = loadRecentlyViewed().filter((r) => r.mode !== mode);
+  list.unshift({ mode, title: section.title, ts: Date.now() });
+  try { localStorage.setItem(RECENTLY_VIEWED_KEY, JSON.stringify(list.slice(0, 8))); } catch { /* private browsing, quota, etc. — just skip persisting */ }
+}
+
+// Same challenge deterministically for everyone, all day — a hash of
+// today's UTC date selects the index, so it rotates once every 24 hours
+// without needing a server-side scheduler or any stored state.
+function dailyChallenge() {
+  if (!CHALLENGES.length) return null;
+  const today = new Date().toISOString().slice(0, 10);
+  let h = 0;
+  for (let i = 0; i < today.length; i++) h = (h * 31 + today.charCodeAt(i)) | 0;
+  return CHALLENGES[Math.abs(h) % CHALLENGES.length];
+}
+
+// Shared by the home page's Daily Challenge/Templates cards and (via a
+// small wrapper) the Physics Challenges modal's own Load button — one
+// definition of "what loading a challenge actually does."
+function openPhysicsChallengeById(id) {
+  const c = findChallenge(id);
+  if (!c) return;
+  window._setMode("physics");
+  pushUndoNow();
+  state.objects = c.build();
+  state.activeChallengeId = c.id;
+  state.selectedIds = new Set();
+  state.selectedId = null;
+  renderAll();
+  renderPanelUI();
+  scheduleSave();
+}
+
+// Shared by the home page's sim cards and the ?sim=<id> share-link opener
+// (see _openSharedSimFromUrl) — one definition of "what opening a
+// published Community Sim actually does."
+async function openCommunitySimById(id) {
+  try {
+    const sim = await fetchCommunitySimById(id);
+    if (!sim) { showToast("That sim couldn't be found — it may have been unpublished."); return; }
+    if (sim.kind === "worlds") { window._setMode("physics"); applyPhysicsWorldData(window._renderer, sim.data, { kind: "community-sim", id: sim.id, hasLock: sim.hasLock }); }
+    else if (sim.kind === "math-items") { window._setMode("mathematics"); mathematicsMode.applySavedData(sim.data); }
+    showToast(`Opened "${sim.name}" by ${sim.creatorName}`);
+  } catch {
+    showToast("Couldn't load that sim.");
+  }
+}
+
+function buildHomePage(root, onNavigate) {
+  root.innerHTML = `
+    <canvas class="home-bg" aria-hidden="true"></canvas>
+    <div class="home-wrap">
+      <div class="home-hero">
+        <img class="home-logo" src="icons/kinetic-logo-transparent.png" width="48" height="48" alt="" aria-hidden="true" />
+        <div class="home-kicker">twelve sandboxes · one app</div>
+        <h1>Kinetic</h1>
+        <p class="home-slogan">Build it. Change it. See what happens.</p>
+        <p class="home-tagline">Real simulations, not animations — physics, chemistry, astronomy,
+          mathematics, economics, zoology, sound, a city to run sustainably, a whiteboard for your own
+          ideas, and the history and security behind them all. Pick a section to start.</p>
+        <div class="home-hero-ctas">
+          <button class="home-cta home-cta-primary" id="home-cta-create">Create</button>
+          <button class="home-cta home-cta-secondary" id="home-cta-explore">Explore</button>
+          <button class="home-cta home-cta-surprise" id="home-cta-surprise">🎲 Surprise Me</button>
+        </div>
+      </div>
+      <div class="home-rails"></div>
+      <div class="home-all-sandboxes">
+        <h2 class="home-section-title">All Sandboxes</h2>
+        <div class="home-cards"></div>
+      </div>
+    </div>
+  `;
+  const grid = root.querySelector(".home-cards");
+  for (const section of HOME_SECTIONS) {
+    const card = document.createElement("button");
+    card.className = "home-card";
+    card.innerHTML = `
+      <div class="home-card-thumb"></div>
+      <div class="home-card-title">${section.title}</div>
+      <div class="home-card-blurb">${section.blurb}</div>
+    `;
+    card.addEventListener("click", () => onNavigate(section.mode));
+    grid.appendChild(card);
+    buildHomeThumbnail(card.querySelector(".home-card-thumb"), section);
+  }
+  initHomeBackground(root.querySelector(".home-bg"), root);
+
+  root.querySelector("#home-cta-create").addEventListener("click", () => onNavigate("physics"));
+  root.querySelector("#home-cta-explore").addEventListener("click", () => {
+    root.querySelector(".home-all-sandboxes").scrollIntoView({ behavior: "smooth", block: "start" });
+  });
+  root.querySelector("#home-cta-surprise").addEventListener("click", () => surpriseMe(onNavigate));
+
+  buildHomeRails(root.querySelector(".home-rails"), onNavigate);
+  onAuthChange(() => buildHomeRails(root.querySelector(".home-rails"), onNavigate));
+}
+
+// A real random pick across whatever's actually available right now — the
+// 12 sandboxes always count, and once the Featured/Community rails have
+// loaded their random pool grows to include real published sims too, so
+// this stays an honest "surprise" instead of a fixed rotation.
+let _surprisePool = [];
+// buildHomeRails is async and re-triggered by onAuthChange (which fires
+// once refreshUser()'s initial /me check resolves, shortly after the home
+// page's own direct call already kicked one off) — without this guard, the
+// first (now-stale) call's later `await`s resolve after the second call has
+// already cleared and started repopulating the same container, so both
+// end up appending their own copies of every rail. Each call captures its
+// own generation number and bails as soon as a newer call has started.
+let _homeRailsGen = 0;
+function surpriseMe(onNavigate) {
+  const pool = [...HOME_SECTIONS.map((s) => ({ kind: "mode", mode: s.mode })), ..._surprisePool];
+  const pick = pool[Math.floor(Math.random() * pool.length)];
+  if (!pick) return;
+  if (pick.kind === "mode") onNavigate(pick.mode);
+  else if (pick.kind === "sim") openCommunitySimById(pick.id);
+  else if (pick.kind === "challenge") openPhysicsChallengeById(pick.id);
+}
+
+// The dynamic rails below the hero: some are always-available real content
+// (Daily Challenge, Featured Templates, Featured Creator Worlds, Community
+// Sims), others only make sense signed in (Continue Experimenting,
+// Favorites) and simply don't render when there's nothing real to show —
+// no placeholder/empty-state filler standing in for a section with no data.
+async function buildHomeRails(container, onNavigate) {
+  const myGen = ++_homeRailsGen;
+  container.innerHTML = "";
+  _surprisePool = [];
+  const user = getUser();
+
+  const simCard = (sim) => {
+    const card = document.createElement("button");
+    card.className = "home-rail-card home-rail-card-sim";
+    card.innerHTML = `
+      ${sim.snapshot ? `<img class="home-rail-thumb" src="${sim.snapshot}" alt="" />` : `<div class="home-rail-thumb home-rail-thumb-blank"></div>`}
+      <div class="home-rail-card-title">${escapeHtml(sim.name)}</div>
+      <div class="home-rail-card-sub">by ${escapeHtml(sim.creatorName)}</div>
+    `;
+    card.addEventListener("click", () => openCommunitySimById(sim.id));
+    return card;
+  };
+
+  // Continue Experimenting — your own most-recently-updated Physics world.
+  if (user) {
+    try {
+      const items = await fetchItems("worlds");
+      if (myGen !== _homeRailsGen) return;
+      if (items[0]) {
+        const item = items[0];
+        addRail(container, "Continue Experimenting", [(() => {
+          const card = document.createElement("button");
+          card.className = "home-rail-card home-rail-card-sim";
+          card.innerHTML = `
+            ${item.snapshot ? `<img class="home-rail-thumb" src="${item.snapshot}" alt="" />` : `<div class="home-rail-thumb home-rail-thumb-blank"></div>`}
+            <div class="home-rail-card-title">${escapeHtml(item.name)}</div>
+            <div class="home-rail-card-sub">Resume where you left off</div>
+          `;
+          card.addEventListener("click", () => { onNavigate("physics"); applyPhysicsWorldData(window._renderer, item.data, { kind: "worlds", id: item.id, hasLock: !!item.hasLock }); });
+          return card;
+        })()]);
+      }
+    } catch { /* not signed in / offline — just skip this rail */ }
+  }
+
+  // Favorites — the small number of Community Sims you've hearted, fetched
+  // individually by id since favoriting doesn't return full sim records.
+  if (user) {
+    try {
+      const ids = (await fetchMyFavoriteIds()).slice(0, 10);
+      const sims = (await Promise.all(ids.map((id) => fetchCommunitySimById(id).catch(() => null)))).filter(Boolean);
+      if (myGen !== _homeRailsGen) return;
+      if (sims.length) addRail(container, "Favorites", sims.map(simCard));
+      _surprisePool.push(...sims.map((s) => ({ kind: "sim", id: s.id })));
+    } catch { /* ignore */ }
+  }
+
+  // Recently Viewed — this browser's own navigation history, not anything
+  // the server knows about.
+  const recent = loadRecentlyViewed();
+  if (recent.length) {
+    addRail(container, "Recently Viewed", recent.map((r) => {
+      const card = document.createElement("button");
+      card.className = "home-rail-card home-rail-card-recent";
+      card.innerHTML = `<div class="home-rail-card-title">${escapeHtml(r.title)}</div>`;
+      card.addEventListener("click", () => onNavigate(r.mode));
+      return card;
+    }));
+  }
+
+  // Featured Creator Worlds — hand-curated via the local admin dashboard
+  // (~/physics-sim-admin), not from anything on this site.
+  try {
+    const sims = await fetchFeaturedSims();
+    if (myGen !== _homeRailsGen) return;
+    if (sims.length) addRail(container, "Featured Creator Worlds", sims.map(simCard));
+    _surprisePool.push(...sims.map((s) => ({ kind: "sim", id: s.id })));
+  } catch { /* ignore */ }
+
+  // Community Sims — everything published, most recent first.
+  try {
+    const sims = (await fetchCommunitySims()).slice(0, 10);
+    if (myGen !== _homeRailsGen) return;
+    if (sims.length) addRail(container, "Community Sims", sims.map(simCard));
+    _surprisePool.push(...sims.map((s) => ({ kind: "sim", id: s.id })));
+  } catch { /* ignore */ }
+
+  // Daily Challenge — one real Physics challenge, the same one for
+  // everyone, that changes once every 24 hours (see dailyChallenge()).
+  const daily = dailyChallenge();
+  if (daily) {
+    const card = document.createElement("button");
+    card.className = "home-rail-card home-rail-card-challenge";
+    card.innerHTML = `
+      <div class="home-rail-card-badge">${difficultyBadgeHtml(daily.difficulty)}</div>
+      <div class="home-rail-card-title">${escapeHtml(daily.name)}</div>
+      <div class="home-rail-card-sub">${escapeHtml(daily.concept)}</div>
+    `;
+    card.addEventListener("click", () => openPhysicsChallengeById(daily.id));
+    addRail(container, "Daily Challenge", [card]);
+    _surprisePool.push({ kind: "challenge", id: daily.id });
+  }
+
+  // Featured Templates — a few of Physics's own easier scenes, reused as
+  // one-click starting points rather than a blank canvas.
+  const templates = HOME_TEMPLATE_IDS.map((id) => findChallenge(id)).filter(Boolean);
+  if (templates.length) {
+    addRail(container, "Featured Templates", templates.map((t) => {
+      const card = document.createElement("button");
+      card.className = "home-rail-card home-rail-card-challenge";
+      card.innerHTML = `
+        <div class="home-rail-card-title">${escapeHtml(t.name)}</div>
+        <div class="home-rail-card-sub">${escapeHtml(t.objective)}</div>
+      `;
+      card.addEventListener("click", () => openPhysicsChallengeById(t.id));
+      return card;
+    }));
+  }
+}
+
+function addRail(container, title, cards) {
+  const section = document.createElement("div");
+  section.className = "home-rail";
+  const heading = document.createElement("h2");
+  heading.className = "home-section-title";
+  heading.textContent = title;
+  const track = document.createElement("div");
+  track.className = "home-rail-track";
+  for (const card of cards) track.appendChild(card);
+  section.appendChild(heading);
+  section.appendChild(track);
+  container.appendChild(section);
+}
+
+// Ambient background: a living D3 force graph behind the *entire* home
+// page (fixed, so it stays put while the page scrolls), livelier and more
+// prominent than a typical dimmed hero decoration — more nodes, brighter,
+// tinted with the app's own brand colors, and gently pushed around by the
+// pointer, closer to the constantly-alive backgrounds on sites like
+// seeing-theory.brown.edu than a static illustration.
+function initHomeBackground(canvas, root) {
+  const ctx = canvas.getContext("2d");
+  let width = 0, height = 0;
+
+  function resize() {
+    const rect = root.getBoundingClientRect();
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    width = rect.width;
+    height = rect.height;
+    canvas.width = Math.round(width * dpr);
+    canvas.height = Math.round(height * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  window.addEventListener("resize", resize);
+
+  // The container can measure 0×0 for a tick right after the page's own
+  // innerHTML is set, before layout has actually run — seed nothing until
+  // a real size shows up, or the whole simulation starts collapsed at (0,0).
+  resize();
+  if (!(width > 0 && height > 0)) {
+    requestAnimationFrame(() => initHomeBackground(canvas, root));
+    return;
+  }
+
+  const n = 90;
+  // Reads the app's own --cool-1/2/3 brand variables (cyan/purple/green —
+  // #38bdf8/#8b5cf6/#10b981 in light mode, a softened variant in dark) so
+  // this stays in sync with the theme instead of a separately hardcoded copy.
+  const rootStyle = getComputedStyle(document.documentElement);
+  const hexToRgbTriplet = (hex) => {
+    const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex.trim());
+    return m ? `${parseInt(m[1], 16)},${parseInt(m[2], 16)},${parseInt(m[3], 16)}` : null;
+  };
+  const hues = ["--cool-1", "--cool-2", "--cool-3"]
+    .map((v) => hexToRgbTriplet(rootStyle.getPropertyValue(v)))
+    .filter(Boolean);
+  if (hues.length < 3) hues.push("125,211,252", "167,139,250", "52,211,153"); // fallback if the vars aren't defined for some reason
+  const nodes = Array.from({ length: n }, () => ({
+    x: Math.random() * width,
+    y: Math.random() * height,
+    hue: hues[Math.floor(Math.random() * hues.length)],
+  }));
+  const links = [];
+  for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) if (Math.random() < 0.03) links.push({ source: i, target: j });
+
+  // The canvas has pointer-events:none (clicks must reach the cards behind
+  // it), so the pointer is tracked from `root` instead — pointermove/leave
+  // both bubble up from whatever's actually under the cursor.
+  const pointer = { x: -9999, y: -9999, active: false };
+  root.addEventListener("pointermove", (e) => {
+    const rect = canvas.getBoundingClientRect();
+    pointer.x = e.clientX - rect.left;
+    pointer.y = e.clientY - rect.top;
+    pointer.active = true;
+  });
+  root.addEventListener("pointerleave", () => { pointer.active = false; });
+
+  function forcePointer() {
+    let list;
+    function force(alpha) {
+      if (!pointer.active) return;
+      const radius = 140;
+      for (const d of list) {
+        const dx = d.x - pointer.x, dy = d.y - pointer.y;
+        const dist = Math.hypot(dx, dy) || 0.001;
+        if (dist >= radius) continue;
+        const f = ((radius - dist) / radius) * 6 * alpha;
+        d.vx += (dx / dist) * f;
+        d.vy += (dy / dist) * f;
+      }
+    }
+    force.initialize = (_nodes) => { list = _nodes; };
+    return force;
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, width, height);
+    ctx.lineWidth = 1;
+    for (const l of links) {
+      ctx.strokeStyle = `rgba(${l.source.hue},0.3)`;
+      ctx.beginPath();
+      ctx.moveTo(l.source.x, l.source.y);
+      ctx.lineTo(l.target.x, l.target.y);
+      ctx.stroke();
+    }
+    for (const node of nodes) {
+      ctx.beginPath();
+      ctx.arc(node.x, node.y, 3, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(${node.hue},0.95)`;
+      ctx.shadowColor = `rgba(${node.hue},0.8)`;
+      ctx.shadowBlur = 8;
+      ctx.fill();
+    }
+    ctx.shadowBlur = 0;
+  }
+
+  d3.forceSimulation(nodes)
+    .force("charge", d3.forceManyBody().strength(-32))
+    .force("link", d3.forceLink(links).distance(85).strength(0.3))
+    .force("x", d3.forceX(() => width / 2).strength(0.015))
+    .force("y", d3.forceY(() => height / 2).strength(0.015))
+    .force("pointer", forcePointer())
+    .alphaDecay(0)
+    .velocityDecay(0.4)
+    .on("tick", draw);
+}
+
+// A small, genuinely representative illustration per card — a ball on a
+// ramp for Physics, a bent water-style molecule for Chemistry, a sun with
+// orbits for Astronomy, tick marks on a line for History, a padlock for
+// Cybersecurity — rather than one generic visual reused six times with
+// different color palettes. Particle Physics is the one exception where a
+// frozen D3 force layout *is* the accurate picture, since that's literally
+// what all 8 of its demos look like — the same technique (and the same
+// d3.forceSimulation this app's own physics canvas already loads) the
+// original standalone gallery used for its own demo thumbnails.
+function buildHomeThumbnail(el, section) {
+  const w = el.clientWidth || 260, h = 84;
+  const svg = d3.select(el).append("svg").attr("viewBox", `0 0 ${w} ${h}`);
+  const [hueA, hueB] = section.hues;
+  const colorA = `hsl(${hueA}, 80%, 62%)`, colorB = `hsl(${hueB}, 80%, 62%)`;
+
+  if (section.kind === "physics") {
+    // A ramp with a ball at its foot and a dashed launch arc — the same
+    // board+ball shapes this sim's own palette icons use.
+    svg.append("line").attr("x1", 40).attr("y1", 24).attr("x2", 150).attr("y2", 62)
+      .attr("stroke", colorB).attr("stroke-width", 5).attr("stroke-linecap", "round");
+    const arc = d3.path();
+    arc.moveTo(150, 62);
+    arc.bezierCurveTo(185, 40, 215, 40, 235, 68);
+    svg.append("path").attr("d", arc.toString()).attr("fill", "none")
+      .attr("stroke", "rgba(148,163,184,0.55)").attr("stroke-width", 2).attr("stroke-dasharray", "4 4");
+    svg.append("circle").attr("cx", 235).attr("cy", 68).attr("r", 7).attr("fill", colorA);
+    svg.append("circle").attr("cx", 40).attr("cy", 24).attr("r", 7).attr("fill", colorA);
+  } else if (section.kind === "chemistry") {
+    // A bent triatomic molecule, like water: one bigger central atom, two
+    // smaller ones off at real-ish bond angles.
+    const cx = 130, cy = 46, bond = 26;
+    const a1 = -125 * Math.PI / 180, a2 = -55 * Math.PI / 180;
+    const p1 = [cx + Math.cos(a1) * bond, cy + Math.sin(a1) * bond];
+    const p2 = [cx + Math.cos(a2) * bond, cy + Math.sin(a2) * bond];
+    svg.append("line").attr("x1", cx).attr("y1", cy).attr("x2", p1[0]).attr("y2", p1[1]).attr("stroke", "rgba(148,163,184,0.6)").attr("stroke-width", 3);
+    svg.append("line").attr("x1", cx).attr("y1", cy).attr("x2", p2[0]).attr("y2", p2[1]).attr("stroke", "rgba(148,163,184,0.6)").attr("stroke-width", 3);
+    svg.append("circle").attr("cx", cx).attr("cy", cy).attr("r", 13).attr("fill", colorA);
+    svg.append("circle").attr("cx", p1[0]).attr("cy", p1[1]).attr("r", 8).attr("fill", colorB);
+    svg.append("circle").attr("cx", p2[0]).attr("cy", p2[1]).attr("r", 8).attr("fill", colorB);
+  } else if (section.kind === "astronomy") {
+    // A sun with a couple of elliptical orbits and planets sitting on them.
+    const cx = w / 2, cy = h / 2 + 4;
+    svg.append("circle").attr("cx", cx).attr("cy", cy).attr("r", 9).attr("fill", colorA);
+    for (const [rx, ry, angle] of [[46, 16, 20], [70, 24, -12]]) {
+      svg.append("ellipse").attr("cx", cx).attr("cy", cy).attr("rx", rx).attr("ry", ry)
+        .attr("transform", `rotate(${angle} ${cx} ${cy})`)
+        .attr("fill", "none").attr("stroke", "rgba(148,163,184,0.45)").attr("stroke-width", 1.5);
+      const t = Math.random() * Math.PI * 2;
+      const rad = angle * Math.PI / 180;
+      const ex = rx * Math.cos(t), ey = ry * Math.sin(t);
+      const px = cx + ex * Math.cos(rad) - ey * Math.sin(rad);
+      const py = cy + ex * Math.sin(rad) + ey * Math.cos(rad);
+      svg.append("circle").attr("cx", px).attr("cy", py).attr("r", 5).attr("fill", colorB);
+    }
+  } else if (section.kind === "history") {
+    // The real timeline UI, shrunk down: an axis with tick marks, one lit
+    // up as "selected."
+    const y = h / 2 + 6;
+    svg.append("line").attr("x1", 20).attr("y1", y).attr("x2", w - 20).attr("y2", y).attr("stroke", "var(--border)").attr("stroke-width", 2);
+    const count = 7, activeIdx = 3;
+    for (let i = 0; i < count; i++) {
+      const x = 20 + (i / (count - 1)) * (w - 40);
+      const active = i === activeIdx;
+      svg.append("line").attr("x1", x).attr("y1", y - (active ? 14 : 9)).attr("x2", x).attr("y2", y)
+        .attr("stroke", active ? colorA : "rgba(148,163,184,0.6)").attr("stroke-width", active ? 3 : 2);
+    }
+  } else if (section.kind === "cybersecurity") {
+    // A simple padlock: a shackle arc over a rounded body.
+    const cx = w / 2, topY = 22;
+    svg.append("path")
+      .attr("d", `M ${cx - 12} ${topY + 14} v-8 a12 12 0 0 1 24 0 v8`)
+      .attr("fill", "none").attr("stroke", colorB).attr("stroke-width", 4).attr("stroke-linecap", "round");
+    svg.append("rect").attr("x", cx - 18).attr("y", topY + 10).attr("width", 36).attr("height", 28)
+      .attr("rx", 5).attr("fill", colorA);
+    svg.append("circle").attr("cx", cx).attr("cy", topY + 22).attr("r", 3.5).attr("fill", "rgba(0,0,0,0.35)");
+  } else if (section.kind === "mathematics") {
+    // A real sine curve plotted against real axes — genuinely what opening
+    // the calculator with its default y = sin(x) looks like, not a
+    // decorative squiggle.
+    const originX = w / 2, originY = h / 2 + 6;
+    svg.append("line").attr("x1", 10).attr("x2", w - 10).attr("y1", originY).attr("y2", originY).attr("stroke", "rgba(148,163,184,0.4)");
+    svg.append("line").attr("x1", originX).attr("x2", originX).attr("y1", 8).attr("y2", h - 8).attr("stroke", "rgba(148,163,184,0.4)");
+    const pxPerUnit = 16;
+    const pts = [];
+    for (let px = 10; px <= w - 10; px += 3) {
+      const x = (px - originX) / pxPerUnit;
+      const y = Math.sin(x);
+      pts.push([px, originY - y * 22]);
+    }
+    svg.append("path").attr("d", d3.line()(pts)).attr("fill", "none").attr("stroke", colorA).attr("stroke-width", 2.5);
+    svg.append("circle").attr("cx", originX + Math.PI / 2 * pxPerUnit).attr("cy", originY - 22).attr("r", 3.5).attr("fill", colorB);
+  } else if (section.kind === "whiteboard") {
+    // A loose freehand squiggle plus a couple of sticky-note rectangles —
+    // sketching and note-taking, the two most literal things this mode does.
+    const path = d3.path();
+    path.moveTo(24, 50);
+    path.bezierCurveTo(50, 20, 70, 70, 96, 40);
+    path.bezierCurveTo(112, 20, 122, 45, 138, 30);
+    svg.append("path").attr("d", path.toString()).attr("fill", "none")
+      .attr("stroke", colorA).attr("stroke-width", 3.5).attr("stroke-linecap", "round");
+    svg.append("rect").attr("x", w - 62).attr("y", 18).attr("width", 40).attr("height", 34).attr("rx", 3)
+      .attr("fill", colorB).attr("opacity", 0.85).attr("transform", `rotate(-6 ${w - 42} 35)`);
+    svg.append("rect").attr("x", w - 44).attr("y", 40).attr("width", 34).attr("height", 30).attr("rx", 3)
+      .attr("fill", colorA).attr("opacity", 0.7).attr("transform", `rotate(5 ${w - 27} 55)`);
+  } else if (section.kind === "economics") {
+    // A classic supply/demand X — downward demand line, upward supply
+    // line, crossing at the equilibrium point, genuinely what this mode's
+    // default market chart looks like.
+    const margin = 16;
+    svg.append("line").attr("x1", margin).attr("x2", margin).attr("y1", margin).attr("y2", h - margin).attr("stroke", "rgba(148,163,184,0.5)");
+    svg.append("line").attr("x1", margin).attr("x2", w - margin).attr("y1", h - margin).attr("y2", h - margin).attr("stroke", "rgba(148,163,184,0.5)");
+    svg.append("line").attr("x1", margin).attr("y1", margin).attr("x2", w - margin).attr("y2", h - margin).attr("stroke", colorA).attr("stroke-width", 2.5);
+    svg.append("line").attr("x1", margin).attr("y1", h - margin).attr("x2", w - margin).attr("y2", margin).attr("stroke", colorB).attr("stroke-width", 2.5);
+    svg.append("circle").attr("cx", (margin + w - margin) / 2).attr("cy", h / 2).attr("r", 4.5).attr("fill", "var(--text)");
+  } else if (section.kind === "zoology") {
+    // A tiny 3-node food chain: producer -> consumer -> predator.
+    const positions = [[w * 0.22, h * 0.7], [w * 0.5, h * 0.35], [w * 0.78, h * 0.7]];
+    for (let i = 0; i < positions.length - 1; i++) {
+      svg.append("line").attr("x1", positions[i][0]).attr("y1", positions[i][1])
+        .attr("x2", positions[i + 1][0]).attr("y2", positions[i + 1][1]).attr("stroke", "rgba(148,163,184,0.5)").attr("stroke-width", 2);
+    }
+    positions.forEach((p, i) => {
+      svg.append("circle").attr("cx", p[0]).attr("cy", p[1]).attr("r", 9).attr("fill", i === 0 ? colorA : i === 1 ? colorB : colorA).attr("opacity", 0.85);
+    });
+  } else if (section.kind === "sound") {
+    // A little sine-ish waveform, genuinely what the live canvas draws.
+    const pts = [];
+    for (let x = 8; x <= w - 8; x += 4) pts.push([x, h / 2 + Math.sin((x / w) * Math.PI * 4) * (h * 0.28)]);
+    const line = d3.line();
+    svg.append("path").attr("d", line(pts)).attr("fill", "none").attr("stroke", colorA).attr("stroke-width", 2.5).attr("stroke-linecap", "round");
+  } else if (section.kind === "sustainability") {
+    // A tiny 3x2 city grid with a couple of "buildings" filled in.
+    const cols = 4, rows = 3, cell = Math.min((w - 16) / cols, (h - 16) / rows);
+    const ox = (w - cell * cols) / 2, oy = (h - cell * rows) / 2;
+    const filled = new Set([1, 3, 5, 8, 9]);
+    let i = 0;
+    for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+      svg.append("rect").attr("x", ox + c * cell + 1).attr("y", oy + r * cell + 1).attr("width", cell - 2).attr("height", cell - 2)
+        .attr("rx", 2).attr("fill", filled.has(i) ? colorA : "rgba(148,163,184,0.25)").attr("opacity", filled.has(i) ? 0.85 : 1);
+      i++;
+    }
+  } else {
+    // Particle Physics: a small frozen force-directed graph, exactly the
+    // shape every one of its 8 real demos takes.
+    const n = 22;
+    const nodes = Array.from({ length: n }, (_, i) => ({ hue: i % 2 ? hueB : hueA }));
+    const links = [];
+    for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) if (Math.random() < 0.09) links.push({ source: i, target: j });
+    const sim = d3.forceSimulation(nodes)
+      .force("charge", d3.forceManyBody().strength(-16))
+      .force("link", d3.forceLink(links).distance(15))
+      .force("x", d3.forceX(w / 2).strength(0.04))
+      .force("y", d3.forceY(h / 2).strength(0.04))
+      .stop();
+    for (let i = 0; i < 200; i++) sim.tick();
+    svg.append("g").attr("stroke", "rgba(148,163,184,0.35)").selectAll("line").data(links).join("line")
+      .attr("x1", (d) => d.source.x).attr("y1", (d) => d.source.y)
+      .attr("x2", (d) => d.target.x).attr("y2", (d) => d.target.y);
+    svg.append("g").selectAll("circle").data(nodes).join("circle")
+      .attr("r", 3).attr("cx", (d) => d.x).attr("cy", (d) => d.y)
+      .attr("fill", (d) => `hsl(${d.hue}, 80%, 62%)`);
+  }
+}
+
 function wireModeTabs() {
+  window._setMode = (mode) => setMode(mode); // exposed so code outside this closure (the dashboard's "load a shared item" flow) can switch modes too
+  const brandHomeBtn = document.getElementById("brand-home-btn");
   const physicsBtn = document.getElementById("mode-physics-btn");
   const chemistryBtn = document.getElementById("mode-chemistry-btn");
   const astronomyBtn = document.getElementById("mode-astronomy-btn");
-  const modeButtons = { physics: physicsBtn, chemistry: chemistryBtn, astronomy: astronomyBtn };
+  const historyBtn = document.getElementById("mode-history-btn");
+  const cybersecurityBtn = document.getElementById("mode-cybersecurity-btn");
+  const particlesBtn = document.getElementById("mode-particles-btn");
+  const mathematicsBtn = document.getElementById("mode-mathematics-btn");
+  const whiteboardBtn = document.getElementById("mode-whiteboard-btn");
+  const economicsBtn = document.getElementById("mode-economics-btn");
+  const zoologyBtn = document.getElementById("mode-zoology-btn");
+  const soundBtn = document.getElementById("mode-sound-btn");
+  const sustainabilityBtn = document.getElementById("mode-sustainability-btn");
+  const modeButtons = { physics: physicsBtn, chemistry: chemistryBtn, astronomy: astronomyBtn, history: historyBtn, cybersecurity: cybersecurityBtn, particles: particlesBtn, mathematics: mathematicsBtn, whiteboard: whiteboardBtn, economics: economicsBtn, zoology: zoologyBtn, sound: soundBtn, sustainability: sustainabilityBtn };
+
+  const homeRoot = document.getElementById("home-root");
+  buildHomePage(homeRoot, (mode) => setMode(mode));
 
   const workspace = document.getElementById("workspace");
   const chemRoot = document.getElementById("chemistry-root");
   const astronomyRoot = document.getElementById("astronomy-root");
-  const roots = { physics: workspace, chemistry: chemRoot, astronomy: astronomyRoot };
+  const historyRoot = document.getElementById("history-root");
+  const cybersecurityRoot = document.getElementById("cybersecurity-root");
+  const particlesRoot = document.getElementById("particles-root");
+  const mathematicsRoot = document.getElementById("mathematics-root");
+  const whiteboardRoot = document.getElementById("whiteboard-root");
+  const economicsRoot = document.getElementById("economics-root");
+  const zoologyRoot = document.getElementById("zoology-root");
+  const soundRoot = document.getElementById("sound-root");
+  const sustainabilityRoot = document.getElementById("sustainability-root");
+  const roots = { home: homeRoot, physics: workspace, chemistry: chemRoot, astronomy: astronomyRoot, history: historyRoot, cybersecurity: cybersecurityRoot, particles: particlesRoot, mathematics: mathematicsRoot, whiteboard: whiteboardRoot, economics: economicsRoot, zoology: zoologyRoot, sound: soundRoot, sustainability: sustainabilityRoot };
 
   const physicsOnlyControls = [
     document.getElementById("run-controls"),
     document.getElementById("gravity-controls"),
+    document.getElementById("speed-controls"),
     document.getElementById("light-mode-toggle-wrap"),
     document.getElementById("clear-btn"),
+    document.getElementById("my-worlds-btn"),
+    document.getElementById("undo-btn"),
+    document.getElementById("redo-btn"),
   ];
   const challengeBtn = document.getElementById("challenges-btn");
   const quizBtn = document.getElementById("quiz-btn");
@@ -404,12 +1645,22 @@ function wireModeTabs() {
     if (state.mode === mode) return;
     if (state.mode === "physics" && state.playing) togglePlay(window._renderer);
     state.mode = mode;
+    recordRecentlyViewed(mode);
 
     for (const [m, btn] of Object.entries(modeButtons)) btn.classList.toggle("active", mode === m);
+    brandHomeBtn.classList.toggle("active", mode === "home");
     for (const [m, el] of Object.entries(roots)) el.classList.toggle("hidden", mode !== m);
     physicsOnlyControls.forEach((el) => el && (el.style.display = mode === "physics" ? "" : "none"));
+    // Chemistry, Astronomy, and History each have their own mode-specific
+    // Challenges entry point built into their own panel (a mixing-bench
+    // button, an "Astronomy Challenges" button, a "History Challenges"
+    // button) — this shared topbar one is Physics-only.
     challengeBtn.style.display = mode === "physics" ? "" : "none";
-    quizBtn.style.display = mode === "chemistry" || mode === "physics" ? "" : "none";
+    // Home is just a launcher, and Particle Physics is a gallery of
+    // embedded external demos — neither is a knowledge domain with quiz
+    // content the way the other modes are.
+    const NO_QUIZ_MODES = new Set(["particles", "home", "mathematics", "whiteboard", "economics", "zoology", "sound", "sustainability"]);
+    quizBtn.style.display = NO_QUIZ_MODES.has(mode) ? "none" : "";
 
     if (mode === "physics") startParticleLoop(); else stopParticleLoop();
 
@@ -426,14 +1677,98 @@ function wireModeTabs() {
     } else {
       astronomyMode?.unmount();
     }
+
+    if (mode === "history") {
+      if (!historyMode) historyMode = new HistoryMode(historyRoot, { state, showToast });
+      historyMode.mount();
+    } else {
+      historyMode?.unmount();
+    }
+
+    if (mode === "cybersecurity") {
+      if (!cybersecurityMode) cybersecurityMode = new CybersecurityMode(cybersecurityRoot, { state, showToast });
+      cybersecurityMode.mount();
+    } else {
+      cybersecurityMode?.unmount();
+    }
+
+    if (mode === "mathematics") {
+      if (!mathematicsMode) mathematicsMode = new MathematicsMode(mathematicsRoot);
+      mathematicsMode.mount();
+    } else {
+      mathematicsMode?.unmount();
+    }
+
+    if (mode === "whiteboard") {
+      if (!whiteboardMode) whiteboardMode = new WhiteboardMode(whiteboardRoot);
+      whiteboardMode.mount();
+    } else {
+      whiteboardMode?.unmount();
+    }
+
+    if (mode === "economics") {
+      if (!economicsMode) economicsMode = new EconomicsMode(economicsRoot);
+      economicsMode.mount();
+    } else {
+      economicsMode?.unmount();
+    }
+
+    if (mode === "zoology") {
+      if (!zoologyMode) zoologyMode = new ZoologyMode(zoologyRoot);
+      zoologyMode.mount();
+    } else {
+      zoologyMode?.unmount();
+    }
+
+    if (mode === "sound") {
+      if (!soundMode) soundMode = new SoundMode(soundRoot);
+      soundMode.mount();
+    } else {
+      soundMode?.unmount();
+    }
+
+    if (mode === "sustainability") {
+      if (!sustainabilityMode) sustainabilityMode = new SustainabilityMode(sustainabilityRoot, { state });
+      sustainabilityMode.mount();
+    } else {
+      sustainabilityMode?.unmount();
+    }
   }
 
+  brandHomeBtn.addEventListener("click", () => setMode("home"));
   physicsBtn.addEventListener("click", () => setMode("physics"));
   chemistryBtn.addEventListener("click", () => setMode("chemistry"));
   astronomyBtn.addEventListener("click", () => setMode("astronomy"));
+  historyBtn.addEventListener("click", () => setMode("history"));
+  cybersecurityBtn.addEventListener("click", () => setMode("cybersecurity"));
+  particlesBtn.addEventListener("click", () => setMode("particles"));
+  mathematicsBtn.addEventListener("click", () => setMode("mathematics"));
+  whiteboardBtn.addEventListener("click", () => setMode("whiteboard"));
+  economicsBtn.addEventListener("click", () => setMode("economics"));
+  zoologyBtn.addEventListener("click", () => setMode("zoology"));
+  soundBtn.addEventListener("click", () => setMode("sound"));
+  sustainabilityBtn.addEventListener("click", () => setMode("sustainability"));
+
+  // Each individual demo's own top bar was removed (it duplicated this
+  // app's nav one level up) — this subnav is the only way left to switch
+  // between the 8 demos, so it drives the iframe's src directly.
+  const particlesFrame = document.getElementById("particles-frame");
+  const particlesTabs = Array.from(document.querySelectorAll(".particles-tab"));
+  for (const tab of particlesTabs) {
+    tab.addEventListener("click", () => {
+      particlesFrame.src = `particle-physics/${tab.dataset.demo}`;
+      for (const t of particlesTabs) t.classList.toggle("active", t === tab);
+    });
+  }
+  // Switching demos reloads the iframe from scratch, which would otherwise
+  // reset it to its own default (dark) palette regardless of the site's
+  // current theme.
+  particlesFrame.addEventListener("load", () => {
+    applyTheme(document.documentElement.dataset.theme === "dark" ? "dark" : "light");
+  });
 
   state.mode = null;
-  setMode("physics");
+  setMode("home");
 }
 
 function wireKeyboard(renderer) {
@@ -447,44 +1782,86 @@ function wireKeyboard(renderer) {
     if (e.code === "Space") {
       e.preventDefault();
       togglePlay(renderer);
-    } else if ((e.code === "Delete" || e.code === "Backspace") && state.selectedId && !state.playing) {
+    } else if (e.code === "KeyR" && !cmd) {
       e.preventDefault();
-      deleteObject(state.selectedId);
+      resetPhysics(renderer);
+    } else if (e.code === "KeyG" && !cmd) {
+      e.preventDefault();
+      setGrabToolActive(!state.grabToolActive);
+    } else if ((e.code === "Delete" || e.code === "Backspace") && state.selectedIds.size && !state.playing) {
+      e.preventDefault();
+      deleteSelected();
+    } else if (e.code === "KeyJ" && !cmd && state.selectedIds.size >= 2 && !state.playing) {
+      e.preventDefault();
+      joinSelected();
     } else if (e.code === "Escape") {
+      state.selectedIds = new Set();
       state.selectedId = null;
       renderAll();
       renderPanelUI();
-    } else if (cmd && e.code === "KeyC" && state.selectedId && !state.playing) {
+    } else if (cmd && e.code === "KeyC" && state.selectedIds.size && !state.playing) {
       e.preventDefault();
       copySelected();
     } else if (cmd && e.code === "KeyV" && clipboard && !state.playing) {
       e.preventDefault();
       pasteClipboard();
+    } else if (cmd && e.code === "KeyZ" && !state.playing) {
+      e.preventDefault();
+      if (e.shiftKey) redo(); else undo();
     }
   });
 }
 
 function copySelected() {
-  const spec = state.objects.find((o) => o.id === state.selectedId);
-  if (!spec) return;
-  clipboard = cloneSpec(spec);
-  showToast("Copied");
+  const specs = state.objects.filter((o) => state.selectedIds.has(o.id));
+  if (!specs.length) return;
+  clipboard = specs.map(cloneSpec);
+  showToast(specs.length > 1 ? `Copied ${specs.length}` : "Copied");
 }
 
 function pasteClipboard() {
-  if (!clipboard) return;
-  const spec = cloneSpec(clipboard);
-  spec.id = makeId(spec.type);
-  spec.x = snap(spec.x + 40);
-  spec.y = snap(spec.y + 40);
-  if (spec.targetId) spec.targetId = null; // don't silently share a trigger link with the original
-  state.objects.push(spec);
-  state.selectedId = spec.id;
+  if (!clipboard || !clipboard.length) return;
+  const pasted = _pasteWithOffset(40, 40);
+  // paste again from the same spot, so repeated ⌘V lays out a diagonal trail
+  clipboard = pasted.map(cloneSpec);
+}
+
+// Touch double-tap paste: same clipboard, but dropped centered on the
+// tapped point instead of the keyboard shortcut's fixed diagonal offset.
+function pasteClipboardAt(x, y) {
+  if (!clipboard || !clipboard.length) return;
+  const cx = clipboard.reduce((s, o) => s + o.x, 0) / clipboard.length;
+  const cy = clipboard.reduce((s, o) => s + o.y, 0) / clipboard.length;
+  _pasteWithOffset(x - cx, y - cy);
+}
+
+function _pasteWithOffset(dx, dy) {
+  pushUndoNow();
+  // A pasted group that was joined stays joined to its own copies, not
+  // welded to the originals — same idea as clearing targetId below, just
+  // remapped instead of dropped, since the whole point of copying a welded
+  // cluster is to get another independent welded cluster.
+  const joinGroupRemap = new Map();
+  const pasted = clipboard.map((spec) => {
+    const s = cloneSpec(spec);
+    s.id = makeId(s.type);
+    s.x = snap(s.x + dx);
+    s.y = snap(s.y + dy);
+    if (s.x2 != null) { s.x2 = snap(s.x2 + dx); s.y2 = snap(s.y2 + dy); } // flexible-endpoint objects (rope/track): shift both ends together
+    if (s.targetId) s.targetId = null; // don't silently share a trigger link with the original
+    if (s.joinGroup) {
+      if (!joinGroupRemap.has(s.joinGroup)) joinGroupRemap.set(s.joinGroup, makeId("join"));
+      s.joinGroup = joinGroupRemap.get(s.joinGroup);
+    }
+    return s;
+  });
+  state.objects.push(...pasted);
+  state.selectedIds = new Set(pasted.map((s) => s.id));
+  syncSelectedId();
   renderAll();
   renderPanelUI();
   scheduleSave();
-  // paste again from the same spot, so repeated ⌘V lays out a diagonal trail
-  clipboard = cloneSpec(spec);
+  return pasted;
 }
 
 function beginPaletteDrag(type, pointerEvent) {
@@ -522,10 +1899,14 @@ function beginPaletteDrag(type, pointerEvent) {
 
     const { x, y } = window._renderer.screenToWorld(ev.clientX, ev.clientY);
     const spec = createSpec(type);
-    spec.x = snap(x);
-    spec.y = snap(y);
+    const dx = snap(x) - spec.x, dy = snap(y) - spec.y;
+    spec.x += dx;
+    spec.y += dy;
+    if (spec.x2 != null) { spec.x2 += dx; spec.y2 += dy; } // flexible-endpoint objects (rope/track): shift the far end by the same delta
+    pushUndoNow();
     state.objects.push(spec);
-    state.selectedId = spec.id;
+    state.selectedIds = new Set([spec.id]);
+    syncSelectedId();
     renderAll();
     renderPanelUI();
     scheduleSave();
@@ -535,4 +1916,6 @@ function beginPaletteDrag(type, pointerEvent) {
   window.addEventListener("pointerup", up);
 }
 
+startLoadingAnimation();
 boot();
+finishLoading();

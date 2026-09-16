@@ -41,28 +41,6 @@ export const MATERIALS = {
     shatterImpactThreshold: 9, // relative speed (world units/step-ish) needed to shatter
     refractiveIndex: 1.5, // used by Light Mode's ray tracer
   },
-  ice: {
-    label: "Ice",
-    color: "#d7f3fb",
-    strokeColor: "#9fd6e8",
-    density: 0.92,
-    friction: 0.02,
-    restitution: 0.05,
-    frictionAir: 0.01,
-    refractiveIndex: 1.31,
-  },
-  water: {
-    label: "Water",
-    color: "#3a7bd5",
-    strokeColor: "#2c5ea3",
-    density: 1.0,
-    friction: 0,
-    restitution: 0,
-    frictionAir: 0.01,
-    fillOpacity: 0.5,
-    isFluid: true,
-    refractiveIndex: 1.33,
-  },
 };
 
 export const MATERIAL_LIST = Object.keys(MATERIALS);

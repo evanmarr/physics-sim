@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Percolation</title>
+<style>
+  :root{
+    --bg: #090b11;
+    --bg-elev: #12151f;
+    --text: #e7e9f2;
+    --text-dim: #8a90a6;
+    --border: rgba(255,255,255,0.09);
+    --accent: #7dd3fc;
+    --accent2: #a78bfa;
+      --head-bg: rgba(9,11,17,0.72);
+    --code-bg: rgba(255,255,255,0.08);
+  }
+
+  :root[data-theme="light"]{
+    --bg: #f4f6fb;
+    --bg-elev: #ffffff;
+    --text: #1c1f26;
+    --text-dim: #5b6472;
+    --border: rgba(15,23,42,0.10);
+    --head-bg: rgba(255,255,255,0.82);
+    --code-bg: rgba(15,23,42,0.06);
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;height:100%;overflow:hidden;background:var(--bg);color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;}
+  a{color:inherit;}
+  code{background:var(--code-bg); padding:1px 6px; border-radius:5px; font-size:0.92em;
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;}
+  .demo-head{
+    position:fixed; z-index:5; top:16px; left:24px; max-width:440px;
+    background:var(--head-bg); backdrop-filter:blur(10px);
+    border:1px solid var(--border); border-radius:14px; padding:16px 20px 18px;
+    pointer-events:none;
+  }
+  .demo-head a, .demo-head button, .demo-head input, .demo-head code{pointer-events:auto;}
+  .kicker{font-size:12px; letter-spacing:0.14em; text-transform:uppercase;
+    color:var(--accent); font-weight:600; margin-bottom:12px;}
+  .demo-head h1{font-size:clamp(22px,3.4vw,30px); line-height:1.1; margin:0 0 12px; letter-spacing:-0.02em;}
+  .demo-head p{color:var(--text-dim); font-size:14px; line-height:1.6; margin:0;}
+  .demo-head a{color:var(--accent); text-decoration:none;}
+  .demo-head a:hover{text-decoration:underline;}
+  .stage{position:fixed; top:0; left:0; right:0; bottom:0;}
+  .stage canvas{display:block; width:100%; height:100%; cursor:pointer;}
+  .controls{display:flex; align-items:center; gap:8px; margin-top:14px; font-size:12.5px; color:var(--text-dim);}
+  .controls input{width:140px;}
+  .status{margin-top:10px; font-size:13px; font-weight:600;}
+  .status.percolates{color:#34d399;}
+  .status.blocked{color:#f87171;}
+  button.regen{
+    margin-top:10px; padding:7px 12px; font-size:12.5px; border-radius:8px;
+    border:1px solid var(--border); background:var(--bg-elev); color:var(--text); cursor:pointer;
+  }
+  button.regen:hover{border-color:var(--accent);}
+</style>
+</head>
+<body>
+
+<div class="demo-head">
+  <div class="kicker">percolation theory · flood fill · critical threshold</div>
+  <h1>Percolation</h1>
+  <p>Each cell in the grid is independently open with probability <em>p</em>. A path
+    "percolates" if open cells connect all the way from the top row to the bottom —
+    exactly the model used for how liquid seeps through porous rock, or how a
+    disease/fire/electrical network spans a random medium. On an infinite square
+    lattice the odds flip from "almost never" to "almost always" astonishingly
+    fast right around <code>p &asymp; 0.593</code>, the critical threshold. Drag the
+    slider to feel that phase transition, or click/drag cells to toggle them by hand.</p>
+  <div class="controls">
+    <span>p</span>
+    <input type="range" id="p-slider" min="0" max="1" step="0.01" value="0.55">
+    <span id="p-value">0.55</span>
+  </div>
+  <div class="status" id="status"></div>
+  <button class="regen" id="regen-btn">Regenerate</button>
+</div>
+
+<div class="stage" id="stage"></div>
+
+<script>
+const stage = document.getElementById("stage");
+const canvas = document.createElement("canvas");
+const context = canvas.getContext("2d");
+stage.appendChild(canvas);
+
+const CELL = 14;
+let width, height, cols, rows;
+let open, wet; // open[row][col]: boolean; wet[row][col]: reachable from the top through open cells
+let p = 0.55;
+
+const pSlider = document.getElementById("p-slider");
+const pValue = document.getElementById("p-value");
+const statusEl = document.getElementById("status");
+const regenBtn = document.getElementById("regen-btn");
+
+function start() {
+  width = stage.clientWidth;
+  height = stage.clientHeight;
+  if (!(width > 0 && height > 0)) { requestAnimationFrame(start); return; }
+
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  canvas.width = width * dpr;
+  canvas.height = height * dpr;
+  canvas.style.width = width + "px";
+  canvas.style.height = height + "px";
+  context.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  cols = Math.floor(width / CELL);
+  rows = Math.floor(height / CELL);
+  regenerate();
+
+  window.addEventListener("resize", () => {
+    width = stage.clientWidth;
+    height = stage.clientHeight;
+    canvas.width = width * dpr;
+    canvas.height = height * dpr;
+    canvas.style.width = width + "px";
+    canvas.style.height = height + "px";
+    context.setTransform(dpr, 0, 0, dpr, 0, 0);
+    cols = Math.floor(width / CELL);
+    rows = Math.floor(height / CELL);
+    regenerate();
+  });
+}
+start();
+
+function regenerate() {
+  open = Array.from({ length: rows }, () => Array.from({ length: cols }, () => Math.random() < p));
+  floodFill();
+  draw();
+}
+
+// BFS from every open cell in row 0 -- `wet` marks every cell reachable
+// from the top through a chain of open, 4-connected neighbors. If any wet
+// cell shows up in the last row, the grid percolates.
+function floodFill() {
+  wet = Array.from({ length: rows }, () => new Array(cols).fill(false));
+  const queue = [];
+  for (let c = 0; c < cols; c++) {
+    if (open[0][c]) { wet[0][c] = true; queue.push([0, c]); }
+  }
+  let head = 0;
+  while (head < queue.length) {
+    const [r, c] = queue[head++];
+    for (const [dr, dc] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const nr = r + dr, nc = c + dc;
+      if (nr < 0 || nr >= rows || nc < 0 || nc >= cols) continue;
+      if (!open[nr][nc] || wet[nr][nc]) continue;
+      wet[nr][nc] = true;
+      queue.push([nr, nc]);
+    }
+  }
+}
+
+function percolates() {
+  return wet[rows - 1]?.some(Boolean);
+}
+
+function draw() {
+  context.clearRect(0, 0, width, height);
+  const percolatesNow = percolates();
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      if (!open[r][c]) {
+        context.fillStyle = "rgba(148,163,184,0.08)";
+      } else if (wet[r][c]) {
+        context.fillStyle = percolatesNow ? "rgba(52,211,153,0.9)" : "rgba(125,211,252,0.75)";
+      } else {
+        context.fillStyle = "rgba(125,211,252,0.28)";
+      }
+      context.fillRect(c * CELL + 1, r * CELL + 1, CELL - 2, CELL - 2);
+    }
+  }
+  statusEl.textContent = percolatesNow ? "Percolates — connected top to bottom" : "Blocked — no path through";
+  statusEl.className = "status " + (percolatesNow ? "percolates" : "blocked");
+}
+
+pSlider.addEventListener("input", () => {
+  p = Number(pSlider.value);
+  pValue.textContent = p.toFixed(2);
+  regenerate();
+});
+regenBtn.addEventListener("click", regenerate);
+
+// Click, or click-and-drag, to toggle cells by hand and watch the
+// connectivity update live.
+let dragging = false, dragValue = null;
+function cellAt(clientX, clientY) {
+  const rect = canvas.getBoundingClientRect();
+  const c = Math.floor((clientX - rect.left) / CELL);
+  const r = Math.floor((clientY - rect.top) / CELL);
+  if (r < 0 || r >= rows || c < 0 || c >= cols) return null;
+  return [r, c];
+}
+function toggleAt(clientX, clientY, forceValue) {
+  const cell = cellAt(clientX, clientY);
+  if (!cell) return;
+  const [r, c] = cell;
+  open[r][c] = forceValue ?? !open[r][c];
+  floodFill();
+  draw();
+}
+canvas.addEventListener("pointerdown", (e) => {
+  dragging = true;
+  const cell = cellAt(e.clientX, e.clientY);
+  if (cell) dragValue = !open[cell[0]][cell[1]];
+  toggleAt(e.clientX, e.clientY, dragValue);
+});
+canvas.addEventListener("pointermove", (e) => {
+  if (!dragging) return;
+  toggleAt(e.clientX, e.clientY, dragValue);
+});
+window.addEventListener("pointerup", () => { dragging = false; });
+</script>
+</body>
+</html>

@@ -29,7 +29,53 @@
   --grid-major: #383f4c;
 }
 
+#loading-screen {
+  position: fixed; inset: 0; z-index: 9999;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--bg);
+  transition: opacity .6s ease;
+}
+#loading-screen.loading-done { opacity: 0; pointer-events: none; }
+#loading-canvas { position: absolute; transition: opacity .5s ease; }
+#loading-screen.loading-done #loading-canvas { opacity: 0; }
+#loading-logo { opacity: 0; transition: opacity .5s ease .1s; }
+#loading-screen.loading-done #loading-logo { opacity: 1; }
+
+/* The "cool colors" — cyan/lavender/mint — carried over from the Particle
+   Physics gallery's original look. Fixed rather than theme-swapped: they're
+   meant as a recognizable accent identity for the app's launcher screens
+   (this Home page, that gallery's own home), not something that should
+   flip with light/dark the way the functional --accent does. */
+:root {
+  --cool-1: #38bdf8;
+  --cool-2: #8b5cf6;
+  --cool-3: #10b981;
+}
+:root[data-theme="dark"] {
+  --cool-1: #7dd3fc;
+  --cool-2: #a78bfa;
+  --cool-3: #34d399;
+}
+
 * { box-sizing: border-box; }
+
+/* Every object/palette-item drag in this app is custom (pointerdown/move/up
+   or d3.drag), not native HTML5 drag-and-drop — but SVG shapes, icons, and
+   text are natively draggable/selectable in most browsers regardless, which
+   without this shows up as a stray text-selection highlight or a ghost
+   drag-image fighting the real drag as you move the mouse. `user-select`
+   alone (below) doesn't reliably reach into SVG in every browser, so both
+   are declared here on every element. */
+* {
+  -webkit-user-drag: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+/* ...except actual text-entry fields, which still need normal select/edit. */
+input, textarea {
+  user-select: text;
+  -webkit-user-select: text;
+}
 
 html, body {
   margin: 0;
@@ -39,7 +85,6 @@ html, body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
   font-size: 14px;
   overflow: hidden;
-  user-select: none;
 }
 
 button {
@@ -58,6 +103,76 @@ button.primary { background: var(--accent); border-color: var(--accent); color: 
 button.danger { background: var(--danger); border-color: var(--danger); color: #2a0b0b; }
 button:disabled { opacity: .4; cursor: default; }
 
+/* ---------- Device-mode prompt (first visit) ---------- */
+.device-prompt-overlay {
+  position: fixed; inset: 0; z-index: 10000;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(10, 12, 16, 0.6);
+}
+.device-prompt-box {
+  width: min(420px, 90vw); background: var(--panel); border: 1px solid var(--border);
+  border-radius: 12px; padding: 26px; text-align: center; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+}
+.device-prompt-box h2 { margin: 0 0 10px; }
+.device-prompt-box p { color: var(--text-dim); font-size: 13.5px; line-height: 1.5; margin: 0 0 20px; }
+.device-prompt-actions { display: flex; gap: 10px; }
+.device-prompt-actions button { flex: 1; padding: 14px 10px; font-size: 14px; }
+.device-prompt-remember {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  margin-top: 18px; font-size: 13px; color: var(--text-dim); cursor: pointer;
+}
+
+/* ---------- Mobile device mode: bigger touch targets, no keyboard hints ---------- */
+:root[data-device="mobile"] button {
+  padding: 10px 14px; font-size: 14.5px; min-height: 40px;
+}
+:root[data-device="mobile"] .palette-item { padding: 12px 10px; margin-right: 22px; }
+:root[data-device="mobile"] .mode-tab { padding: 10px 4px; }
+:root[data-device="mobile"] input[type="range"] { height: 24px; }
+:root[data-device="mobile"] .hint { display: none; }
+:root[data-device="mobile"] .rotate-handle circle { r: 12; }
+/* Cybersecurity's search results (fixed 380px) and info panel sit side by
+   side on desktop, but that badly overflows a narrow phone screen -- stack
+   them instead. Both desktop's .cyber-results/.cyber-info are flex:1/fixed-
+   width children of a row that itself scrolls internally; naively keeping
+   that same flex sizing in a column just redistributes the SAME cramped
+   height between two stacked panes instead of one, squeezing the info pane
+   down to a sliver the instant it actually has a description to show. So on
+   mobile the whole body scrolls as one normal column instead: the results
+   list keeps its own internal scroll (still useful once there are dozens of
+   entries), but the info pane gets its natural content height, appearing
+   right below the entry you tapped -- the same relative position (right
+   after the list) that it holds beside the list on desktop. */
+:root[data-device="mobile"] .cyber-body { flex-direction: column; overflow-y: auto; }
+:root[data-device="mobile"] .cyber-results { width: 100%; max-height: 38vh; padding-right: 0; flex-shrink: 0; }
+:root[data-device="mobile"] .cyber-info { flex: none; overflow-y: visible; }
+:root[data-device="mobile"] .cyber-header { flex-direction: column; align-items: flex-start; gap: 4px; }
+/* Portrait phone: the desktop's 4-column layout (palette + canvas + two
+   side panels, each with a fixed pixel width) doesn't fit a narrow screen
+   at all -- stack everything into full-width bands instead, and turn the
+   palette into a horizontal icon strip along the top so it doesn't eat
+   most of the vertical space a portrait screen actually has. */
+@media (orientation: portrait) {
+  :root[data-device="mobile"] #workspace-body { flex-wrap: wrap; overflow-y: auto; }
+  :root[data-device="mobile"] #palette {
+    flex: 1 1 100%; width: auto; max-height: 92px;
+    display: flex; flex-direction: row; overflow-x: auto; overflow-y: hidden;
+    border-right: none; border-bottom: 1px solid var(--border);
+  }
+  :root[data-device="mobile"] .palette-section-title { display: none; }
+  :root[data-device="mobile"] .palette-item { flex: 0 0 auto; flex-direction: column; text-align: center; font-size: 11px; margin-right: 10px; }
+  :root[data-device="mobile"] #canvas-wrap { flex: 1 1 100%; min-height: 45vh; }
+  :root[data-device="mobile"] #physics-math-panel,
+  :root[data-device="mobile"] #prop-panel {
+    flex: 1 1 100%; width: auto; max-height: 24vh;
+    border-left: none; border-top: 1px solid var(--border);
+  }
+}
+
+/* One shared top bar for every section, styled after the Particle Physics
+   gallery's own plain-link nav — a row of text links rather than a
+   button-group of filled tabs — so switching sections and switching demos
+   inside Particle Physics both read as the same kind of navigation. */
 #topbar {
   height: 52px;
   display: flex;
@@ -66,14 +181,43 @@ button:disabled { opacity: .4; cursor: default; }
   padding: 0 16px;
   background: var(--panel);
   border-bottom: 1px solid var(--border);
+  /* Deliberately NOT overflow:hidden on either axis — this bar hosts two
+     absolutely-positioned dropdowns (the menu and the account dropdown),
+     and any overflow value but "visible" here would clip them instead of
+     just the button row scrolling. The mode-tab row below handles its own
+     horizontal scroll instead. */
+  overflow: visible;
 }
-.brand { font-weight: 700; letter-spacing: .03em; color: var(--accent); background: none; border: none; padding: 4px 2px; font-size: 14px; }
-.brand:hover { border-color: transparent; text-decoration: underline; }
-#theme-toggle { margin-left: 8px; padding: 6px 10px; }
-#mode-tabs { display: flex; gap: 4px; background: var(--panel-alt); border: 1px solid var(--border); border-radius: 8px; padding: 3px; }
-.mode-tab { border: none; background: transparent; padding: 5px 12px; border-radius: 6px; color: var(--text-dim); }
+/* Every direct child keeps its natural width and the bar scrolls instead —
+   without this, flex's default shrink-to-fit squeezes buttons down to a
+   sliver (or their text disappearing entirely) on a narrow window instead
+   of just letting you scroll to reach them. */
+#topbar > * { flex-shrink: 0; }
+.brand { display: flex; align-items: center; gap: 7px; font-weight: 700; letter-spacing: .03em; color: var(--cool-2); background: none; border: none; padding: 4px 6px; font-size: 14px; cursor: pointer; border-radius: 8px; }
+.brand.active { background: var(--panel-alt, rgba(125,211,252,0.12)); }
+.brand-logo { flex-shrink: 0; }
+#menu-wrap { position: relative; margin-left: auto; }
+#menu-btn { font-size: 20px; line-height: 1; padding: 4px 10px; }
+#menu-dropdown {
+  position: absolute; top: 100%; right: 0; margin-top: 4px; z-index: 60;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.2); padding: 4px; min-width: 160px;
+  display: flex; flex-direction: column;
+}
+#menu-dropdown button { width: 100%; text-align: left; padding: 8px 10px; font-size: 13.5px; border: none; background: none; border-radius: 6px; }
+#menu-dropdown button:hover { background: var(--panel-alt); }
+/* Unlike every other direct child of #topbar, this one DOES shrink — with
+   12 modes it's easily wider than the window, and without this it just
+   pushes account-controls/the "..." menu off the right edge entirely with
+   no way to reach them (the internal overflow-x:auto here only helps once
+   this box itself is sized to fit the remaining space, not the whole bar). */
+#mode-tabs { display: flex; align-items: center; gap: 22px; overflow-x: auto; flex: 1 1 auto; min-width: 0; }
+.mode-tab {
+  border: none; background: none; padding: 4px 0; border-radius: 0;
+  color: var(--text-dim); font-size: 13.5px; font-weight: 500;
+}
 .mode-tab:hover { border-color: transparent; color: var(--text); }
-.mode-tab.active { background: var(--accent); color: #0b1220; font-weight: 600; }
+.mode-tab.active { background: none; color: var(--text); font-weight: 700; }
 
 #run-controls { display: flex; align-items: center; gap: 8px; }
 #run-controls .hint { color: var(--text-dim); font-size: 11px; border: 1px solid var(--border); padding: 1px 6px; border-radius: 4px; }
@@ -83,16 +227,60 @@ button:disabled { opacity: .4; cursor: default; }
 #gravity-controls { display: flex; align-items: center; gap: 8px; color: var(--text-dim); }
 #gravity-controls input { width: 140px; }
 #gravity-val { color: var(--text); font-weight: 600; }
+#speed-controls { display: flex; align-items: center; gap: 8px; color: var(--text-dim); }
+#speed-controls input { width: 110px; }
+#speed-val { color: var(--text); font-weight: 600; }
 
 #light-mode-toggle-wrap { margin-left: auto; }
+#units-controls { display: flex; gap: 6px; }
+#mobile-edit-controls { display: none; gap: 6px; }
+:root[data-device="mobile"] #mobile-edit-controls { display: flex; }
+#mobile-multiselect-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
 #light-mode-btn.active { background: var(--accent-2); border-color: var(--accent-2); color: #2a1a00; font-weight: 600; }
+#field-mode-btn.active { background: #8b5cf6; border-color: #8b5cf6; color: #fff; font-weight: 600; }
+.field-line { stroke: #8b5cf6; stroke-width: 1; stroke-opacity: 0.45; }
+.field-arrow { fill: #8b5cf6; opacity: 0.7; }
 #file-controls { display: flex; gap: 8px; }
+#account-controls { display: flex; align-items: center; gap: 8px; }
+#account-email-wrap { position: relative; }
+#account-email {
+  max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--text-dim); font-size: 13px; background: none; border: none; cursor: pointer;
+  padding: 4px 8px; border-radius: 6px;
+}
+#account-email:hover { background: var(--panel-alt); color: var(--text); }
+#account-dropdown {
+  position: absolute; top: 100%; right: 0; margin-top: 4px; z-index: 50;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.2); padding: 4px; min-width: 110px;
+}
+#account-dropdown button { width: 100%; text-align: left; padding: 7px 10px; font-size: 13px; }
+
+#title-wrap { position: relative; }
+/* Flown out to the LEFT of the title row, not below it — this sits inside
+   #menu-dropdown, which is itself already anchored at the right edge of a
+   (typically narrow) window, so a dropdown opening downward/rightward here
+   would run off-screen. */
+#title-dropdown {
+  position: absolute; top: 0; right: 100%; margin-right: 4px; z-index: 61;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.2); padding: 4px; min-width: 110px;
+  display: flex; flex-direction: column;
+}
+#title-dropdown button { width: 100%; text-align: left; padding: 7px 10px; font-size: 13px; white-space: nowrap; }
 
 #workspace {
   position: absolute;
   top: 52px; left: 0; right: 0; bottom: 0;
   display: flex;
+  flex-direction: column;
 }
+#physics-toolbar {
+  display: flex; align-items: center; gap: 16px; flex-wrap: wrap; flex-shrink: 0;
+  padding: 8px 16px;
+  background: var(--panel); border-bottom: 1px solid var(--border);
+}
+#workspace-body { display: flex; flex: 1; min-height: 0; }
 
 #chemistry-root {
   position: absolute;
@@ -106,26 +294,117 @@ button:disabled { opacity: .4; cursor: default; }
   position: absolute;
   top: 52px; left: 0; right: 0; bottom: 0;
   overflow-y: auto;
-  background: var(--bg);
+  /* A clean dark gradient base (radial washes of the brand cyan/purple/
+     green, barely-there) sits under the animated particle canvas and every
+     card — subtle enough not to compete with either, present enough to
+     read as a designed background rather than a flat fill. */
+  background:
+    radial-gradient(ellipse 60% 50% at 15% 0%, color-mix(in srgb, var(--cool-1) 10%, transparent), transparent 70%),
+    radial-gradient(ellipse 60% 50% at 85% 15%, color-mix(in srgb, var(--cool-2) 10%, transparent), transparent 70%),
+    radial-gradient(ellipse 70% 60% at 50% 100%, color-mix(in srgb, var(--cool-3) 8%, transparent), transparent 70%),
+    var(--bg);
 }
-.home-wrap { max-width: 900px; margin: 0 auto; padding: 60px 24px 80px; }
-.home-hero { text-align: center; margin-bottom: 48px; }
-.home-hero h1 { font-size: 42px; margin: 0 0 10px; color: var(--accent); letter-spacing: -.01em; }
+.home-bg { position: fixed; inset: 0; width: 100%; height: 100%; opacity: 0.8; pointer-events: none; z-index: 0; }
+.home-wrap { position: relative; z-index: 1; max-width: 900px; margin: 0 auto; padding: 60px 24px 80px; }
+.home-hero {
+  text-align: center; margin-bottom: 48px; padding: 24px 0;
+  /* A soft wash behind just the hero text keeps it legible over the much
+     brighter, fuller network animation now running behind the whole page,
+     without hiding that animation everywhere else (especially behind the
+     cards, where it's meant to show through). */
+  background: radial-gradient(ellipse 70% 100% at center, var(--bg) 45%, transparent 100%);
+}
+.home-logo { margin-bottom: 14px; }
+.home-kicker {
+  font-size: 12px; letter-spacing: .14em; text-transform: uppercase;
+  color: var(--cool-1); font-weight: 700; margin-bottom: 12px;
+}
+.home-hero h1 {
+  font-size: 42px; margin: 0 0 10px; letter-spacing: -.01em;
+  background: linear-gradient(100deg, var(--cool-1), var(--cool-2) 55%, var(--cool-3));
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+.home-slogan { font-size: 17px; font-weight: 600; color: var(--text); margin: 0 0 10px; }
 .home-tagline { font-size: 15px; color: var(--text-dim); max-width: 560px; margin: 0 auto; line-height: 1.6; }
-.home-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; margin-bottom: 56px; }
-.home-card {
-  background: var(--panel); border: 1px solid var(--border); border-radius: 14px;
-  padding: 28px 20px; text-align: left; cursor: pointer;
-  display: flex; flex-direction: column; gap: 10px;
+
+.home-hero-ctas { display: flex; justify-content: center; flex-wrap: wrap; gap: 12px; margin-top: 22px; }
+.home-cta { border-radius: 10px; padding: 12px 22px; font-size: 14.5px; font-weight: 700; cursor: pointer; border: 1px solid transparent; transition: transform .12s, filter .12s; }
+.home-cta:hover { transform: translateY(-2px); }
+.home-cta-primary { background: linear-gradient(100deg, var(--cool-1), var(--cool-2)); color: #0b1220; }
+.home-cta-primary:hover { filter: brightness(1.08); }
+.home-cta-secondary { background: transparent; border-color: var(--border); color: var(--text); }
+.home-cta-secondary:hover { border-color: var(--cool-1); }
+.home-cta-surprise { background: var(--panel-alt); border-color: var(--border); color: var(--cool-3); }
+.home-cta-surprise:hover { border-color: var(--cool-3); }
+
+/* Rails: a heading plus a horizontally-scrolling, snap-scrolled row of
+   cards — the same "shelf" pattern a modern streaming/app-store home page
+   uses for things like "Continue Watching" or "Featured," so all of
+   Kinetic's own home sections (real user data or curated content) read as
+   one consistent family instead of a grid grab-bag. */
+.home-rails { display: flex; flex-direction: column; gap: 34px; margin-bottom: 48px; }
+.home-section-title { font-size: 15px; font-weight: 700; margin: 0 0 14px; color: var(--text); }
+.home-rail-track {
+  display: flex; gap: 14px; overflow-x: auto; padding-bottom: 6px;
+  scroll-snap-type: x proximity;
+}
+.home-rail-card {
+  flex: 0 0 auto; scroll-snap-align: start;
+  width: 200px; background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+  padding: 12px; text-align: left; cursor: pointer; display: flex; flex-direction: column; gap: 6px;
   transition: transform .12s, border-color .12s;
 }
-.home-card:hover { transform: translateY(-3px); border-color: var(--accent); }
-.home-card-icon { font-size: 34px; }
-.home-card-title { font-size: 18px; font-weight: 700; }
+.home-rail-card:hover { transform: translateY(-3px); border-color: var(--cool-2); }
+.home-rail-thumb { width: 100%; height: 100px; border-radius: 8px; object-fit: cover; background: var(--panel-alt); display: block; }
+.home-rail-thumb-blank { background: linear-gradient(135deg, color-mix(in srgb, var(--cool-1) 18%, var(--panel-alt)), color-mix(in srgb, var(--cool-2) 18%, var(--panel-alt))); }
+.home-rail-card-title { font-size: 13.5px; font-weight: 700; color: var(--text); }
+.home-rail-card-sub { font-size: 11.5px; color: var(--text-dim); line-height: 1.4; }
+.home-rail-card-badge { margin-bottom: 2px; }
+.home-rail-card-recent { width: 150px; justify-content: center; min-height: 48px; }
+
+.home-all-sandboxes { scroll-margin-top: 20px; }
+.home-cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; margin-bottom: 56px; }
+/* A lone card left over in the last row of a 4-column grid sits centered
+   instead of stranded on the left. */
+.home-cards > .home-card:last-child:nth-child(4n+1) { grid-column: 2 / span 2; }
+.home-cards > .home-card:nth-last-child(2):nth-child(4n+1) { grid-column: 1 / span 2; }
+.home-cards > .home-card:nth-last-child(1):nth-child(4n+2) { grid-column: 3 / span 2; }
+.home-card {
+  background: var(--panel); border: 1px solid var(--border); border-radius: 14px;
+  padding: 0 20px 20px; text-align: left; cursor: pointer;
+  display: flex; flex-direction: column; gap: 10px;
+  transition: transform .12s, border-color .12s;
+  overflow: hidden;
+}
+.home-card:hover { transform: translateY(-3px); border-color: var(--cool-1); }
+/* Bleeds to the card's edges via negative margin, since the card itself
+   carries no top padding — cards without a thumbnail (History's own
+   category picker, reusing this same class) are unaffected either way. */
+.home-card-thumb { height: 84px; margin: 0 -20px 4px; background: var(--panel-alt); }
+.home-card-thumb svg { width: 100%; height: 100%; display: block; }
+.home-card-title { font-size: 18px; font-weight: 700; margin-top: 20px; }
 .home-card-blurb { font-size: 12.5px; color: var(--text-dim); line-height: 1.5; }
 .home-about { border-top: 1px solid var(--border); padding-top: 32px; }
 .home-about h2 { font-size: 15px; margin: 0 0 8px; }
 .home-about p { font-size: 13px; color: var(--text-dim); line-height: 1.65; margin: 0 0 24px; }
+
+@media (max-width: 860px) {
+  .home-cards { grid-template-columns: repeat(2, 1fr); }
+  .home-cards > .home-card:last-child:nth-child(4n+1),
+  .home-cards > .home-card:nth-last-child(2):nth-child(4n+1),
+  .home-cards > .home-card:nth-last-child(1):nth-child(4n+2) { grid-column: auto; }
+  .home-rail-card { width: 170px; }
+}
+@media (max-width: 520px) {
+  .home-wrap { padding: 36px 16px 60px; }
+  .home-hero h1 { font-size: 32px; }
+  .home-slogan { font-size: 15.5px; }
+  .home-tagline { font-size: 13.5px; }
+  .home-cards { grid-template-columns: 1fr; }
+  .home-cta { flex: 1 1 auto; padding: 12px 16px; }
+  .home-rail-card { width: 150px; }
+  .home-rail-thumb { height: 84px; }
+}
 
 #palette {
   width: 168px;
@@ -148,6 +427,7 @@ button:disabled { opacity: .4; cursor: default; }
   padding: 8px;
   border-radius: 8px;
   border: 1px solid transparent;
+  touch-action: none;
   cursor: grab;
   margin-bottom: 4px;
 }
@@ -158,8 +438,8 @@ button:disabled { opacity: .4; cursor: default; }
 .palette-item .price { font-size: 10.5px; color: var(--accent-2); }
 .palette-shortcuts { margin-top: 18px; padding: 8px 6px 4px; border-top: 1px solid var(--border); color: var(--text-dim); font-size: 10.5px; line-height: 1.6; }
 
-#canvas-wrap { flex: 1; position: relative; overflow: hidden; background: var(--bg); }
-#canvas { width: 100%; height: 100%; display: block; cursor: default; }
+#canvas-wrap { flex: 1; position: relative; overflow: hidden; background: var(--bg); touch-action: none; }
+#canvas { width: 100%; height: 100%; display: block; cursor: default; touch-action: none; }
 
 #mode-banner {
   position: absolute;
@@ -174,6 +454,18 @@ button:disabled { opacity: .4; cursor: default; }
   pointer-events: none;
 }
 #mode-banner.hidden, .hidden { display: none !important; }
+.touch-menu {
+  position: fixed; z-index: 10001; transform: translate(-50%, -110%);
+  background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.25); padding: 6px; display: flex; gap: 4px;
+}
+.touch-menu button { padding: 10px 16px; font-size: 14px; white-space: nowrap; }
+#grid-scale-badge {
+  position: absolute; bottom: 10px; left: 10px;
+  background: var(--panel); border: 1px solid var(--border);
+  color: var(--text-dim); font-size: 11px; padding: 4px 10px;
+  border-radius: 999px; pointer-events: none; opacity: 0.85;
+}
 
 #prop-panel {
   width: 260px;
@@ -259,8 +551,111 @@ button:disabled { opacity: .4; cursor: default; }
 .math-edit-reset:hover { color: var(--text); border-color: var(--accent-2); }
 
 .modal { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: flex; align-items: center; justify-content: center; z-index: 50; }
+/* alertPopup/confirmPopup can be triggered from inside another already-open
+   modal (e.g. Donate from inside About) — same z-index as every other
+   .modal would leave it stacking by DOM order, not open-order, so whichever
+   modal happens to come later in the HTML would always paint on top
+   regardless of which was actually opened last. This needs to always win. */
+#popup-modal { z-index: 100; }
 .modal-box { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 20px; width: 360px; max-height: 70vh; overflow-y: auto; }
+.about-box { width: 480px; }
+.about-box p { font-size: 14px; line-height: 1.6; color: var(--text-dim); }
+.about-box h3 { margin-top: 20px; margin-bottom: 6px; }
+.about-placeholder-note { font-size: 12px; font-style: italic; color: var(--danger); margin: 0 0 6px; }
+.about-actions { display: flex; gap: 8px; margin-top: 4px; }
+
+.classroom-box { width: 460px; }
+.classroom-box h3 { margin: 18px 0 8px; font-size: 13px; }
+.classroom-row {
+  display: flex; align-items: center; gap: 10px; padding: 10px;
+  border: 1px solid var(--border); border-radius: 8px; background: var(--panel-alt);
+  margin-bottom: 8px;
+}
+.classroom-row-info { flex: 1; min-width: 0; }
+.classroom-row-name { font-weight: 600; font-size: 13.5px; }
+.classroom-row-meta { font-size: 11.5px; color: var(--text-dim); margin-top: 2px; }
+.classroom-code {
+  font-size: 15px; font-weight: 700; letter-spacing: .08em; padding: 3px 8px;
+  border-radius: 6px; background: var(--panel); border: 1px solid var(--border);
+}
+.classroom-form { display: flex; gap: 8px; margin-top: 4px; }
+.classroom-form input { flex: 1; }
+
+.dashboard-hint { font-size: 12.5px; color: var(--text-dim); margin: 0 0 14px; }
+.dashboard-share-actions { display: flex; gap: 8px; margin-bottom: 18px; flex-wrap: wrap; }
+.dashboard-row {
+  display: flex; align-items: center; gap: 10px; padding: 10px;
+  border: 1px solid var(--border); border-radius: 8px; background: var(--panel-alt);
+  margin-bottom: 8px;
+}
+.dashboard-row-info { flex: 1; min-width: 0; }
+.dashboard-row-name { font-weight: 600; font-size: 13.5px; }
+.dashboard-row-kind { font-weight: 400; font-size: 11px; color: var(--text-dim); border: 1px solid var(--border); border-radius: 999px; padding: 1px 8px; margin-left: 6px; }
+.dashboard-row-meta { font-size: 11.5px; color: var(--text-dim); margin-top: 2px; }
+.dashboard-share-form {
+  margin-top: 12px; padding: 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-alt);
+}
+.dashboard-share-form select { width: 100%; margin-bottom: 10px; padding: 7px 9px; }
 .modal-box h2 { margin-top: 0; }
+.modal-box input[type="text"], .modal-box input[type="email"], .modal-box input[type="password"], .modal-box input[type="number"] {
+  width: 100%; box-sizing: border-box; background: var(--panel-alt); color: var(--text);
+  border: 1px solid var(--border); border-radius: 6px; padding: 7px 9px; font-size: 13px; margin-bottom: 10px;
+}
+.modal-box label { display: block; font-size: 12px; color: var(--text-dim); margin-bottom: 4px; }
+.modal-box textarea {
+  width: 100%; box-sizing: border-box; background: var(--panel-alt); color: var(--text);
+  border: 1px solid var(--border); border-radius: 6px; padding: 9px; font-size: 13px;
+  margin-bottom: 10px; font-family: inherit; resize: vertical;
+}
+.feedback-hint { font-size: 12.5px; color: var(--text-dim); margin: 0 0 12px; }
+.modal-box #auth-submit, .modal-box #auth-close { width: 100%; margin-top: 4px; }
+
+.auth-tabs { display: flex; gap: 6px; margin-bottom: 14px; }
+.auth-name-row { display: flex; gap: 8px; }
+.auth-name-row > div { flex: 1; }
+#auth-title { width: 100%; box-sizing: border-box; background: var(--panel-alt); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 7px 9px; font-size: 13px; margin-bottom: 4px; }
+.auth-tab { flex: 1; }
+.auth-tab.active { background: var(--accent); border-color: var(--accent); color: #0b1220; font-weight: 600; }
+.auth-hint { font-size: 11.5px; color: var(--text-dim); margin: -4px 0 10px; }
+.auth-checkbox { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text-dim); margin-bottom: 10px; }
+.auth-checkbox input { margin: 0; }
+.auth-error { color: var(--danger); font-size: 12.5px; min-height: 16px; margin-bottom: 4px; }
+.auth-error.auth-notice { color: var(--good); }
+#auth-code { font-size: 22px; letter-spacing: .3em; text-align: center; }
+
+#onboarding-modal-box { width: 420px; max-width: 92vw; }
+.onboarding-progress { display: flex; gap: 6px; margin-bottom: 14px; }
+.onboarding-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--border); }
+.onboarding-dot.active { background: var(--accent); }
+.onboarding-dot.done { background: var(--good); }
+.onboarding-options { display: flex; flex-direction: column; gap: 8px; margin: 14px 0; }
+.onboarding-option { text-align: left; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-alt); }
+.onboarding-option.selected { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, var(--panel-alt)); font-weight: 600; }
+.onboarding-actions { display: flex; align-items: center; justify-content: space-between; margin-top: 6px; }
+.onboarding-actions-right { display: flex; gap: 8px; }
+#onboarding-skip { color: var(--text-dim); background: none; border: none; }
+
+#saves-modal-box { width: 420px; max-width: 92vw; }
+#saves-modal-box:has(.community-card) { width: 640px; }
+.saves-new-row { display: flex; gap: 8px; align-items: flex-start; }
+.saves-new-row input { flex: 1; }
+.saves-hint { font-size: 11.5px; color: var(--text-dim); margin-top: -6px; }
+.saves-list { display: flex; flex-direction: column; gap: 8px; margin: 14px 0; max-height: 55vh; overflow-y: auto; }
+.saves-empty { color: var(--text-dim); font-size: 13px; }
+.saves-item { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px; border: 1px solid var(--border); border-radius: 8px; flex-wrap: wrap; }
+.saves-item-info { flex: 1; min-width: 140px; }
+.saves-item-name { font-weight: 600; }
+.saves-item-date { font-size: 11px; color: var(--text-dim); }
+.saves-item-actions { display: flex; gap: 6px; flex-shrink: 0; flex-wrap: wrap; }
+.saves-item-actions button { padding: 5px 8px; font-size: 12px; }
+#saves-modal-box #saves-close { width: 100%; margin-top: 4px; }
+.community-snapshot { width: 64px; height: 40px; object-fit: cover; border-radius: 6px; border: 1px solid var(--border); flex-shrink: 0; background: var(--panel-alt); }
+.community-snapshot-empty { display: flex; align-items: center; justify-content: center; }
+
+.popup-message { color: var(--text-dim); font-size: 13.5px; line-height: 1.5; }
+.popup-actions { display: flex; gap: 8px; margin-top: 16px; }
+.popup-actions button { flex: 1; }
+#popup-modal-box #popup-ok { width: 100%; margin-top: 16px; }
 .shop-item { display: flex; align-items: center; gap: 10px; padding: 10px; border: 1px solid var(--border); border-radius: 8px; margin-bottom: 8px; }
 .shop-item .swatch { width: 32px; height: 32px; border-radius: 6px; }
 .shop-item .info { flex: 1; }
@@ -278,6 +673,31 @@ button:disabled { opacity: .4; cursor: default; }
   padding: 1px 8px;
   margin: 3px 0 5px;
 }
+.difficulty-badge {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  padding: 2px 8px;
+  border-radius: 999px;
+  color: #0b1220;
+  vertical-align: middle;
+}
+.difficulty-badge[data-tier="Simple"] { background: #4fd18b; }
+.difficulty-badge[data-tier="Easy"] { background: #8bd14f; }
+.difficulty-badge[data-tier="Medium"] { background: #d8cf4a; }
+.difficulty-badge[data-tier="Hard"] { background: #e0a34a; }
+.difficulty-badge[data-tier="Challenging"] { background: #e0794a; }
+.difficulty-badge[data-tier="Extreme"] { background: #e0544a; color: #fff; }
+.difficulty-badge[data-tier="Impossible"] { background: #a94ae0; color: #fff; }
+
+.challenge-hint-toggle {
+  margin-top: 6px; padding: 3px 10px; font-size: 11px; border-radius: 999px;
+  border: 1px solid var(--border); background: var(--panel); color: var(--text-dim); cursor: pointer;
+}
+.challenge-hint-toggle:hover { border-color: var(--accent); color: var(--text); }
+.challenge-hint-text { margin-top: 6px; font-size: 11.5px; color: var(--text-dim); line-height: 1.5; font-style: italic; }
 
 .toast {
   position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
@@ -289,10 +709,89 @@ button:disabled { opacity: .4; cursor: default; }
 
 .grid-bg { fill: var(--bg); }
 
+.water-layer { opacity: 0.82; }
+
 .world-object.selected > .shape { stroke: var(--accent) !important; stroke-width: 3px; }
+/* A padlock cue on any Locked object (see panel.js) — a dashed amber
+   outline reads as "protected" without needing its own icon layer, and
+   stays visible under the normal selection highlight too. */
+.world-object.locked > .shape { stroke-dasharray: 6 3 !important; stroke: #d9a441 !important; }
+.world-object.locked { cursor: not-allowed; }
+/* Rope keeps its own configured tube thickness even while selected —
+   the generic 3px override above would otherwise thin a fat rope down to
+   a spindly line the moment you click it. --rope-width is set inline by
+   render.js from the rope's actual thickness field. */
+.world-object.selected > .shape.rope-preview { stroke-width: var(--rope-width, 10px) !important; }
+.rope-preview { stroke-linecap: round; }
+.rope-end-handle { cursor: grab; }
+.rope-end-outer { fill: #9aa1ac; stroke: #5f6672; stroke-width: 2; }
+.rope-end-dot { fill: #1b1e24; }
+.wheel-spoke { stroke: #1b1e24; stroke-width: 2; stroke-linecap: round; opacity: 0.55; }
+.wheel-hub { fill: #1b1e24; }
+.world-object.selected .rope-end-outer { stroke: var(--accent); }
+.rope-tube { stroke-linecap: round; stroke-linejoin: round; }
 .rotate-handle { cursor: grab; }
 .rotate-handle circle { fill: var(--accent); }
+.marquee-select-box { fill: var(--accent); fill-opacity: 0.12; stroke: var(--accent); stroke-width: 1.5; stroke-dasharray: 4 3; pointer-events: none; }
+
+/* ---------- Mirror ---------- */
+/* Body color/stroke come from the chosen material like every other object
+   (set inline in updateShape's generic .shape block) — this is just the
+   glassy sheen accent on top. */
+.mirror-highlight { stroke: #ffffff; stroke-width: 2; stroke-opacity: .8; stroke-linecap: round; pointer-events: none; }
+
+/* ---------- Wire ---------- */
+/* Colors fixed regardless of material — the whole point is a recognizable
+   tricolor braid, not something that should blend into the palette like a
+   normal material-colored object. */
+.wire-strand { fill: none; stroke-width: 2; stroke-linecap: round; }
+.wire-strand-red { stroke: #e0473f; }
+.wire-strand-green { stroke: #2ecc71; }
+.wire-strand-blue { stroke: #4f8cff; }
+.world-object.selected .wire-strand { stroke-width: 3; filter: drop-shadow(0 0 3px var(--accent)); }
+
+/* ---------- Portal ---------- */
+.portal-ring { fill: rgba(139, 92, 246, 0.25); stroke: #8b5cf6; stroke-width: 3; }
+.portal-spiral { fill: none; stroke: #c4b5fd; stroke-width: 1.5; stroke-opacity: 0.8; }
+.portal-arrow { fill: #8b5cf6; }
+
 .rotate-handle line { stroke: var(--accent); stroke-width: 1.5px; }
+
+/* ---------- Speed labels (Play mode) ---------- */
+.speed-label { pointer-events: auto; cursor: pointer; }
+.speed-label-bg { fill: rgba(20, 22, 28, 0.72); stroke: rgba(255, 255, 255, 0.18); stroke-width: 1px; }
+.speed-label-text { fill: #f4f6fb; font-size: 11px; font-weight: 600; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; pointer-events: none; }
+
+.speed-unit-menu {
+  position: fixed; z-index: 200; transform: translate(-50%, 8px);
+  display: flex; flex-direction: column; gap: 2px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+  padding: 4px; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+}
+.speed-unit-menu button {
+  padding: 5px 14px; border-radius: 5px; text-align: left;
+  background: none; border: none; color: var(--text); font-size: 12.5px; cursor: pointer;
+}
+.speed-unit-menu button:hover { background: var(--panel-alt); }
+.speed-unit-menu button.active { color: var(--accent); font-weight: 600; }
+
+/* ---------- Tutorial ---------- */
+.tutorial-overlay { position: fixed; inset: 0; z-index: 9000; pointer-events: none; }
+.tutorial-spot {
+  position: fixed; border-radius: 10px; pointer-events: none;
+  box-shadow: 0 0 0 9999px rgba(10, 12, 16, 0.6);
+  border: 2px solid var(--accent);
+  transition: left 0.25s ease, top 0.25s ease, width 0.25s ease, height 0.25s ease;
+}
+.tutorial-tooltip {
+  position: fixed; z-index: 9001; pointer-events: auto;
+  width: 320px; background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+  padding: 14px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+}
+.tutorial-progress { font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 6px; }
+.tutorial-text { font-size: 13.5px; line-height: 1.5; color: var(--text); margin-bottom: 12px; }
+.tutorial-actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.tutorial-waiting { font-size: 12px; color: var(--accent); font-style: italic; }
 
 /* ---------- Chemistry mode ---------- */
 
@@ -340,13 +839,17 @@ button:disabled { opacity: .4; cursor: default; }
 .chem-info-row b { color: var(--text); font-weight: 600; }
 .chem-add-btn { margin-top: 12px; width: 100%; }
 
-.chem-slots { display: grid; grid-template-columns: repeat(2, minmax(70px, 1fr)); gap: 6px; margin-bottom: 10px; }
+/* auto-fill (not a hard repeat(2,...)) so a slot — and its temperature
+   slider — gets real width whenever the panel has room, instead of always
+   being squeezed to half-width; a 0-3000K range in a ~70px-wide slider
+   moved ~25K per pixel of drag, which is what made it feel unslidable. */
+.chem-slots { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 6px; margin-bottom: 10px; }
 .chem-slot {
   min-height: 62px; border: 2px dashed var(--border); border-radius: 8px;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   font-size: 11px; color: var(--text-dim); position: relative; padding: 6px 4px;
 }
-.chem-slot.filled { border-style: solid; background: var(--panel-alt); }
+.chem-slot.filled { border-style: solid; background: var(--panel-alt); cursor: pointer; }
 .chem-slot-sym { font-size: 16px; font-weight: 700; color: var(--text); }
 .chem-slot-name { font-size: 9.5px; color: var(--text-dim); text-align: center; }
 .chem-slot-clear {
@@ -356,6 +859,14 @@ button:disabled { opacity: .4; cursor: default; }
 .chem-slot-temp { display: flex; align-items: center; gap: 4px; width: 100%; margin-top: 3px; }
 .chem-slot-temp input[type="range"] { flex: 1; height: 12px; }
 .chem-slot-temp span { font-size: 9px; color: var(--text-dim); min-width: 34px; text-align: right; }
+.chem-slot-phase-row { display: flex; gap: 3px; width: 100%; margin-top: 4px; }
+.chem-phase-btn {
+  flex: 1; font-size: 9px; text-transform: capitalize; padding: 2px 0;
+  border: 1px solid var(--border); border-radius: 4px; background: var(--panel);
+  color: var(--text-dim);
+}
+.chem-phase-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.chem-phase-btn:hover:not(.active) { border-color: var(--accent-2); color: var(--text); }
 .chem-slot-btn-row { display: flex; gap: 8px; margin-bottom: 10px; }
 .chem-slot-btn-row button { flex: 1; font-size: 11.5px; padding: 6px 4px; }
 .chem-water-btn { width: 100%; margin-bottom: 10px; }
@@ -389,6 +900,10 @@ button:disabled { opacity: .4; cursor: default; }
   overflow-x: auto;
   overflow-y: hidden;
 }
+.astro-outer { display: flex; flex-direction: column; width: 100%; height: 100%; overflow: hidden; }
+.astro-mode-tabs { flex: 0 0 auto; padding: 10px 14px 0; }
+.astro-solar-wrap { display: flex; flex: 1; min-height: 0; overflow-x: auto; overflow-y: hidden; }
+.astro-rocket-wrap { flex: 1; min-height: 0; overflow: hidden; display: flex; }
 .anat-layers { flex: 0.9; border-right: 1px solid var(--border); min-width: 220px; }
 .anat-viewer { flex: 1.4; border-right: 1px solid var(--border); min-width: 340px; display: flex; flex-direction: column; position: relative; }
 .anat-info { flex: 1; min-width: 260px; }
@@ -421,5 +936,520 @@ button:disabled { opacity: .4; cursor: default; }
 }
 #astronomy-root .anat-viewer canvas { border-radius: 8px; }
 .astro-date-label { font-size: 11.5px; color: var(--text-dim); margin-bottom: 14px; padding-bottom: 10px; border-bottom: 1px solid var(--border); }
+.astro-time-slider { width: 100%; margin: 4px 0 2px; }
+.astro-time-slider-readout { font-size: 11px; color: var(--text-dim); text-align: center; margin-bottom: 14px; }
+.astro-speed-row { display: flex; flex-direction: column; gap: 4px; }
+.astro-focus-btn { width: 100%; margin-top: 10px; }
+.astro-speed-btn { text-align: left; }
+.astro-speed-btn.active { background: var(--accent); border-color: var(--accent); color: #0b1220; font-weight: 600; }
 .astro-eclipse-result { margin-top: 10px; background: var(--panel-alt); border: 1px solid var(--border); border-radius: 8px; padding: 12px; text-align: center; }
 .astro-eclipse-result button { width: 100%; margin-top: 10px; }
+
+/* ---------- History ---------- */
+
+.history-root {
+  position: absolute;
+  top: 52px; left: 0; right: 0; bottom: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: var(--bg);
+}
+
+.history-picker { max-width: 900px; margin: 0 auto; padding: 48px 24px 60px; width: 100%; }
+.history-picker-title-row { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-bottom: 6px; }
+.history-picker-title { font-size: 32px; margin: 0; color: var(--accent); letter-spacing: -.01em; }
+.history-picker-sub { font-size: 14px; color: var(--text-dim); margin: 0 0 32px; }
+.history-challenge-banner {
+  font-size: 12.5px; color: var(--accent); background: rgba(79,140,255,.12);
+  border: 1px solid var(--accent); border-radius: 8px; padding: 8px 12px;
+  flex: 1; min-width: 200px;
+}
+.history-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+@media (max-width: 700px) { .history-cards { grid-template-columns: repeat(2, 1fr); } }
+
+.history-timeline-header {
+  display: flex; align-items: center; gap: 16px;
+  padding: 16px 20px; border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.history-timeline-header button { flex-shrink: 0; }
+
+.history-timeline-row { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+/* Always-visible, gesture-free way to move through the strip — wheel and
+   click-drag both work on it too (wired in JS), but neither depends on
+   trackpad/mouse-wheel behavior the way a plain button click doesn't. */
+.history-timeline-nav {
+  flex-shrink: 0; align-self: stretch; width: 32px;
+  background: var(--panel-alt); border: none; color: var(--text-dim);
+  font-size: 14px; cursor: pointer;
+}
+.history-timeline-nav:hover { color: var(--text); background: var(--border); }
+
+/* The horizontal scroller: fixed height, wide inner track set by JS so
+   every tick gets even spacing regardless of how many entries there are. */
+.history-timeline-scroll { overflow-x: auto; overflow-y: hidden; flex: 1; min-width: 0; padding: 18px 0 16px; }
+.history-timeline-track { position: relative; height: 120px; }
+.history-timeline-axis {
+  position: absolute; left: 0; right: 0; top: 50%;
+  height: 2px; background: var(--border);
+}
+.history-tick {
+  position: absolute; top: 0; transform: translateX(-50%);
+  width: 116px; display: flex; flex-direction: column; align-items: center; gap: 4px;
+  background: none; border: none; padding: 0; cursor: pointer;
+}
+.history-tick-mark {
+  width: 2px; height: 16px; background: var(--text-dim);
+  margin-top: 52px; /* centers the mark on the axis line at track height/2 */
+  transition: background .12s, height .12s;
+}
+.history-tick-year { font-size: 10.5px; color: var(--text-dim); font-weight: 600; }
+.history-tick-title { font-size: 11px; line-height: 1.3; text-align: center; color: var(--text); max-width: 110px; }
+.history-tick:hover .history-tick-mark { background: var(--text); }
+.history-tick.active .history-tick-mark { background: var(--accent); height: 20px; width: 3px; margin-top: 50px; }
+.history-tick.active .history-tick-year { color: var(--accent); }
+.history-tick.active .history-tick-title { font-weight: 700; }
+
+.history-info-panel { flex: 1; overflow-y: auto; padding: 24px; border-top: 1px solid var(--border); }
+
+.history-info-year { font-size: 12px; color: var(--accent); font-weight: 700; letter-spacing: .03em; text-transform: uppercase; margin-bottom: 6px; }
+.history-info-title { font-size: 22px; margin-bottom: 8px; }
+.history-info-people { font-size: 13.5px; color: var(--text-dim); margin-bottom: 18px; padding-bottom: 18px; border-bottom: 1px solid var(--border); }
+.history-info-summary { font-size: 15px; line-height: 1.6; margin-bottom: 14px; max-width: 640px; }
+.history-info-detail { font-size: 13.5px; line-height: 1.7; color: var(--text-dim); max-width: 640px; }
+
+/* ---------- Cybersecurity ---------- */
+
+.cyber-root {
+  position: absolute;
+  top: 52px; left: 0; right: 0; bottom: 0;
+  display: flex; flex-direction: column;
+  overflow: hidden;
+  background: var(--bg);
+  padding: 28px 32px;
+  gap: 4px;
+}
+.cyber-header { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; }
+.cyber-title { font-size: 32px; margin: 0; color: var(--accent); letter-spacing: -.01em; }
+.cyber-sub { font-size: 14px; color: var(--text-dim); margin: 0 0 14px; }
+
+.cyber-challenge-banner {
+  font-size: 12.5px; color: var(--accent); background: rgba(79,140,255,.12);
+  border: 1px solid var(--accent); border-radius: 8px; padding: 8px 12px;
+  margin-bottom: 14px;
+}
+
+.cyber-controls { display: flex; flex-direction: column; gap: 10px; margin-bottom: 16px; flex-shrink: 0; }
+.cyber-search {
+  width: 100%; max-width: 460px; padding: 10px 14px; font-size: 14px;
+  border-radius: 8px; border: 1px solid var(--border);
+  background: var(--panel-alt); color: var(--text);
+}
+.cyber-filter-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.cyber-filter {
+  font-size: 12.5px; padding: 7px 12px; border-radius: 999px;
+  border: 1px solid var(--border); background: transparent; color: var(--text-dim);
+  cursor: pointer;
+}
+.cyber-filter.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.cyber-filter:not(.active):hover { border-color: var(--text-dim); color: var(--text); }
+
+.cyber-body { display: flex; gap: 20px; flex: 1; min-height: 0; }
+.cyber-results { width: 380px; flex-shrink: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding-right: 4px; }
+.cyber-empty { font-size: 13px; color: var(--text-dim); padding: 20px 4px; }
+
+.cyber-card {
+  display: flex; gap: 12px; text-align: left; align-items: flex-start;
+  padding: 12px; border-radius: 10px; border: 1px solid var(--border);
+  background: var(--panel-alt);
+  cursor: pointer;
+  /* .cyber-results is a flex column with a capped height (constrained
+     further still on mobile) — without this, flexbox shrinks every card
+     below its own content's height to force them all to fit, instead of
+     just scrolling, and the overflow text bleeds into the next card. */
+  flex-shrink: 0;
+}
+.cyber-card:hover { border-color: var(--text-dim); }
+.cyber-card.active { border-color: var(--accent); background: rgba(79,140,255,.1); }
+.cyber-card-name { font-weight: 600; font-size: 14px; }
+.cyber-card-year { font-size: 11px; color: var(--accent); margin: 1px 0 4px; }
+.cyber-card-summary { font-size: 12px; color: var(--text-dim); line-height: 1.4; }
+
+.cyber-info { flex: 1; overflow-y: auto; padding: 24px; min-width: 0; }
+.cyber-info-empty { font-size: 13.5px; color: var(--text-dim); }
+
+.cyber-sub-nav { display: flex; gap: 8px; margin-bottom: 14px; }
+.cyber-sub-tab {
+  padding: 7px 14px; border-radius: 999px; border: 1px solid var(--border);
+  background: var(--panel); color: var(--text-dim); font-size: 13px; cursor: pointer;
+}
+.cyber-sub-tab.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+.cyber-sim-root { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 18px; padding-bottom: 20px; }
+.cyber-sim-card { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 18px 20px; }
+.cyber-sim-title { margin: 0 0 8px; font-size: 17px; }
+.cyber-sim-desc { font-size: 13px; color: var(--text-dim); line-height: 1.5; margin: 0 0 14px; }
+.cyber-sim-input { width: 100%; max-width: 420px; padding: 9px 12px; font-size: 14px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.cyber-sim-meter-track { width: 100%; max-width: 420px; height: 8px; border-radius: 999px; background: var(--border); margin-top: 10px; overflow: hidden; }
+.cyber-sim-meter-fill { height: 100%; width: 0%; transition: width .15s, background .15s; }
+.cyber-sim-stats { margin-top: 10px; font-size: 13.5px; }
+.cyber-sim-hint { font-size: 12.5px; color: var(--text-dim); margin-top: 4px; }
+.cyber-sim-btn { margin-top: 12px; padding: 8px 14px; font-size: 13px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg); color: var(--text); cursor: pointer; }
+.cyber-sim-btn:hover { border-color: var(--accent); }
+
+.phish-email { background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 16px 18px; margin-top: 8px; font-size: 13.5px; line-height: 1.6; }
+.phish-field { margin-bottom: 4px; }
+.phish-body { margin-top: 10px; }
+.phish-clue { cursor: pointer; border-radius: 3px; padding: 0 1px; }
+.phish-clue:hover { background: rgba(248,113,113,0.18); }
+.phish-clue.found { background: rgba(52,211,153,0.28); text-decoration: underline wavy #34d399; cursor: default; }
+
+.cyber-hash-out {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px;
+  word-break: break-all; background: var(--bg); border: 1px solid var(--border);
+  border-radius: 8px; padding: 10px 12px; margin-top: 10px; min-height: 18px; color: var(--accent);
+}
+.cyber-totp-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 32px;
+  font-weight: 700; letter-spacing: .12em; margin-top: 8px; color: var(--text);
+}
+
+.cyber-fw-rules { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
+.cyber-fw-rule {
+  display: flex; align-items: center; gap: 10px; font-size: 12.5px; padding: 6px 10px;
+  border-radius: 6px; background: var(--bg); border: 1px solid var(--border);
+}
+.cyber-fw-rule-num { color: var(--text-dim); font-variant-numeric: tabular-nums; width: 16px; }
+.cyber-fw-rule-action { font-weight: 700; width: 52px; }
+.cyber-fw-rule-allow .cyber-fw-rule-action { color: #34d399; }
+.cyber-fw-rule-block .cyber-fw-rule-action { color: #f87171; }
+.cyber-fw-rule button { margin-left: auto; background: none; border: none; color: var(--text-dim); cursor: pointer; padding: 2px 6px; }
+.cyber-fw-rule button:hover { color: #f87171; }
+.cyber-fw-add { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+.cyber-fw-add input, .cyber-fw-add select { padding: 6px 8px; font-size: 12.5px; }
+.cyber-fw-add input[type="text"] { width: 150px; }
+.cyber-fw-feed {
+  display: flex; flex-direction: column; gap: 3px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+  padding: 10px 12px; max-height: 220px; overflow-y: auto;
+}
+.cyber-fw-line { padding: 1px 0; }
+.cyber-fw-allowed { color: #34d399; }
+.cyber-fw-blocked { color: #f87171; }
+
+/* ---------- Particle Physics ---------- */
+/* The demos are a separate, self-contained static site (see
+   particle-physics/) rather than ported into this app's own object model,
+   so this mode is an iframe onto it — but each demo's own top bar was
+   removed (it duplicated Contraption's own nav one level up), so this
+   subnav is the only way left to switch between the 8 demos, driving the
+   iframe's src directly instead of relying on links inside the frame. */
+#particles-root {
+  position: absolute;
+  top: 52px; left: 0; right: 0; bottom: 0;
+  display: flex; flex-direction: column;
+  background: var(--bg);
+}
+#particles-subnav {
+  display: flex; align-items: center; gap: 20px; flex-shrink: 0;
+  padding: 10px 20px; background: var(--panel); border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+}
+.particles-tab {
+  border: none; background: none; padding: 4px 0; white-space: nowrap;
+  color: var(--text-dim); font-size: 13px; font-weight: 500;
+}
+.particles-tab:hover { border-color: transparent; color: var(--text); }
+.particles-tab.active { background: none; color: var(--cool-1); font-weight: 700; }
+#particles-frame { display: block; width: 100%; height: 100%; flex: 1; border: none; }
+
+/* ---------- Mathematics ---------- */
+.math-root {
+  position: absolute;
+  top: 52px; left: 0; right: 0; bottom: 0;
+  display: flex;
+  background: var(--bg);
+}
+.math-sidebar {
+  width: 300px; flex-shrink: 0; overflow-y: auto;
+  padding: 20px; border-right: 1px solid var(--border); background: var(--panel);
+}
+.math-func-list { display: flex; flex-direction: column; gap: 8px; margin: 14px 0; }
+.math-func-row { display: flex; flex-direction: column; gap: 3px; }
+.math-func-input-row { display: flex; align-items: center; gap: 6px; }
+.math-func-swatch { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
+.math-func-swatch-input {
+  width: 18px; height: 18px; flex-shrink: 0; border-radius: 50%; border: 1px solid var(--border);
+  padding: 0; cursor: pointer; background: none;
+  -webkit-appearance: none; appearance: none;
+}
+.math-func-swatch-input::-webkit-color-swatch-wrapper { padding: 0; border-radius: 50%; }
+.math-func-swatch-input::-webkit-color-swatch { border: none; border-radius: 50%; }
+.math-func-swatch-input::-moz-color-swatch { border: none; border-radius: 50%; }
+.math-func-label { font-size: 13px; color: var(--text-dim); flex-shrink: 0; }
+.math-func-input-row input {
+  flex: 1; min-width: 0; font-family: ui-monospace, Menlo, monospace;
+  background: var(--panel-alt); color: var(--text); border: 1px solid var(--border);
+  border-radius: 6px; padding: 5px 8px; font-size: 13px;
+}
+.math-func-remove { flex-shrink: 0; padding: 4px 8px; }
+.math-func-error { font-size: 11px; color: var(--danger); min-height: 14px; }
+.math-type-row { display: flex; flex-wrap: wrap; gap: 6px; margin: 14px 0; }
+.math-type-btn {
+  flex: 1 1 calc(50% - 3px); padding: 7px 6px; font-size: 12px;
+  background: var(--panel-alt); border: 1px solid var(--border); border-radius: 6px; color: var(--text);
+}
+.math-type-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.math-controls { display: flex; flex-direction: column; gap: 8px; }
+.math-data-list { display: flex; flex-direction: column; gap: 8px; }
+.math-data-row { display: flex; align-items: center; gap: 6px; }
+.math-data-label-input { flex: 1; min-width: 0; }
+.math-data-value-input { width: 64px; flex-shrink: 0; }
+.math-data-label-input, .math-data-value-input {
+  font-family: ui-monospace, Menlo, monospace; background: var(--panel-alt); color: var(--text);
+  border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px; font-size: 13px;
+}
+.math-venn-toggle { display: flex; gap: 6px; }
+.math-venn-toggle .math-type-btn { flex: 1; }
+.math-venn-labels { display: flex; gap: 6px; }
+.math-venn-label-input {
+  flex: 1; min-width: 0; text-align: center; font-weight: 600;
+  background: var(--panel-alt); color: var(--text); border: 2px solid var(--swatch, var(--border));
+  border-radius: 6px; padding: 5px 4px; font-size: 13px;
+}
+.math-venn-hint { font-size: 11.5px; color: var(--text-dim); line-height: 1.4; }
+.math-venn-pool {
+  display: flex; flex-wrap: wrap; gap: 6px; min-height: 34px;
+  padding: 8px; border: 1px dashed var(--border); border-radius: 8px; background: var(--panel-alt);
+}
+.math-venn-pool-empty { font-size: 12px; color: var(--text-dim); }
+.math-venn-chip {
+  display: flex; align-items: center; gap: 4px; padding: 4px 6px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 999px; cursor: grab;
+}
+.math-venn-chip:active { cursor: grabbing; }
+.math-venn-chip-value {
+  width: 44px; font-family: ui-monospace, Menlo, monospace; background: none; color: var(--text);
+  border: none; font-size: 12.5px; padding: 2px;
+}
+.math-venn-add-row { display: flex; align-items: center; gap: 6px; }
+.math-venn-add-row .math-data-value-input { width: 64px; }
+.math-venn-add-row button { flex: 1; }
+.math-venn-drag-ghost {
+  position: fixed; z-index: 300; pointer-events: none; transform: translate(-50%, -50%);
+  width: 28px; height: 28px; border-radius: 50%; color: #fff; font-size: 11px; font-weight: 600;
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3); opacity: 0.9;
+}
+.math-venn-token { cursor: grab; }
+.math-venn-token:active { cursor: grabbing; }
+.math-coord-readout { margin-top: 16px; font-family: ui-monospace, Menlo, monospace; font-size: 12px; min-height: 20px; }
+.math-stage { position: relative; flex: 1; overflow: hidden; touch-action: none; }
+.math-svg { display: block; background: var(--bg); }
+.math-gridline { stroke: var(--grid-minor); stroke-width: 1; }
+.math-axis { stroke: var(--text-dim); stroke-width: 1.5; }
+.math-axis-label { font-size: 10px; fill: var(--text-dim); }
+
+/* ---------- Whiteboard ---------- */
+.wb-root {
+  position: absolute;
+  top: 52px; left: 0; right: 0; bottom: 0;
+  display: flex; flex-direction: column;
+  background: var(--bg);
+}
+.wb-tabs {
+  display: flex; gap: 6px; flex-shrink: 0;
+  padding: 10px 20px; background: var(--panel); border-bottom: 1px solid var(--border);
+}
+.wb-tab {
+  padding: 7px 16px; border-radius: 6px; background: var(--panel-alt);
+  border: 1px solid var(--border); color: var(--text); font-size: 13px; font-weight: 500;
+}
+.wb-tab.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.wb-stage { flex: 1; min-height: 0; display: flex; }
+
+.wb-canvas-wrap { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.wb-toolbar {
+  display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
+  padding: 10px 16px; background: var(--panel); border-bottom: 1px solid var(--border);
+}
+.wb-tool-row, .wb-color-row, .wb-size-row { display: flex; align-items: center; gap: 6px; }
+.wb-tool-btn {
+  padding: 6px 10px; border-radius: 6px; background: var(--panel-alt);
+  border: 1px solid var(--border); color: var(--text); font-size: 12.5px;
+}
+.wb-tool-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.wb-color-swatch {
+  width: 22px; height: 22px; border-radius: 50%; border: 2px solid transparent; padding: 0; cursor: pointer;
+  box-shadow: 0 0 0 1px var(--border) inset;
+}
+.wb-color-swatch.active { border-color: var(--accent); }
+.wb-color-custom {
+  width: 22px; height: 22px; border-radius: 50%; border: 1px solid var(--border); padding: 0; cursor: pointer;
+  -webkit-appearance: none; appearance: none; background: none;
+}
+.wb-color-custom::-webkit-color-swatch-wrapper { padding: 0; border-radius: 50%; }
+.wb-color-custom::-webkit-color-swatch { border: none; border-radius: 50%; }
+.wb-size-row span { font-size: 12px; color: var(--text-dim); }
+.wb-size-row input[type="range"] { width: 110px; }
+.wb-clear-btn { margin-left: 4px; }
+.wb-canvas-holder { flex: 1; min-height: 0; position: relative; background: #fff; }
+.wb-canvas-holder canvas { display: block; width: 100%; height: 100%; touch-action: none; cursor: crosshair; }
+
+.wb-notes-wrap { flex: 1; display: flex; min-height: 0; }
+.wb-notes-list {
+  width: 240px; flex-shrink: 0; overflow-y: auto; padding: 14px;
+  border-right: 1px solid var(--border); background: var(--panel);
+  display: flex; flex-direction: column; gap: 6px;
+}
+.wb-note-item {
+  text-align: left; padding: 9px 10px; border-radius: 6px; background: var(--panel-alt);
+  border: 1px solid var(--border); color: var(--text); font-size: 13px;
+}
+.wb-note-item.active { border-color: var(--accent); background: rgba(79, 140, 255, 0.12); }
+.wb-note-item-title { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wb-note-add { margin-top: 4px; }
+.wb-note-editor { flex: 1; display: flex; flex-direction: column; padding: 20px; gap: 12px; min-width: 0; }
+.wb-note-title-input {
+  font-size: 18px; font-weight: 600; border: none; border-bottom: 1px solid var(--border);
+  background: none; color: var(--text); padding: 4px 0;
+}
+.wb-note-body {
+  flex: 1; resize: none; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--panel); color: var(--text); padding: 14px; font-size: 14px; line-height: 1.6;
+}
+.wb-note-delete { align-self: flex-start; }
+
+/* ---------- Economics ---------- */
+.econ-root {
+  position: absolute;
+  top: 52px; left: 0; right: 0; bottom: 0;
+  display: flex; flex-direction: column;
+  background: var(--bg);
+}
+.econ-tabs {
+  display: flex; gap: 6px; flex-shrink: 0;
+  padding: 10px 20px; background: var(--panel); border-bottom: 1px solid var(--border);
+}
+.econ-tab {
+  padding: 7px 16px; border-radius: 6px; background: var(--panel-alt);
+  border: 1px solid var(--border); color: var(--text); font-size: 13px; font-weight: 500;
+}
+.econ-tab.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.econ-stage { flex: 1; min-height: 0; display: flex; }
+
+.econ-sidebar {
+  width: 320px; flex-shrink: 0; overflow-y: auto; padding: 18px;
+  border-right: 1px solid var(--border); background: var(--panel);
+  display: flex; flex-direction: column; gap: 8px;
+}
+.econ-section-title { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--text-dim); margin: 10px 0 2px; }
+.econ-field { display: flex; flex-direction: column; gap: 3px; font-size: 12.5px; color: var(--text-dim); }
+.econ-field label span { color: var(--text); font-weight: 600; }
+.econ-field select { padding: 6px 8px; border-radius: 6px; border: 1px solid var(--border); background: var(--panel-alt); color: var(--text); }
+.econ-help { font-size: 11.5px; color: var(--text-dim); line-height: 1.5; margin-top: 4px; }
+.econ-readout { margin-top: 14px; font-size: 12.5px; line-height: 1.6; color: var(--text); border-top: 1px solid var(--border); padding-top: 10px; }
+
+.econ-title { margin: 0; padding: 14px 20px 0; font-size: 26px; color: var(--accent); flex-shrink: 0; }
+.econ-body { flex: 1; min-height: 0; overflow-y: auto; padding: 18px 24px; }
+.econ-intro { font-size: 13.5px; color: var(--text-dim); line-height: 1.6; max-width: 720px; margin: 0 0 16px; }
+
+/* ---------- Zoology ---------- */
+.zoo-pyramid-slider { width: 100%; max-width: 420px; display: block; margin-bottom: 20px; }
+.zoo-pyramid { display: flex; flex-direction: column-reverse; align-items: center; gap: 4px; margin-bottom: 24px; }
+.zoo-pyramid-level {
+  background: linear-gradient(180deg, var(--accent), var(--cool-2, #8b5cf6));
+  color: #fff; text-align: center; padding: 14px 10px; border-radius: 4px;
+  display: flex; flex-direction: column; gap: 2px; font-size: 12.5px;
+}
+.zoo-pyramid-level strong { font-size: 13.5px; }
+.zoo-level-notes { max-width: 720px; font-size: 12.5px; color: var(--text-dim); line-height: 1.7; }
+.zoo-level-notes p { margin: 0 0 8px; }
+.zoo-organism-palette { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }
+.zoo-organism-chip {
+  padding: 7px 12px; border-radius: 999px; border: 1px solid var(--border);
+  background: var(--panel-alt); color: var(--text-dim); font-size: 13px;
+}
+.zoo-organism-chip.active { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+.zoo-web-stage-wrap { border: 1px solid var(--border); border-radius: 10px; background: var(--panel); overflow: hidden; }
+.zoo-web-stage { width: 100%; min-height: 420px; }
+.zoo-web-stage svg text { user-select: none; }
+
+/* ---------- Sound ---------- */
+.sound-wrap { max-width: 900px; }
+.sound-canvas-wrap { border: 1px solid var(--border); border-radius: 10px; background: var(--bg); padding: 10px; margin: 14px 0; }
+.sound-canvas { width: 100%; height: 180px; display: block; }
+.sound-status { font-size: 12.5px; color: var(--text-dim); margin-top: 8px; min-height: 16px; }
+.sound-record-row { margin-top: 10px; display: flex; align-items: center; gap: 10px; }
+.sound-timer { font-size: 12.5px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.sound-wave-picker { display: flex; gap: 6px; }
+.sound-wave-btn { padding: 7px 14px; border-radius: 7px; border: 1px solid var(--border); background: var(--panel-alt); color: var(--text); font-size: 13px; }
+.sound-wave-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+.cyber-sim-btn.recording { background: #f87171; border-color: #f87171; color: #fff; }
+.sound-playback-wrap { margin-top: 14px; display: flex; flex-direction: column; gap: 10px; }
+.sound-playback-wrap audio { width: 100%; }
+.sound-rate-row { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--text-dim); }
+.sound-rate-row input { flex: 1; max-width: 300px; }
+.sound-hint { font-size: 12px; color: var(--text-dim); margin: 0; }
+.sound-make-controls { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; font-size: 13px; color: var(--text-dim); margin-bottom: 6px; }
+.sound-make-controls select { padding: 6px 10px; }
+.sound-make-controls input[type="range"] { width: 220px; }
+
+/* ---------- Sustainability ---------- */
+.sustain-body { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 20px 20px; }
+.sustain-palette { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+.sustain-chip {
+  display: flex; align-items: center; gap: 6px; padding: 8px 12px; border-radius: 8px;
+  border: 1px solid var(--border); background: var(--panel-alt); color: var(--text); font-size: 12.5px;
+}
+.sustain-chip.active { border-color: var(--accent); background: rgba(79,140,255,.15); font-weight: 600; }
+.sustain-chip-cost { color: var(--text-dim); }
+.sustain-layout { display: flex; gap: 20px; flex-wrap: wrap; }
+.sustain-grid {
+  display: grid; gap: 2px; background: var(--border); border: 1px solid var(--border);
+  border-radius: 8px; overflow: hidden; width: min(720px, 100%); aspect-ratio: 12 / 8;
+}
+.sustain-cell {
+  background: var(--panel-alt); border: none; font-size: 18px; display: flex;
+  align-items: center; justify-content: center; cursor: pointer; padding: 0; aspect-ratio: 1;
+}
+.sustain-cell:hover { background: var(--panel); }
+.sustain-dashboard { width: 260px; flex-shrink: 0; display: flex; flex-direction: column; gap: 10px; }
+.sustain-stat {
+  background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+  padding: 8px 12px; display: flex; justify-content: space-between; align-items: baseline;
+  font-size: 12.5px; color: var(--text-dim); flex-wrap: wrap;
+}
+.sustain-stat strong { color: var(--text); font-size: 13.5px; }
+.sustain-stat-bad { border-color: #f87171; }
+.sustain-stat-bad strong { color: #f87171; }
+.sustain-stat-note { font-size: 11px; color: var(--text-dim); width: 100%; margin-top: 2px; }
+.sustain-warning { background: rgba(248,113,113,.15); border: 1px solid #f87171; color: #f87171; border-radius: 8px; padding: 8px 12px; font-size: 12px; }
+.sustain-actions { display: flex; gap: 8px; margin-top: 16px; }
+
+.econ-market-wrap, .econ-game-wrap { display: flex; flex: 1; min-width: 0; }
+.econ-market-stage { flex: 1; min-width: 0; }
+.econ-svg { display: block; width: 100%; height: 100%; }
+.econ-axis { stroke: var(--text-dim); stroke-width: 1.5; }
+.econ-axis-label { font-size: 11px; fill: var(--text-dim); }
+.econ-line { fill: none; stroke-width: 2.5; }
+.econ-demand { stroke: #e0473f; }
+.econ-supply { stroke: #2f7bde; }
+.econ-supply-faded { stroke-opacity: 0.35; stroke-dasharray: 4 4; }
+.econ-supply-tax { stroke: #2f7bde; }
+.econ-dwl { fill: rgba(240, 168, 60, 0.45); stroke: #f0a83c; stroke-width: 1; }
+.econ-guide { stroke: var(--text-dim); stroke-width: 1; stroke-dasharray: 3 3; }
+.econ-eq-dot { fill: var(--text); }
+.econ-eq-dot-seller { fill: #2f7bde; }
+.econ-control-line { stroke: #8b5cf6; stroke-width: 2; stroke-dasharray: 6 3; }
+
+.econ-game-main { flex: 1; min-width: 0; padding: 20px; overflow-y: auto; }
+.econ-score-row { display: flex; gap: 24px; font-size: 15px; margin-bottom: 14px; }
+.econ-move-row { display: flex; gap: 10px; margin-bottom: 16px; }
+.econ-move-row button { padding: 10px 20px; font-size: 14px; }
+.econ-history { display: flex; flex-direction: column; gap: 3px; font-size: 12.5px; font-family: ui-monospace, Menlo, monospace; color: var(--text-dim); margin-bottom: 14px; max-height: 220px; overflow-y: auto; }
+.econ-payoff-table { border-collapse: collapse; font-size: 12px; margin-bottom: 8px; }
+.econ-payoff-table th, .econ-payoff-table td { border: 1px solid var(--border); padding: 4px 6px; text-align: center; }
+.econ-payoff-input { width: 34px; font-size: 12px; border: 1px solid var(--border); border-radius: 4px; background: var(--panel-alt); color: var(--text); text-align: center; }

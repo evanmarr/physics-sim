@@ -4,7 +4,7 @@ export const WORLD = {
   groundY: 1400,
 };
 
-export const GRID_SIZE = 50;
+export const GRID_SIZE = 20;
 
 export function snap(v, size = GRID_SIZE) {
   return Math.round(v / size) * size;

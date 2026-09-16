@@ -1,40 +1,121 @@
 import { PLANETS, DWARF_PLANETS, MOONS, planetPosition, moonOffsetFromEarth, moonPhaseAngleRad, dateToJulianDate, julianDateToDate, orbitalPeriodDays, findNextSolarEclipse } from "./astronomyData.js";
+import { RocketSimMode } from "./rocketSim.js";
 
-const AU_SCALE = 22; // scene units per AU — not to real scale, or Neptune would be a speck 30x farther than Mercury
+// One linear world-units-per-km factor applied to EVERY body — Sun
+// included — so relative sizes are all physically accurate at once:
+// Jupiter really does end up ~11x Earth's radius, and the Sun really is
+// ~10x Jupiter's, not the other way around. The floor below only exists so
+// the smallest dwarf planets stay clickable.
+const RADIUS_SCALE = 0.00019;
+const MIN_BODY_SIZE = 0.12;
+const SUN_RADIUS_KM = 696000;
+// Scene units per AU. Distances are still compressed for visibility (a
+// real-scale Neptune would be unnavigably far away), but this can't be
+// picked independently of RADIUS_SCALE any more — once the Sun is sized
+// accurately (huge), Mercury's orbit has to clear its surface with real
+// clearance or the inner planets end up literally inside/behind it,
+// invisible and unclickable. 850 keeps Mercury's compressed orbit at about
+// 2.5 Sun-radii out — comfortably clear, while still far more compact than
+// true astronomical scale (which would put Neptune ~850,000 units out).
+const AU_SCALE = 850;
 const SPEEDS = [
   { label: "Paused", daysPerSec: 0 },
+  { label: "1 sec/sec (real time)", daysPerSec: 1 / 86400 },
   { label: "1 hr/sec", daysPerSec: 1 / 24 },
   { label: "1 day/sec", daysPerSec: 1 },
   { label: "1 week/sec", daysPerSec: 7 },
   { label: "1 month/sec", daysPerSec: 30 },
   { label: "1 year/sec", daysPerSec: 365 },
 ];
+const DEFAULT_SPEED_INDEX = 1; // "1 sec/sec (real time)"
 
 export class AstronomyMode {
   constructor(root, ctx) {
     this.root = root;
     this.ctx = ctx; // { state, showToast }
     this.date = new Date();
-    this.speedIndex = 0;
+    this.speedIndex = DEFAULT_SPEED_INDEX;
     this.selectedPlanet = null;
     this._build();
   }
 
-  mount() { this._running = true; this._animate(); }
-  unmount() { this._running = false; if (this._raf) cancelAnimationFrame(this._raf); }
+  mount() { if (this.sub === "rocket") this.rocketSim?.mount(); else { this._running = true; this._animate(); } }
+  unmount() {
+    this._running = false;
+    if (this._raf) cancelAnimationFrame(this._raf);
+    this._lastFrameMs = null;
+    this.rocketSim?.unmount();
+  }
 
   _build() {
     this.root.innerHTML = "";
+    this.sub = "solar";
+
+    // #astronomy-root is itself `display:flex` (row) for the three
+    // existing panels — appending the tab bar directly to it would make
+    // the tab bar a 4th flex column instead of a header above them, so
+    // everything below lives inside one flex-column wrapper instead.
+    const outer = div("astro-outer");
+    this.root.appendChild(outer);
+
+    const tabs = div("econ-tabs astro-mode-tabs");
+    const solarTab = document.createElement("button");
+    solarTab.className = "econ-tab active";
+    solarTab.textContent = "Solar System";
+    solarTab.addEventListener("click", () => this._showSolarSystem(solarTab, rocketTab));
+    const rocketTab = document.createElement("button");
+    rocketTab.className = "econ-tab";
+    rocketTab.textContent = "🚀 Rocket Simulator";
+    rocketTab.addEventListener("click", () => this._showRocketSim(solarTab, rocketTab));
+    tabs.appendChild(solarTab);
+    tabs.appendChild(rocketTab);
+    outer.appendChild(tabs);
+
+    // The existing solar-system view (three panels) and the Rocket
+    // Simulator's own root live side by side as siblings, toggled by
+    // `.hidden` — swapping DOM wholesale on every tab switch would mean
+    // tearing down and rebuilding the whole THREE.js scene each time,
+    // which is both wasteful and a good way to leak WebGL contexts.
+    this.solarWrap = div("astro-solar-wrap");
+    outer.appendChild(this.solarWrap);
     this.controlsPanel = div("chem-panel anat-layers");
     this.viewerPanel = div("chem-panel anat-viewer");
     this.infoPanel = div("chem-panel anat-info");
-    this.root.appendChild(this.controlsPanel);
-    this.root.appendChild(this.viewerPanel);
-    this.root.appendChild(this.infoPanel);
+    this.solarWrap.appendChild(this.controlsPanel);
+    this.solarWrap.appendChild(this.viewerPanel);
+    this.solarWrap.appendChild(this.infoPanel);
 
     this._buildControls();
     this._buildViewer();
     this._buildInfo();
+
+    this.rocketWrap = div("astro-rocket-wrap hidden");
+    outer.appendChild(this.rocketWrap);
+  }
+
+  _showSolarSystem(solarTab, rocketTab) {
+    if (this.sub === "solar") return;
+    this.sub = "solar";
+    solarTab.classList.add("active");
+    rocketTab.classList.remove("active");
+    this.rocketWrap.classList.add("hidden");
+    this.solarWrap.classList.remove("hidden");
+    this.rocketSim?.unmount();
+    this._running = true;
+    this._animate();
+  }
+
+  _showRocketSim(solarTab, rocketTab) {
+    if (this.sub === "rocket") return;
+    this.sub = "rocket";
+    rocketTab.classList.add("active");
+    solarTab.classList.remove("active");
+    this.solarWrap.classList.add("hidden");
+    this.rocketWrap.classList.remove("hidden");
+    this._running = false;
+    if (this._raf) cancelAnimationFrame(this._raf);
+    if (!this.rocketSim) this.rocketSim = new RocketSimMode(this.rocketWrap, this.ctx);
+    this.rocketSim.mount();
   }
 
   _buildControls() {
@@ -48,7 +129,7 @@ export class AstronomyMode {
     this.dateInput.value = toLocalInputValue(this.date);
     this.dateInput.addEventListener("change", () => {
       const d = new Date(this.dateInput.value);
-      if (!isNaN(d)) { this.date = d; this._updatePositions(); }
+      if (!isNaN(d)) { this.date = d; this._updatePositions(); this._syncTimeSlider(); }
     });
     this.controlsPanel.appendChild(this.dateInput);
 
@@ -56,25 +137,60 @@ export class AstronomyMode {
     nowBtn.textContent = "Jump to Now";
     nowBtn.style.width = "100%";
     nowBtn.style.margin = "8px 0";
-    nowBtn.addEventListener("click", () => { this.date = new Date(); this.dateInput.value = toLocalInputValue(this.date); this._updatePositions(); });
+    nowBtn.addEventListener("click", () => {
+      this.date = new Date();
+      this.dateInput.value = toLocalInputValue(this.date);
+      this._updatePositions();
+      this._syncTimeSlider();
+    });
     this.controlsPanel.appendChild(nowBtn);
 
-    const speedLabel = div("chem-hint");
-    speedLabel.textContent = "Playback speed";
-    this.controlsPanel.appendChild(speedLabel);
-    this.speedSelect = document.createElement("select");
-    SPEEDS.forEach((s, i) => {
-      const opt = document.createElement("option");
-      opt.value = i; opt.textContent = s.label;
-      this.speedSelect.appendChild(opt);
+    // A direct ±50-year scrub, anchored to the date this panel was opened —
+    // separate from the datetime field above (exact date/time entry) and
+    // the playback speed below (animates forward automatically); this is
+    // for freely dragging back and forth by hand.
+    const sliderLabel = div("chem-hint");
+    sliderLabel.textContent = "Scrub time (±50 years)";
+    this.controlsPanel.appendChild(sliderLabel);
+    this._timeReference = new Date(this.date);
+    const maxDays = 50 * 365.25;
+    this.timeSlider = document.createElement("input");
+    this.timeSlider.type = "range";
+    this.timeSlider.className = "astro-time-slider";
+    this.timeSlider.min = String(-maxDays);
+    this.timeSlider.max = String(maxDays);
+    this.timeSlider.step = "1";
+    this.timeSlider.value = "0";
+    this.timeSliderReadout = div("astro-time-slider-readout");
+    this.timeSliderReadout.textContent = "today";
+    this.timeSlider.addEventListener("input", () => {
+      const days = +this.timeSlider.value;
+      this.date = new Date(this._timeReference.getTime() + days * 86400000);
+      this.dateInput.value = toLocalInputValue(this.date);
+      this._updatePositions();
+      const years = Math.abs(days / 365.25).toFixed(1);
+      this.timeSliderReadout.textContent = days === 0 ? "today" : `${years} yr ${days > 0 ? "ahead" : "back"}`;
     });
-    this.speedSelect.value = this.speedIndex;
-    this.speedSelect.addEventListener("change", () => { this.speedIndex = +this.speedSelect.value; });
-    this.controlsPanel.appendChild(this.speedSelect);
+    this.controlsPanel.appendChild(this.timeSlider);
+    this.controlsPanel.appendChild(this.timeSliderReadout);
+
+    const speedLabel = div("chem-hint");
+    speedLabel.textContent = "Playback speed (space to pause)";
+    this.controlsPanel.appendChild(speedLabel);
+    const speedRow = div("astro-speed-row");
+    this.speedButtons = SPEEDS.map((s, i) => {
+      const btn = document.createElement("button");
+      btn.textContent = s.label;
+      btn.className = "astro-speed-btn" + (i === this.speedIndex ? " active" : "");
+      btn.addEventListener("click", () => this._setSpeedIndex(i));
+      speedRow.appendChild(btn);
+      return btn;
+    });
+    this.controlsPanel.appendChild(speedRow);
 
     const hint = div("chem-hint");
     hint.style.marginTop = "14px";
-    hint.textContent = "Planet positions are computed from real orbital elements for whatever date/time is set above — not a canned animation. Distances are compressed for visibility; sizes are exaggerated so the inner planets aren't invisible specks.";
+    hint.textContent = "Planet positions are computed from real orbital elements for whatever date/time is set above — not a canned animation. Every body here — Sun included — is sized on one consistent real-world scale, so the Sun really is this dramatically bigger than Jupiter, and Jupiter really is bigger than Earth. Distances between orbits are still compressed for visibility (true-to-scale would put Neptune far off-screen), so start zoomed in on the inner planets and scroll out to reach the rest. Drag to rotate the view, scroll to zoom, and right-click-drag (or hold Shift while dragging) to pan.";
     this.controlsPanel.appendChild(hint);
 
     const chalBtn = document.createElement("button");
@@ -84,7 +200,7 @@ export class AstronomyMode {
     chalBtn.style.marginTop = "14px";
     chalBtn.addEventListener("click", () => this._openChallenges());
     this.controlsPanel.appendChild(chalBtn);
-    this.challengeModal = buildChallengeModal(this.ctx, () => this.date, (d) => { this.date = d; this.dateInput.value = toLocalInputValue(d); this._updatePositions(); });
+    this.challengeModal = buildChallengeModal(this.ctx, () => this.date, (d) => { this.date = d; this.dateInput.value = toLocalInputValue(d); this._updatePositions(); this._syncTimeSlider(); });
     this.controlsPanel.appendChild(this.challengeModal.el);
   }
 
@@ -98,28 +214,79 @@ export class AstronomyMode {
     this.viewerPanel.appendChild(wrap);
 
     this.scene = new THREE.Scene();
-    this.camera = new THREE.PerspectiveCamera(50, 1, 0.01, 3000);
-    this.camera.position.set(0, 160, 220);
+    // Far plane and starting distance are both driven by the Sun's now
+    // real-scale size and AU_SCALE — a real-scale Sun plus real-clearance
+    // orbits makes for a much bigger scene than before. The starting
+    // position frames the Sun through Mars by default (Jupiter onward
+    // needs scrolling out to reach, same as any solar-system model at this
+    // dynamic range).
+    this.camera = new THREE.PerspectiveCamera(50, 1, 0.1, 40000);
+    this.camera.position.set(0, 900, 1600);
     this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     wrap.appendChild(this.renderer.domElement);
     this.controls = new THREE.OrbitControls(this.camera, this.renderer.domElement);
     this.controls.enableDamping = true;
     this.controls.dampingFactor = 0.08;
+    this.controls.enablePan = true;
+    this.controls.screenSpacePanning = true;
+    // Defaults (minDistance 0, zoomSpeed 1) let OrbitControls dolly the
+    // camera essentially on top of its own target with no meaningful
+    // change in framing once close, which reads as "zoom barely does
+    // anything" — a wider zoom speed plus an explicit near/far range fixes
+    // that and lets you get close enough to inspect a real-scale Mercury
+    // or dwarf planet, or pull back past Neptune's orbit.
+    this.controls.zoomSpeed = 2.2;
+    this.controls.minDistance = 0.3;
+    this.controls.maxDistance = 30000;
+    this.controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN };
+    // Right-click-drag already pans by default, but that's easy to miss —
+    // hold Shift to pan with the primary drag too, so the view doesn't stay
+    // locked orbiting the sun forever.
+    this._onPanKeyDown = (e) => { if (e.key === "Shift") this.controls.mouseButtons.LEFT = THREE.MOUSE.PAN; };
+    this._onPanKeyUp = (e) => { if (e.key === "Shift") this.controls.mouseButtons.LEFT = THREE.MOUSE.ROTATE; };
+    window.addEventListener("keydown", this._onPanKeyDown);
+    window.addEventListener("keyup", this._onPanKeyUp);
+
+    // Space toggles play/pause, same shortcut Physics mode uses — gated on
+    // this mode actually being the visible one, and skipped while a text
+    // field has focus, so it doesn't fight typing a date or steal the page
+    // scroll (Space's default action) elsewhere in the app.
+    this._onSpaceDown = (e) => {
+      if (e.code !== "Space" || this.ctx.state?.mode !== "astronomy") return;
+      const tag = document.activeElement?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      e.preventDefault();
+      this._togglePause();
+    };
+    window.addEventListener("keydown", this._onSpaceDown);
+
+    // F focuses/follows the selected planet — same visibility/text-field
+    // guards as Space above.
+    this._onFocusKeyDown = (e) => {
+      if (e.code !== "KeyF" || this.ctx.state?.mode !== "astronomy") return;
+      const tag = document.activeElement?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      e.preventDefault();
+      this._focusSelected();
+    };
+    window.addEventListener("keydown", this._onFocusKeyDown);
 
     this.scene.add(new THREE.AmbientLight(0xffffff, 0.5));
     const sunLight = new THREE.PointLight(0xffffff, 2.2, 0, 0.15);
     this.scene.add(sunLight);
 
-    const sunGeo = new THREE.SphereGeometry(4, 24, 24);
+    const sunRadius = SUN_RADIUS_KM * RADIUS_SCALE;
+    const sunGeo = new THREE.SphereGeometry(sunRadius, 32, 32);
     const sunMat = new THREE.MeshBasicMaterial({ color: 0xffe066 });
-    this.scene.add(new THREE.Mesh(sunGeo, sunMat));
+    this.sunMesh = new THREE.Mesh(sunGeo, sunMat);
+    this.scene.add(this.sunMesh);
 
     this.planetMeshes = {};
+    this.hitMeshes = {};
     this.orbitLines = {};
     const jdNow = dateToJulianDate(this.date);
     const buildPlanetLike = (planet, { dwarf = false } = {}) => {
-      const rawSize = Math.max(0.7, Math.log10(planet.radiusKm) * 0.9 - 2.2);
-      const size = dwarf ? rawSize * 0.6 : rawSize;
+      const size = Math.max(MIN_BODY_SIZE, planet.radiusKm * RADIUS_SCALE);
       const geo = new THREE.SphereGeometry(size, dwarf ? 10 : 18, dwarf ? 10 : 18);
       const mat = new THREE.MeshStandardMaterial({ color: new THREE.Color(planet.color), roughness: 0.7 });
       const mesh = new THREE.Mesh(geo, mat);
@@ -129,14 +296,29 @@ export class AstronomyMode {
       this.scene.add(mesh);
       this.planetMeshes[planet.name] = mesh;
 
-      // A small dark marker at the equator makes the sphere's own spin
-      // actually visible — a uniformly-colored sphere rotating in place
-      // looks identical frame to frame otherwise.
-      const markerGeo = new THREE.SphereGeometry(size * 0.16, 8, 8);
-      const markerMat = new THREE.MeshBasicMaterial({ color: 0x1b1e24 });
-      const marker = new THREE.Mesh(markerGeo, markerMat);
-      marker.position.set(size, 0, 0);
-      mesh.add(marker);
+      // A lat/long wireframe grid, a hair larger than the sphere itself and
+      // parented to it, makes the spin actually visible — a uniformly-
+      // colored sphere rotating in place looks identical frame to frame
+      // otherwise. Being a child of the mesh, it inherits its rotation for
+      // free. It also doubles as a selection indicator: brightens to the
+      // accent color while this planet is the selected one.
+      const gridGeo = new THREE.SphereGeometry(size * 1.015, 12, 8);
+      const gridMat = new THREE.MeshBasicMaterial({ color: 0x8a94a3, wireframe: true, transparent: true, opacity: 0.45 });
+      const grid = new THREE.Mesh(gridGeo, gridMat);
+      mesh.add(grid);
+      mesh.userData.gridMat = gridMat;
+
+      // An invisible, much bigger sibling sphere purely for click/tap
+      // hit-testing — a real-scale Mercury is only a few screen pixels
+      // across at any sensible zoom, and raycasting against the visible
+      // mesh's exact (tiny) geometry makes clicking it directly nearly
+      // impossible. This is what _pickPlanet actually raycasts against.
+      const hitGeo = new THREE.SphereGeometry(Math.max(size * 5, 14), 8, 6);
+      const hitMat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0 });
+      const hitMesh = new THREE.Mesh(hitGeo, hitMat);
+      hitMesh.userData.planet = planet;
+      mesh.add(hitMesh);
+      this.hitMeshes[planet.name] = hitMesh;
 
       const orbitGeo = new THREE.BufferGeometry();
       const points = [];
@@ -185,31 +367,67 @@ export class AstronomyMode {
 
     // Other major moons — simple circular orbits around their host planet,
     // spaced outward so multiple moons of the same planet don't overlap.
+    // Size uses the same RADIUS_SCALE as planets (so e.g. Ganymede still
+    // reads as ~26x smaller than Jupiter, matching reality), but orbit
+    // distance is deliberately exaggerated relative to the host planet's
+    // own radius — real moon orbits are tiny enough that at true scale
+    // they'd render inside their planet's own sphere.
     this.moonMeshes = [];
     const moonIndexByHost = {};
     for (const moon of MOONS) {
       const idx = moonIndexByHost[moon.host] || 0;
       moonIndexByHost[moon.host] = idx + 1;
-      const size = Math.max(0.18, Math.log10(moon.radiusKm) * 0.35 - 0.55);
+      const size = Math.max(MIN_BODY_SIZE, moon.radiusKm * RADIUS_SCALE);
       const geo = new THREE.SphereGeometry(size, 10, 10);
       const mat = new THREE.MeshStandardMaterial({ color: new THREE.Color(moon.color), roughness: 0.8 });
       const mesh = new THREE.Mesh(geo, mat);
       this.scene.add(mesh);
       const hostMesh = this.planetMeshes[moon.host];
-      const visualDist = (hostMesh?.userData.size || 1) * (1.7 + idx * 0.55);
-      this.moonMeshes.push({ moon, mesh, visualDist });
+      const visualDist = (hostMesh?.userData.size || 1) * (3.2 + idx * 1.3);
+
+      // A faint guide ring at the moon's orbit radius around its host, so
+      // "this planet has moons" is visible even before you zoom in on one.
+      const ringGeo = new THREE.BufferGeometry();
+      const ringPts = [];
+      for (let i = 0; i <= 64; i++) {
+        const a = (i / 64) * Math.PI * 2;
+        ringPts.push(new THREE.Vector3(Math.cos(a) * visualDist, 0, Math.sin(a) * visualDist));
+      }
+      ringGeo.setFromPoints(ringPts);
+      const ringMat = new THREE.LineBasicMaterial({ color: new THREE.Color(moon.color), transparent: true, opacity: 0.3 });
+      const ring = new THREE.LineLoop(ringGeo, ringMat);
+      this.scene.add(ring);
+
+      this.moonMeshes.push({ moon, mesh, ring, visualDist });
     }
 
-    // A wireframe halo around whichever planet is selected — repositioned
-    // and rescaled to that planet every frame in _updatePositions.
-    const ringGeo = new THREE.SphereGeometry(1, 20, 20);
-    const ringMat = new THREE.MeshBasicMaterial({ color: 0xffffff, wireframe: true, transparent: true, opacity: 0.85, depthTest: false });
+    // A sparse wireframe halo around whichever planet is selected —
+    // repositioned and rescaled to that planet every frame in
+    // _updatePositions.
+    const ringGeo = new THREE.SphereGeometry(1, 8, 6);
+    const ringMat = new THREE.MeshBasicMaterial({ color: 0xffffff, wireframe: true, transparent: true, opacity: 0.6, depthTest: false });
     this.selectionRing = new THREE.Mesh(ringGeo, ringMat);
     this.selectionRing.visible = false;
     this.selectionRing.renderOrder = 10;
     this.scene.add(this.selectionRing);
 
-    this.renderer.domElement.addEventListener("click", (e) => this._pickPlanet(e));
+    // A native "click" only fires reliably when down/up land on the exact
+    // same element with essentially no movement between them — OrbitControls
+    // is constantly listening on this same canvas for drag-to-rotate, and on
+    // touch or a trackpad even a "tap" almost always drifts a couple pixels,
+    // which was silently swallowing the click and making selection feel
+    // broken. Tracking the down/up distance ourselves and treating anything
+    // under a small threshold as a tap/click fixes that for mouse and touch.
+    let pointerDownPos = null;
+    this.renderer.domElement.addEventListener("pointerdown", (e) => {
+      pointerDownPos = { x: e.clientX, y: e.clientY };
+    });
+    this.renderer.domElement.addEventListener("pointerup", (e) => {
+      if (!pointerDownPos) return;
+      const moved = Math.hypot(e.clientX - pointerDownPos.x, e.clientY - pointerDownPos.y);
+      pointerDownPos = null;
+      if (moved < 6) this._pickPlanet(e);
+    });
 
     const resize = () => {
       const w = wrap.clientWidth || 400, h = wrap.clientHeight || 400;
@@ -228,16 +446,47 @@ export class AstronomyMode {
     const rect = this.renderer.domElement.getBoundingClientRect();
     const mouse = new THREE.Vector2(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1);
     const raycaster = new THREE.Raycaster();
+    // A real-scale Mercury (or any dwarf planet) can be just a few pixels
+    // across at any sensible zoom, which makes clicking the body itself
+    // unreliable — a generous line-hit threshold plus falling back to each
+    // planet's own orbit ring means you can always click *somewhere* on its
+    // path to select it, not just the tiny dot.
+    raycaster.params.Line = { threshold: 6 };
     raycaster.setFromCamera(mouse, this.camera);
-    const hits = raycaster.intersectObjects(Object.values(this.planetMeshes));
-    if (hits.length) {
-      this.selectedPlanet = hits[0].object.userData.planet;
-      this._buildInfo();
-      this._updateSelectionRing();
-    }
+    // A gas giant's invisible hit-sphere (max(size*5, 14)) is huge, and can
+    // sit in front of or overlap a completely different planet's orbit ring
+    // in screen space — checking hit-spheres first and returning immediately
+    // meant clicking directly on, say, Saturn's ring could actually resolve
+    // to Jupiter's much bigger hit-sphere lurking behind/near it. Comparing
+    // every candidate by actual ray distance and taking the closest one
+    // fixes that, instead of always favoring hit-spheres over rings.
+    const planetHits = raycaster.intersectObjects(Object.values(this.hitMeshes));
+    const orbitEntries = Object.entries(this.orbitLines);
+    const orbitHits = raycaster.intersectObjects(orbitEntries.map(([, line]) => line));
+
+    const candidates = [
+      ...planetHits.map((hit) => ({ distance: hit.distance, planet: hit.object.userData.planet })),
+      ...orbitHits.map((hit) => {
+        const name = orbitEntries.find(([, line]) => line === hit.object)?.[0];
+        const planet = [...PLANETS, ...DWARF_PLANETS].find((p) => p.name === name);
+        return planet ? { distance: hit.distance, planet } : null;
+      }).filter(Boolean),
+    ];
+    if (!candidates.length) return;
+    candidates.sort((a, b) => a.distance - b.distance);
+    this.selectedPlanet = candidates[0].planet;
+    this._buildInfo();
+    this._updateSelectionRing();
   }
 
   _updateSelectionRing() {
+    // Reset every planet's own rotation grid back to its resting color,
+    // then brighten only the selected one — cheaper than tracking which
+    // one was previously lit.
+    for (const mesh of Object.values(this.planetMeshes)) {
+      mesh.userData.gridMat?.color.set(0x8a94a3);
+      if (mesh.userData.gridMat) mesh.userData.gridMat.opacity = 0.45;
+    }
     if (!this.selectionRing) return;
     if (!this.selectedPlanet) { this.selectionRing.visible = false; return; }
     const mesh = this.planetMeshes[this.selectedPlanet.name];
@@ -246,6 +495,10 @@ export class AstronomyMode {
     this.selectionRing.position.copy(mesh.position);
     const s = (mesh.userData.size || 1) * 1.6;
     this.selectionRing.scale.set(s, s, s);
+    if (mesh.userData.gridMat) {
+      mesh.userData.gridMat.color.set(0xffd76b);
+      mesh.userData.gridMat.opacity = 0.9;
+    }
   }
 
   _updatePositions() {
@@ -267,16 +520,27 @@ export class AstronomyMode {
       const spinTurns = (jd * 24) / planet.rotationHours;
       mesh.rotation.y = (spinTurns - Math.floor(spinTurns)) * Math.PI * 2;
       if (planet.name === "Earth") {
+        // The real Earth-Moon distance (0.00257 AU) is honest but useless
+        // here: Earth's own sphere is already log-exaggerated to ~1.2 scene
+        // units for visibility, so that real distance places the Moon's
+        // center well *inside* Earth's mesh — same problem the other
+        // planets' moons avoid by orbiting at a multiple of their host's
+        // rendered size, not their host's real size. Keep the Moon's real
+        // direction (still astronomically accurate) but rescale its
+        // distance the same way.
         const moon = moonOffsetFromEarth(jd);
+        const realDist = Math.hypot(moon.x, moon.y, moon.z) || 1;
+        const dir = { x: moon.x / realDist, y: moon.y / realDist, z: moon.z / realDist };
+        const visualDist = (mesh.userData.size || 1) * 3.2;
         this.moonMesh.position.set(
-          (pos.x + moon.x * 6) * AU_SCALE,
-          (pos.z + moon.z * 6) * AU_SCALE,
-          (pos.y + moon.y * 6) * AU_SCALE
+          pos.x * AU_SCALE + dir.x * visualDist,
+          pos.z * AU_SCALE + dir.z * visualDist,
+          pos.y * AU_SCALE + dir.y * visualDist
         );
       }
     }
 
-    for (const { moon, mesh, visualDist } of this.moonMeshes) {
+    for (const { moon, mesh, ring, visualDist } of this.moonMeshes) {
       const hostMesh = this.planetMeshes[moon.host];
       if (!hostMesh) continue;
       const angle = moonPhaseAngleRad(moon, jd);
@@ -285,6 +549,7 @@ export class AstronomyMode {
         hostMesh.position.y,
         hostMesh.position.z + Math.sin(angle) * visualDist
       );
+      ring.position.copy(hostMesh.position);
     }
 
     if (this.asteroidBelt) {
@@ -316,6 +581,31 @@ export class AstronomyMode {
     this.infoCard = div("chem-info-card");
     this.infoPanel.appendChild(this.infoCard);
     this._refreshInfoNumbers();
+
+    const focusBtn = document.createElement("button");
+    focusBtn.className = "astro-focus-btn";
+    focusBtn.textContent = "Focus (F)";
+    focusBtn.title = "Center the view on this planet and follow it as it orbits";
+    focusBtn.addEventListener("click", () => this._focusSelected());
+    this.infoPanel.appendChild(focusBtn);
+  }
+
+  // Re-centers the orbit controls' target on the selected planet and pulls
+  // the camera to a sensible framing distance along whatever direction it
+  // was already looking from — then keeps re-centering every frame in
+  // _animate() so the view actually follows the planet as it orbits,
+  // instead of just snapping to where it was the instant you pressed F.
+  _focusSelected() {
+    if (!this.selectedPlanet) return;
+    const mesh = this.planetMeshes[this.selectedPlanet.name];
+    if (!mesh) return;
+    const size = mesh.userData.size || 1;
+    let offset = this.camera.position.clone().sub(this.controls.target);
+    if (offset.lengthSq() < 1e-6) offset = new THREE.Vector3(0, size * 3, size * 8);
+    offset.setLength(Math.max(size * 8, 4));
+    this.controls.target.copy(mesh.position);
+    this.camera.position.copy(mesh.position).add(offset);
+    this._followingPlanet = this.selectedPlanet.name;
   }
 
   _refreshInfoNumbers() {
@@ -333,17 +623,62 @@ export class AstronomyMode {
     `;
   }
 
+  _setSpeedIndex(i) {
+    this.speedIndex = i;
+    this.speedButtons?.forEach((b, idx) => b.classList.toggle("active", idx === i));
+  }
+
+  _togglePause() {
+    if (this.speedIndex === 0) {
+      this._setSpeedIndex(this._lastActiveSpeedIndex ?? DEFAULT_SPEED_INDEX);
+    } else {
+      this._lastActiveSpeedIndex = this.speedIndex;
+      this._setSpeedIndex(0);
+    }
+  }
+
   _animate() {
     if (!this._running) return;
     this._raf = requestAnimationFrame(() => this._animate());
+    // Real elapsed time since the last frame, not an assumed fixed 60fps —
+    // "1 sec/sec (real time)" only actually runs at real-world speed if
+    // this accounts for the display's actual refresh rate (120Hz+ displays,
+    // or a throttled/backgrounded tab, would otherwise run faster or
+    // slower than intended).
+    const now = performance.now();
+    const realDtSec = this._lastFrameMs ? Math.min((now - this._lastFrameMs) / 1000, 0.25) : 1 / 60;
+    this._lastFrameMs = now;
     const speed = SPEEDS[this.speedIndex].daysPerSec;
     if (speed > 0) {
-      this.date = new Date(this.date.getTime() + speed * 86400000 / 60);
+      this.date = new Date(this.date.getTime() + speed * 86400000 * realDtSec);
       if (this.dateInput) this.dateInput.value = toLocalInputValue(this.date);
       this._updatePositions();
+      this._syncTimeSlider();
+    }
+    if (this._followingPlanet && this.selectedPlanet?.name === this._followingPlanet) {
+      const mesh = this.planetMeshes[this._followingPlanet];
+      if (mesh) {
+        const delta = mesh.position.clone().sub(this.controls.target);
+        this.controls.target.copy(mesh.position);
+        this.camera.position.add(delta);
+      }
     }
     this.controls.update();
     this.renderer.render(this.scene, this.camera);
+  }
+
+  // Keeps the ±50-year scrub slider showing the right offset whenever the
+  // date changes from somewhere else (typing a date, Jump to Now, playback,
+  // or jumping to a challenge result) — clamped to the slider's own range
+  // rather than erroring if the date lands outside it.
+  _syncTimeSlider() {
+    if (!this.timeSlider) return;
+    const maxDays = +this.timeSlider.max;
+    const days = (this.date.getTime() - this._timeReference.getTime()) / 86400000;
+    const clamped = Math.max(-maxDays, Math.min(maxDays, days));
+    this.timeSlider.value = String(clamped);
+    const years = Math.abs(clamped / 365.25).toFixed(1);
+    this.timeSliderReadout.textContent = Math.abs(days) < 0.5 ? "today" : `${years} yr ${days > 0 ? "ahead" : "back"}${Math.abs(days) > maxDays ? " (off slider)" : ""}`;
   }
 
   _openChallenges() {

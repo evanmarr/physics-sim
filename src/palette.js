@@ -4,18 +4,13 @@ import { materialOf } from "./materials.js";
 export function renderPalette(container, state, handlers) {
   container.innerHTML = "";
 
-  const coreSection = document.createElement("div");
-  coreSection.className = "palette-section-title";
-  coreSection.textContent = "Objects";
-  container.appendChild(coreSection);
-
   for (const [type, def] of Object.entries(OBJECT_DEFS)) {
     container.appendChild(buildItem(type, def, handlers));
   }
 
   const shortcuts = document.createElement("div");
   shortcuts.className = "palette-shortcuts";
-  shortcuts.innerHTML = "<div>⌘C copy · ⌘V paste</div><div>Del delete · Esc deselect</div>";
+  shortcuts.innerHTML = "<div>⌘C copy · ⌘V paste</div><div>Del delete · Esc deselect</div><div>⇧+click or ⇧+drag: multi-select</div>";
   container.appendChild(shortcuts);
 }
 
