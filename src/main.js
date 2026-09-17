@@ -856,8 +856,14 @@ function togglePlay(renderer) {
     playBtn.classList.add("playing");
     banner.textContent = "SIMULATING — space to pause";
   } else {
-    state.selectedIds = new Set();
-    state.selectedId = null;
+    // Collapses a multi-selection to nothing (editing several objects at
+    // once during a live simulation doesn't make sense), but deliberately
+    // keeps a single selection intact rather than clearing it outright —
+    // Live Graphs (below, in onFrame) is entirely keyed off
+    // state.selectedId, so nulling it here meant pressing Play right after
+    // selecting an object silently broke graphing for that entire run
+    // (and lost the selection highlight during simulation too).
+    state.selectedIds = state.selectedId ? new Set([state.selectedId]) : new Set();
     renderPanelUI();
     window._renderer.renderTrajectory(null);
     const clones = state.objects.map(cloneSpec);
