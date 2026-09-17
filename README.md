@@ -144,11 +144,20 @@ plan**. Currently wired into Physics 2D, Rocket Simulator, Astronomy
 switching content with the active tab), Sustainability (the actual
 scoring formula from its own code, not a paraphrase), Chemistry (the real
 121-reaction curated table plus the general bonding-rule engine it falls
-back to), and Sound (switching between Record & Visualize and Make Your
-Own Sound, including the equal-temperament formula), with content
-verified against each module's actual implementation (not
-general-knowledge claims); other modules can adopt the same component
-later (see Limitations). Every per-challenge win condition across every
+back to), Sound (switching between Record & Visualize and Make Your Own
+Sound, including the equal-temperament formula), Mathematics (the real
+recursive-descent expression parser behind Graph — never `eval` — and a
+plain note that Bar/Pie/Venn are direct data visualizations with no
+underlying model), and Zoology (the real 10% trophic-efficiency rule
+behind the Energy Pyramid, and the real predator-prey edges behind the
+Food Web Builder), with content verified against each module's actual
+implementation (not general-knowledge claims). Particle Physics's 8 demos
+(each a standalone HTML file in an iframe, not a `src/*.js` module) keep
+their own real inline explanations instead — e.g. "Epidemic Spread"
+genuinely implements SIR states over a real contact network, and
+"Percolation" genuinely implements a probability-threshold phase
+transition — retrofitting the shared modal there would need cross-frame
+messaging for little added benefit. Every per-challenge win condition across every
 module's challenge ladder (`challenges.js`, `rocketSim.js`, etc.) has
 carried its own `explanation`/`source` fields since before this pass —
 `How This Model Works` complements that with a per-simulation view, not a
@@ -298,11 +307,12 @@ Settings → Environment Variables; locally: `.env.local`, gitignored).
 - **A real payment processor is not connected** — see the table above; the
   checkout UI and interest-capture are real, the charge at the end isn't.
 - **Live Graphs** are wired into Physics 2D, Rocket Simulator, Astronomy,
-  and Economics; **How This Model Works** additionally covers
-  Sustainability, Chemistry, and Sound (info panel only, no time-series
-  graph — those modules don't have a natural one). The reusable engines
-  exist for every remaining module (Epidemic Spread, History,
-  Cybersecurity, etc.) to adopt without rework.
+  and Economics only — Chemistry, Sound, Sustainability, Mathematics, and
+  Zoology don't have an obvious real time-series to graph, so they get
+  **How This Model Works** info panels only. History and Cybersecurity are
+  reference/lookup tools rather than simulations, so neither pattern
+  applies to them. Particle Physics's 8 demos keep their own inline
+  explanations (see above) instead of the shared modal.
 - **Classroom assignments/submissions/progress dashboards** aren't built
   yet — classrooms (join/leave/roster/push-pull items) exist; the
   entitlement architecture already supports a future

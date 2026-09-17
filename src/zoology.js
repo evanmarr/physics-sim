@@ -4,11 +4,32 @@
 // population, and a food web builder that draws real predator-prey edges
 // between whatever organisms you pick — not a static diagram.
 import { ORGANISMS, TROPHIC_LEVELS } from "./zoologyData.js";
+import { openModelInfo } from "./modelInfo.js";
 
 const SUB_MODES = [
   { id: "pyramid", label: "Food Chains & Pyramids" },
   { id: "web", label: "Food Web Builder" },
 ];
+
+const PYRAMID_MODEL_INFO = {
+  title: "Energy Pyramid",
+  concept: "Every trophic level's population is genuinely computed from the producer population you drag, not preset per level — each level up the pyramid keeps exactly 10% of the energy (here, population, as a stand-in for biomass/energy) of the level below it. That real ~10% rule of thumb is why food chains rarely run past 4-5 levels: there simply isn't enough energy left after that many 90% losses to support another level.",
+  equation: "Pₙ = P₀ · 0.1ⁿ   (population at trophic level n, from the producer population P₀)",
+  variables: [
+    { symbol: "P₀", meaning: "producer (e.g. grass) population — the slider you drag" },
+    { symbol: "n", meaning: "trophic level, counting up from producers (0) through top predators" },
+  ],
+  constants: [{ name: "Ecological efficiency", value: "10%", unit: "of energy transferred per level" }],
+  assumptions: ["Exactly 10% transfer efficiency at every level — the real figure varies by ecosystem (roughly 5-20% in practice), but 10% is the standard teaching approximation."],
+  limitations: ["Population is used as a direct stand-in for energy/biomass — it ignores that different organisms store wildly different amounts of energy per individual."],
+  sources: ["The ecological 10% rule (energy transfer efficiency between trophic levels)"],
+};
+const WEB_MODEL_INFO = {
+  title: "Food Web Builder",
+  concept: "Predator-prey edges drawn between organisms are real relationships from this app's own organism data (src/zoologyData.js), not a generic template graph — pick a different set of organisms and you get a genuinely different web shape, including isolated nodes if you pick organisms with no predator/prey relationship among the others selected.",
+  limitations: ["A static snapshot of who-eats-whom, not a population-dynamics simulation (no predator/prey population oscillation over time, e.g. Lotka-Volterra)."],
+  sources: ["Real predator-prey relationships curated per organism"],
+};
 
 function div(cls) {
   const el = document.createElement("div");
@@ -45,6 +66,12 @@ export class ZoologyMode {
       btn.addEventListener("click", () => { this.sub = m.id; this._renderSub(); });
       tabs.appendChild(btn);
     }
+    const infoBtn = document.createElement("button");
+    infoBtn.textContent = "ℹ️ How This Model Works";
+    infoBtn.title = "What this simulation actually models";
+    infoBtn.style.marginLeft = "8px";
+    infoBtn.addEventListener("click", () => openModelInfo(this.sub === "pyramid" ? PYRAMID_MODEL_INFO : WEB_MODEL_INFO));
+    tabs.appendChild(infoBtn);
     this.root.appendChild(tabs);
 
     this.body = div("econ-body");

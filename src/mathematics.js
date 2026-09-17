@@ -1,5 +1,21 @@
 import { compileExpression } from "./mathExpr.js";
 import { openSavesPanel } from "./auth.js";
+import { openModelInfo } from "./modelInfo.js";
+
+const GRAPH_MODEL_INFO = {
+  title: "Graph",
+  concept: "Typed expressions are parsed and evaluated by a real, self-contained recursive-descent parser (src/mathExpr.js) — not JavaScript's eval or new Function, which would run arbitrary typed text as real code. It supports implicit multiplication (\"2sin(x)\", \"(x+1)(x-1)\"), standard functions/constants, and correct operator precedence, including right-associative exponents (2^3^2 = 512, not 64).",
+  variables: [{ symbol: "x", meaning: "the independent variable, sampled across the currently visible window" }],
+  constants: [{ name: "Samples per visible width", value: 480 }],
+  assumptions: ["The curve is recomputed from scratch at 480 evenly-spaced x-values across whatever window is currently visible, every time you pan or zoom — not cached or interpolated from a wider precomputed range."],
+  limitations: ["Purely a 2D real-valued function grapher — no implicit equations (e.g. x²+y²=1), complex numbers, or parametric/polar curves."],
+  sources: ["Standard recursive-descent expression parsing (tokenize -> parse -> evaluate)"],
+};
+const CHART_MODEL_INFO = {
+  title: "Bar / Pie / Venn",
+  concept: "These three are direct visualizations of the numbers you enter — bar and pie chart heights/slices are exactly proportional to your values, and Venn region counts are exactly whatever you've dragged into them. There's no underlying equation or simulation here to describe; the chart is simply a faithful picture of the data.",
+  limitations: ["The Venn diagram's circles are a fixed schematic layout, not proportional-area — an exact proportional-area Venn diagram doesn't exist in general for 3+ overlapping sets, so this shows honest region counts instead of pretending circle size means something for 3 sets."],
+};
 
 // A small math-visualization suite: a real graphing calculator (type y =
 // f(x), pan/zoom/hover like an actual calculator) plus three data-chart
@@ -88,6 +104,13 @@ export class MathematicsMode {
       this._typeButtons[t.id] = btn;
     });
     sidebar.appendChild(typeRow);
+
+    const infoBtn = document.createElement("button");
+    infoBtn.textContent = "ℹ️ How This Model Works";
+    infoBtn.title = "What this visualization actually does";
+    infoBtn.style.marginBottom = "10px";
+    infoBtn.addEventListener("click", () => openModelInfo(this.chartType === "function" ? GRAPH_MODEL_INFO : CHART_MODEL_INFO));
+    sidebar.appendChild(infoBtn);
 
     const savesBtn = document.createElement("button");
     savesBtn.textContent = "My Saved Items";
