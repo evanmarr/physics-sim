@@ -678,13 +678,19 @@ button:disabled { opacity: .4; cursor: default; }
   /* The base .modal-box's overflow-y:auto is what we actually need here —
      without it, content taller than the inherited 70vh max-height (easy to
      hit: three plan cards plus the AI Tutor blurb) was simply clipped with
-     no way to scroll to it, hiding the Close button entirely. overflow-x
-     stays visible so .plan-card-plus's glow (a box-shadow, which any
-     ancestor with overflow other than visible clips) isn't cut off
-     sideways; only a scrolled vertical edge can still clip the glow
-     top/bottom, an acceptable tradeoff next to a genuinely unusable modal. */
+     no way to scroll to it, hiding the Close button entirely. An earlier
+     version of this rule also set overflow-x:visible to keep
+     .plan-card-plus's glow (a box-shadow) from being clipped sideways —
+     but overflow-y:auto alone already implies overflow-x:auto per the CSS
+     spec (an element can't scroll one axis while the other stays
+     "visible"), so forcing overflow-x:visible let arbitrary child content
+     spill uncontained past the box's own edge at narrow widths, which on
+     mobile made the whole modal look broken rather than just softening a
+     shadow. Letting overflow-x fall back to its implied "auto" fixes that;
+     the glow being very slightly clipped at the box's exact edge is a far
+     smaller cost than that.
+  */
   overflow-y: auto;
-  overflow-x: visible;
 }
 .plans-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .plans-header h2 { margin: 0; }
