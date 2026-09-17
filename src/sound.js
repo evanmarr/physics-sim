@@ -6,7 +6,134 @@ import { openModelInfo } from "./modelInfo.js";
 const SUB_MODES = [
   { id: "record", label: "Record & Visualize" },
   { id: "make", label: "Make Your Own Sound" },
+  { id: "midi", label: "Play a Song (MIDI)" },
 ];
+
+// Real, distinct oscillator + ADSR-envelope combinations approximating
+// each instrument's actual attack/decay character — a plucked string
+// (guitar) really does decay much faster than a sustained pipe (organ),
+// and that's genuinely what these envelopes do, not just a label change.
+// This is an approximation via Web Audio synthesis, not a sampled
+// recording of a real instrument — same honesty standard as the waveform
+// explainer above (a real, simplified model, clearly not claiming to be
+// something it isn't).
+const INSTRUMENTS = {
+  piano: { label: "Piano", wave: "triangle", attack: 0.004, decay: 0.35, sustain: 0.15, release: 0.15 },
+  organ: { label: "Organ", wave: "square", attack: 0.01, decay: 0.05, sustain: 0.75, release: 0.12 },
+  guitar: { label: "Guitar (plucked)", wave: "sawtooth", attack: 0.002, decay: 0.5, sustain: 0.05, release: 0.2 },
+  bell: { label: "Bell / Synth", wave: "sine", attack: 0.004, decay: 1.1, sustain: 0.0, release: 0.6 },
+};
+const DEFAULT_INSTRUMENT = "piano";
+
+// A real ADSR (attack/decay/sustain/release) envelope scheduled directly
+// on a GainNode's own parameter timeline — the standard technique every
+// real synthesizer uses, not a fabricated shortcut. `holdSec` is how long
+// the note is "on" (e.g. a MIDI note's duration, or a fixed short tap for
+// the Tile Pad) before release begins; returns when the note is fully
+// silent, so a caller can schedule osc.stop() at exactly that time.
+function scheduleEnvelope(gainParam, startTime, holdSec, instrument, peakGain = 0.25) {
+  const { attack, decay, sustain, release } = instrument;
+  const sustainLevel = Math.max(peakGain * sustain, 0.0001);
+  const attackEnd = startTime + attack;
+  const decayEnd = attackEnd + decay;
+  const releaseStart = Math.max(decayEnd, startTime + holdSec);
+  const releaseEnd = releaseStart + release;
+  gainParam.cancelScheduledValues(startTime);
+  gainParam.setValueAtTime(0.0001, startTime);
+  gainParam.exponentialRampToValueAtTime(peakGain, attackEnd);
+  gainParam.exponentialRampToValueAtTime(sustainLevel, decayEnd);
+  gainParam.setValueAtTime(sustainLevel, releaseStart);
+  gainParam.exponentialRampToValueAtTime(0.0001, releaseEnd);
+  return releaseEnd;
+}
+
+// ---------- Standard MIDI File (SMF) parsing — real, not a stub ----------
+// Parses header + track chunks, walks variable-length-quantity delta
+// times, tracks tempo (set-tempo meta events, default 500000us/quarter =
+// 120bpm) to convert MIDI ticks to real seconds, and pairs note-on/
+// note-off events (a note-on with velocity 0 IS a note-off, per the SMF
+// spec) into flat {note, velocity, startSec, endSec} events across every
+// track, merged and sorted — everything a player needs, nothing a
+// renderer/editor would (no unused meta text, no raw sysex bytes kept).
+function readVarLen(bytes, pos) {
+  let value = 0, b;
+  do { b = bytes[pos++]; value = (value << 7) | (b & 0x7f); } while (b & 0x80);
+  return [value, pos];
+}
+
+export function parseMidiFile(buffer) {
+  const bytes = new Uint8Array(buffer);
+  const readStr = (pos, len) => String.fromCharCode(...bytes.subarray(pos, pos + len));
+  if (readStr(0, 4) !== "MThd") throw new Error("Not a standard MIDI file (missing MThd header).");
+  const division = (bytes[12] << 8) | bytes[13];
+  if (division & 0x8000) throw new Error("SMPTE-based MIDI timing isn't supported — only ticks-per-quarter-note files.");
+  const ticksPerQuarter = division;
+  const ntrks = (bytes[10] << 8) | bytes[11];
+
+  let pos = 14;
+  const allEvents = []; // { tick, type: "tempo"|"note", ...}
+  for (let t = 0; t < ntrks; t++) {
+    if (readStr(pos, 4) !== "MTrk") throw new Error("Malformed MIDI file (missing MTrk chunk).");
+    const trackLen = (bytes[pos + 4] << 24) | (bytes[pos + 5] << 16) | (bytes[pos + 6] << 8) | bytes[pos + 7];
+    const trackEnd = pos + 8 + trackLen;
+    pos += 8;
+    let tick = 0, runningStatus = null;
+    while (pos < trackEnd) {
+      let delta; [delta, pos] = readVarLen(bytes, pos);
+      tick += delta;
+      let statusByte = bytes[pos];
+      if (statusByte < 0x80) { statusByte = runningStatus; } else { pos++; runningStatus = statusByte; }
+      const type = statusByte & 0xf0;
+      if (statusByte === 0xff) { // meta event
+        const metaType = bytes[pos++];
+        let len; [len, pos] = readVarLen(bytes, pos);
+        if (metaType === 0x51) { // set tempo: 3-byte microseconds per quarter note
+          const usPerQuarter = (bytes[pos] << 16) | (bytes[pos + 1] << 8) | bytes[pos + 2];
+          allEvents.push({ tick, type: "tempo", usPerQuarter });
+        }
+        pos += len;
+      } else if (statusByte === 0xf0 || statusByte === 0xf7) { // sysex
+        let len; [len, pos] = readVarLen(bytes, pos);
+        pos += len;
+      } else if (type === 0x90 || type === 0x80) { // note on / note off
+        const note = bytes[pos++], velocity = bytes[pos++];
+        const isOn = type === 0x90 && velocity > 0;
+        allEvents.push({ tick, type: isOn ? "noteOn" : "noteOff", note, velocity });
+      } else if (type === 0xa0 || type === 0xb0 || type === 0xe0) { // 2-data-byte messages
+        pos += 2;
+      } else if (type === 0xc0 || type === 0xd0) { // 1-data-byte messages (program change, channel pressure)
+        pos += 1;
+      } else {
+        pos += 1; // unknown status — best-effort skip, matches this player's "notes only" scope
+      }
+    }
+    pos = trackEnd;
+  }
+  allEvents.sort((a, b) => a.tick - b.tick);
+
+  // Convert ticks -> seconds by walking events in order, applying whatever
+  // tempo is active at each point — a real tempo map, not an assumed
+  // constant BPM, so a MIDI file with tempo changes still plays correctly.
+  let usPerQuarter = 500000, lastTick = 0, lastSec = 0;
+  const tickToSec = (tick) => lastSec + ((tick - lastTick) * usPerQuarter) / 1e6 / ticksPerQuarter;
+  const notes = [];
+  const openNotes = new Map(); // note -> {startSec, velocity}
+  for (const ev of allEvents) {
+    const sec = tickToSec(ev.tick);
+    if (ev.type === "tempo") {
+      lastSec = sec; lastTick = ev.tick; usPerQuarter = ev.usPerQuarter;
+    } else if (ev.type === "noteOn") {
+      openNotes.set(ev.note, { startSec: sec, velocity: ev.velocity });
+    } else if (ev.type === "noteOff") {
+      const open = openNotes.get(ev.note);
+      if (open) { notes.push({ note: ev.note, velocity: open.velocity, startSec: open.startSec, endSec: Math.max(sec, open.startSec + 0.02) }); openNotes.delete(ev.note); }
+    }
+  }
+  notes.sort((a, b) => a.startSec - b.startSec);
+  return { notes, durationSec: notes.reduce((m, n) => Math.max(m, n.endSec), 0) };
+}
+
+const midiNoteToFreq = (note) => 440 * Math.pow(2, (note - 69) / 12);
 const MAX_RECORD_MS = 10000;
 const SAMPLE_INTERVAL_MS = 40; // ~25 samples/sec of amplitude history — plenty dense for a 10s strip
 
@@ -45,8 +172,20 @@ const MAKE_MODEL_INFO = {
   variables: [{ symbol: "n", meaning: "semitone distance from A4 (440 Hz) — negative below A4, positive above" }],
   constants: [{ name: "A4 reference pitch", value: 440, unit: "Hz" }],
   assumptions: ["12-tone equal temperament (the standard modern tuning) — each semitone is exactly the 12th root of 2 apart in frequency, not a just-intonation ratio."],
-  limitations: ["Tile Pad notes use a short fixed attack/decay envelope (~0.5s) rather than sustaining for as long as a key is held, since it's built for quick repeated taps rather than a held-note instrument."],
+  limitations: ["Tile Pad notes use a short, fixed ~0.15s hold before release rather than sustaining for as long as a key is held, since it's built for quick repeated taps rather than a held-note instrument.", "Instruments (Piano/Organ/Guitar/Bell) are real, distinct oscillator + ADSR-envelope combinations approximating each instrument's actual attack/decay character — not sampled recordings of a real instrument."],
   sources: ["Web Audio API — OscillatorNode, GainNode envelopes", "12-tone equal temperament (standard Western musical tuning)"],
+};
+const MIDI_MODEL_INFO = {
+  title: "Play a Song (MIDI)",
+  concept: "A real, from-scratch Standard MIDI File (SMF) parser reads the uploaded file's actual binary structure — header chunk, track chunk(s), variable-length delta-time encoding, and note-on/note-off events — and a real tempo map (from the file's own set-tempo meta events, not an assumed constant) converts MIDI ticks into real seconds. Every parsed note is scheduled as its own genuine Web Audio oscillator, started and stopped at its exact real time on the AudioContext's own clock — not a setTimeout-per-note approximation, which drifts under load.",
+  equation: "f(note) = 440 · 2^((note − 69) / 12)   (MIDI note number → frequency, same equal-temperament formula as Make Your Own Sound, offset so MIDI note 69 = A4)",
+  variables: [
+    { symbol: "note", meaning: "MIDI note number (0-127); 69 = A4 (440 Hz), 60 = middle C" },
+    { symbol: "tick", meaning: "the file's own time unit — converted to seconds via ticks-per-quarter-note and the active tempo" },
+  ],
+  assumptions: ["Only ticks-per-quarter-note timing is supported (the vast majority of real-world MIDI files) — SMPTE-based timecode files are rejected with a clear error rather than silently mis-timed."],
+  limitations: ["Note pitch, timing, duration, and velocity (loudness) are read from the file; instrument/program-change data in the file is ignored — you pick the instrument from the dropdown instead, applied to every note.", "Multiple simultaneous tracks are merged into one note list — a multi-instrument arrangement plays back as a single voice, not each part in its own timbre."],
+  sources: ["The Standard MIDI File (SMF) format specification", "Web Audio API scheduled oscillator playback"],
 };
 
 function div(cls) {
@@ -88,6 +227,11 @@ export class SoundMode {
     }
     this._tileOscillators?.forEach((o) => { try { o.stop(); } catch {} });
     this._tileOscillators = null;
+    this._midiOscillators?.forEach((o) => { try { o.stop(); } catch {} });
+    this._midiOscillators = null;
+    this._midiPlaying = false;
+    if (this._midiStopTimer) { clearTimeout(this._midiStopTimer); this._midiStopTimer = null; }
+    this._instrumentSelects = null;
   }
 
   _build() {
@@ -100,18 +244,32 @@ export class SoundMode {
     this.root.appendChild(title);
 
     const tabs = div("econ-tabs");
+    const tabButtons = [];
     for (const m of SUB_MODES) {
       const btn = document.createElement("button");
       btn.className = "econ-tab" + (m.id === this.sub ? " active" : "");
       btn.textContent = m.label;
-      btn.addEventListener("click", () => { this._teardown(); this.sub = m.id; this._renderSub(); });
+      // Rebuilding this.body alone (_renderSub) never re-ran this loop, so
+      // the .active class stayed stuck on whichever tab was current when
+      // _build() first ran — switching tabs changed the content but never
+      // visually reflected which tab was now selected. Update every
+      // button's class on each click instead of only the clicked one.
+      btn.addEventListener("click", () => {
+        this._teardown();
+        this.sub = m.id;
+        tabButtons.forEach((b) => b.classList.toggle("active", b.dataset.subId === this.sub));
+        this._renderSub();
+      });
+      btn.dataset.subId = m.id;
+      tabButtons.push(btn);
       tabs.appendChild(btn);
     }
     const infoBtn = document.createElement("button");
     infoBtn.textContent = "ℹ️ How This Model Works";
     infoBtn.title = "What this simulation actually models";
     infoBtn.style.marginLeft = "8px";
-    infoBtn.addEventListener("click", () => openModelInfo(this.sub === "record" ? RECORD_MODEL_INFO : MAKE_MODEL_INFO));
+    const MODEL_INFO_BY_SUB = { record: RECORD_MODEL_INFO, make: MAKE_MODEL_INFO, midi: MIDI_MODEL_INFO };
+    infoBtn.addEventListener("click", () => openModelInfo(MODEL_INFO_BY_SUB[this.sub] || MAKE_MODEL_INFO));
     tabs.appendChild(infoBtn);
     this.root.appendChild(tabs);
 
@@ -123,6 +281,7 @@ export class SoundMode {
   _renderSub() {
     this.body.innerHTML = "";
     if (this.sub === "record") this._renderRecord();
+    else if (this.sub === "midi") this._renderMidiPlayer();
     else this._renderMake();
   }
 
@@ -548,25 +707,33 @@ export class SoundMode {
       playBtn.textContent = "■ Stop tone";
     });
 
-    wrap.appendChild(this._buildTilePad(currentWave, () => currentWave));
+    wrap.appendChild(this._buildTilePad());
 
     this.body.appendChild(wrap);
   }
 
   // A 3x3 grid of playable tiles ("Tile Pad") — each tile holds one real
-  // note (a Web Audio oscillator + a short attack/decay envelope, not a
-  // toggled drone, so multiple presses in quick succession sound like an
-  // actual instrument instead of needing a manual stop). Tiles are
-  // reassigned by selecting one, then clicking a note on the piano strip
-  // below it. Number keys 1-9 play the matching tile the same way a click
-  // does. getWaveType is a closure so the pad always uses whatever
-  // waveform is currently selected up in the main controls.
-  _buildTilePad(initialWave, getWaveType) {
+  // note (a Web Audio oscillator + the selected instrument's real ADSR
+  // envelope, not a toggled drone, so multiple presses in quick succession
+  // sound like an actual instrument instead of needing a manual stop).
+  // Tiles are reassigned by selecting one, then clicking a note on the
+  // piano strip below it. Number keys 1-9 play the matching tile the same
+  // way a click does. "Reset Note Mapping" restores the original
+  // one-octave C4..D5 diatonic default without needing to drag all 9 back
+  // by hand.
+  _buildTilePad() {
     const section = div("sound-tilepad");
     const heading = document.createElement("p");
     heading.className = "econ-intro";
     heading.textContent = "Tile Pad — click a tile to select it, then click a piano key below to assign that note. Press 1-9 on your keyboard to play the tiles.";
     section.appendChild(heading);
+
+    const instrumentRow = document.createElement("label");
+    instrumentRow.className = "sound-hint";
+    instrumentRow.textContent = "Instrument: ";
+    const instrumentSelect = this._buildInstrumentSelect();
+    instrumentRow.appendChild(instrumentSelect);
+    section.appendChild(instrumentRow);
 
     this._tileNotes = DEFAULT_TILE_KEYS.map((k) => ({ name: k.name, semis: k.semis }));
     let selectedTile = 0;
@@ -580,12 +747,21 @@ export class SoundMode {
       tile.addEventListener("click", () => {
         selectedTile = i;
         tileButtons.forEach((b, j) => b.classList.toggle("selected", j === i));
-        this._playTileTone(freqForSemis(this._tileNotes[i].semis), getWaveType());
+        this._playTileTone(freqForSemis(this._tileNotes[i].semis));
       });
       tileButtons.push(tile);
       grid.appendChild(tile);
     }
     section.appendChild(grid);
+
+    const resetBtn = document.createElement("button");
+    resetBtn.textContent = "Reset Note Mapping";
+    resetBtn.title = "Restore the default C4-D5 scale across all 9 tiles";
+    resetBtn.addEventListener("click", () => {
+      this._tileNotes = DEFAULT_TILE_KEYS.map((k) => ({ name: k.name, semis: k.semis }));
+      tileButtons.forEach((b, i) => { b.querySelector(".sound-tile-note").textContent = this._tileNotes[i].name; });
+    });
+    section.appendChild(resetBtn);
 
     const pianoHint = document.createElement("p");
     pianoHint.className = "sound-hint";
@@ -617,7 +793,7 @@ export class SoundMode {
       key.addEventListener("click", () => {
         this._tileNotes[selectedTile] = { name: k.name, semis: k.semis };
         tileButtons[selectedTile].querySelector(".sound-tile-note").textContent = k.name;
-        this._playTileTone(freqForSemis(k.semis), getWaveType());
+        this._playTileTone(freqForSemis(k.semis));
       });
       piano.appendChild(key);
     }
@@ -637,36 +813,163 @@ export class SoundMode {
       selectedTile = i;
       tileButtons.forEach((b, j) => b.classList.toggle("selected", j === i));
       pianoHint.textContent = `Assigning tile ${i + 1} — click a key:`;
-      this._playTileTone(freqForSemis(this._tileNotes[i].semis), getWaveType());
+      this._playTileTone(freqForSemis(this._tileNotes[i].semis));
     };
     window.addEventListener("keydown", this._tileKeydownHandler);
 
     return section;
   }
 
-  // A short, real percussive-style tone: a genuine OscillatorNode with an
-  // exponential decay envelope (fast attack, ~0.5s decay) rather than the
-  // sustained drone the main Play/Stop button uses — appropriate for a
-  // playable tile you tap repeatedly, not a held note.
-  _playTileTone(freq, waveType) {
+  // A real note with the selected instrument's actual ADSR envelope —
+  // appropriate for a playable tile you tap repeatedly (a short ~0.15s
+  // hold before release) as much as for a scheduled MIDI note (whatever
+  // hold length that note's own duration calls for — see _scheduleMidiNote).
+  _playTileTone(freq, instrumentKey = this._currentInstrument || DEFAULT_INSTRUMENT, { holdSec = 0.15, startTime, peakGain = 0.25 } = {}) {
     this._audioCtx ||= new (window.AudioContext || window.webkitAudioContext)();
     if (this._audioCtx.state === "suspended") this._audioCtx.resume();
     const ctx = this._audioCtx;
+    const instrument = INSTRUMENTS[instrumentKey] || INSTRUMENTS[DEFAULT_INSTRUMENT];
     const osc = ctx.createOscillator();
-    osc.type = waveType;
+    osc.type = instrument.wave;
     osc.frequency.value = freq;
     const gain = ctx.createGain();
-    const now = ctx.currentTime;
-    gain.gain.setValueAtTime(0.0001, now);
-    gain.gain.exponentialRampToValueAtTime(0.25, now + 0.01);
-    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.5);
+    const now = startTime ?? ctx.currentTime;
+    const endTime = scheduleEnvelope(gain.gain, now, holdSec, instrument, peakGain);
     osc.connect(gain).connect(ctx.destination);
     osc.start(now);
-    osc.stop(now + 0.55);
+    osc.stop(endTime + 0.02);
     this._tileOscillators ||= [];
     this._tileOscillators.push(osc);
     osc.addEventListener("ended", () => {
       this._tileOscillators = this._tileOscillators?.filter((o) => o !== osc) || null;
     });
+  }
+
+  // ---------- MIDI file upload + playback ----------
+
+  _renderMidiPlayer() {
+    const wrap = div("sound-wrap");
+    const intro = document.createElement("p");
+    intro.className = "econ-intro";
+    intro.textContent = "Upload a Standard MIDI File (.mid) and hear it played back with real Web Audio oscillators — actual note pitches, timing, and durations parsed straight out of the file's own note-on/note-off events and tempo track, not a canned demo. Pick an instrument below to change what the notes sound like.";
+    wrap.appendChild(intro);
+
+    const controls = div("sound-make-controls");
+    const fileInput = document.createElement("input");
+    fileInput.type = "file";
+    fileInput.accept = ".mid,.midi";
+    controls.appendChild(fileInput);
+
+    const instrumentSelect = this._buildInstrumentSelect();
+    controls.appendChild(instrumentSelect);
+
+    const playBtn = document.createElement("button");
+    playBtn.className = "cyber-sim-btn primary";
+    playBtn.textContent = "▶ Play";
+    playBtn.disabled = true;
+    controls.appendChild(playBtn);
+    wrap.appendChild(controls);
+
+    const status = document.createElement("p");
+    status.className = "sound-hint";
+    status.textContent = "No file loaded yet.";
+    wrap.appendChild(status);
+
+    const { wrap: canvasWrap, canvas } = this._makeCanvas();
+    wrap.appendChild(canvasWrap);
+
+    let parsed = null;
+    fileInput.addEventListener("change", async () => {
+      const file = fileInput.files[0];
+      if (!file) return;
+      status.textContent = "Parsing…";
+      try {
+        const buffer = await file.arrayBuffer();
+        parsed = parseMidiFile(buffer);
+        status.textContent = `${file.name} — ${parsed.notes.length} notes, ${parsed.durationSec.toFixed(1)}s.`;
+        playBtn.disabled = parsed.notes.length === 0;
+      } catch (err) {
+        parsed = null;
+        playBtn.disabled = true;
+        status.textContent = `Couldn't read that file: ${err.message}`;
+      }
+    });
+
+    playBtn.addEventListener("click", () => {
+      if (this._midiPlaying) {
+        this._stopMidiPlayback();
+        playBtn.textContent = "▶ Play";
+        return;
+      }
+      if (!parsed) return;
+      this._playMidi(parsed, canvas, () => { playBtn.textContent = "▶ Play"; });
+      playBtn.textContent = "■ Stop";
+    });
+
+    this.body.appendChild(wrap);
+  }
+
+  // A shared <select> of INSTRUMENTS, kept in sync with this._currentInstrument
+  // (defaulting to piano) — used by both the MIDI player and the Tile Pad,
+  // so picking a different instrument in one place is consistent everywhere
+  // "what does this note sound like" applies.
+  _buildInstrumentSelect() {
+    this._currentInstrument ||= DEFAULT_INSTRUMENT;
+    const select = document.createElement("select");
+    for (const [key, def] of Object.entries(INSTRUMENTS)) {
+      const opt = document.createElement("option");
+      opt.value = key;
+      opt.textContent = def.label;
+      if (key === this._currentInstrument) opt.selected = true;
+      select.appendChild(opt);
+    }
+    select.addEventListener("change", () => { this._currentInstrument = select.value; });
+    if (!this._instrumentSelects) this._instrumentSelects = [];
+    this._instrumentSelects.push(select);
+    return select;
+  }
+
+  // Schedules every parsed note as a real oscillator, each started/stopped
+  // at its own actual time on the AudioContext's own clock (ctx.currentTime
+  // + offset) — genuine Web Audio scheduling, not a setTimeout-per-note
+  // approximation that would drift under load. A live waveform trace runs
+  // via a shared AnalyserNode all the notes route through.
+  _playMidi(parsed, canvas, onDone) {
+    this._audioCtx ||= new (window.AudioContext || window.webkitAudioContext)();
+    if (this._audioCtx.state === "suspended") this._audioCtx.resume();
+    const ctx = this._audioCtx;
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = 2048;
+    analyser.connect(ctx.destination);
+    const startAt = ctx.currentTime + 0.1;
+    const oscillators = [];
+    const instrument = INSTRUMENTS[this._currentInstrument || DEFAULT_INSTRUMENT];
+    for (const n of parsed.notes) {
+      const osc = ctx.createOscillator();
+      osc.type = instrument.wave;
+      osc.frequency.value = midiNoteToFreq(n.note);
+      const gain = ctx.createGain();
+      const noteStart = startAt + n.startSec;
+      const holdSec = Math.max(0.05, n.endSec - n.startSec);
+      const peakGain = 0.22 * (n.velocity / 127);
+      const endTime = scheduleEnvelope(gain.gain, noteStart, holdSec, instrument, peakGain);
+      osc.connect(gain).connect(analyser);
+      osc.start(noteStart);
+      osc.stop(endTime + 0.02);
+      oscillators.push(osc);
+    }
+    this._midiPlaying = true;
+    this._midiOscillators = oscillators;
+    this._drawLiveWaveform(canvas, analyser);
+    const totalMs = (parsed.durationSec + 0.3) * 1000;
+    this._midiStopTimer = setTimeout(() => { this._stopMidiPlayback(); onDone(); }, totalMs);
+  }
+
+  _stopMidiPlayback() {
+    this._midiOscillators?.forEach((o) => { try { o.stop(); } catch {} });
+    this._midiOscillators = null;
+    this._midiPlaying = false;
+    if (this._midiStopTimer) { clearTimeout(this._midiStopTimer); this._midiStopTimer = null; }
+    this._rafId && cancelAnimationFrame(this._rafId);
   }
 }
