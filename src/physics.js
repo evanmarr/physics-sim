@@ -474,6 +474,17 @@ export class PhysicsSim {
         body = Bodies.fromVertices(spec.x, spec.y, [trianglePoints(spec.width ?? spec.size ?? 130, spec.height)], common, true);
         break;
       }
+      case "customPolygon": {
+        // Kinetic Plus Custom Physics Items — the collision shape IS the
+        // saved vertex list, not a stand-in circle/rectangle. Only
+        // convex, non-self-intersecting shapes are ever saved (see
+        // src/customItems.js's validation), which is exactly what
+        // Matter's own (non-poly-decomp) `Bodies.fromVertices` can
+        // resolve correctly with `flagInternal: true` — so what you see
+        // in the editor is exactly what collides here.
+        body = Bodies.fromVertices(spec.x, spec.y, [spec.vertices], common, true);
+        break;
+      }
       case "cannon":
       case "lens":
         body = Bodies.rectangle(spec.x, spec.y, spec.width, spec.height, { ...common, isStatic: true });

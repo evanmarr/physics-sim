@@ -16,6 +16,28 @@
 // prediction about any real city's future — it's a scenario you're
 // building this session, scored against itself.
 import { openSavesPanel } from "./auth.js";
+import { openModelInfo } from "./modelInfo.js";
+
+const SUSTAINABILITY_MODEL_INFO = {
+  title: "Sustainability City Builder",
+  concept: "Every dashboard number is computed live from exactly what's placed on the grid this tick — including real day/night solar and gusty wind output — not a hidden or precomputed score.",
+  equation: "Score = (brownout this tick? 5 : 30) + 0.3·(renewable share, 0-100) + max(0, 25 − 0.5·pollutionLevel) + 15·(population / housing capacity), clamped to 0-100",
+  constants: [
+    { name: "Solar capacity factor", value: 0.25, unit: "of nameplate, zeroed at night" },
+    { name: "Wind capacity factor", value: 0.35, unit: "of nameplate, gusts tick to tick" },
+    { name: "Coal capacity factor", value: 0.85, unit: "of nameplate (baseload, day or night)" },
+    { name: "Coal fuel cost", value: 4, unit: "per tick, ongoing (renewables have none)" },
+  ],
+  assumptions: [
+    "One tick = one real-time step of this session, not a calendar unit — a full day/night cycle is 24 ticks.",
+    "A building's energy/pollution/income figures are fixed per building, not affected by adjacency or city size.",
+  ],
+  limitations: [
+    "Figures are simplified, order-of-magnitude numbers loosely based on real U.S. EIA generation/capacity-factor and residential/commercial energy-use data — not a real facility's spec sheet or a forecast for any real city.",
+    "No population growth, land value, traffic, or multi-city trade — this is a single self-contained grid scored against itself.",
+  ],
+  sources: ["U.S. Energy Information Administration (EIA) — typical capacity factors and residential/commercial energy-use averages, circa 2023-2024"],
+};
 
 const GRID_W = 12, GRID_H = 8;
 const TICK_MS = 2000;
@@ -113,10 +135,18 @@ export class SustainabilityMode {
     this.root.innerHTML = "";
     this.root.className = "econ-root";
 
+    const titleRow = div("chem-panel-title");
+    titleRow.style.cssText = "display:flex;align-items:center;justify-content:space-between;padding:0 20px";
     const title = document.createElement("h1");
     title.className = "econ-title";
     title.textContent = "Sustainability";
-    this.root.appendChild(title);
+    titleRow.appendChild(title);
+    const infoBtn = document.createElement("button");
+    infoBtn.textContent = "ℹ️ How This Model Works";
+    infoBtn.title = "What this simulation actually models";
+    infoBtn.addEventListener("click", () => openModelInfo(SUSTAINABILITY_MODEL_INFO));
+    titleRow.appendChild(infoBtn);
+    this.root.appendChild(titleRow);
 
     const intro = document.createElement("p");
     intro.className = "econ-intro";

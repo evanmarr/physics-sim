@@ -11,6 +11,7 @@
 // no reasonable way to speak the Postgres wire protocol from scratch, unlike
 // password hashing (crypto.scryptSync) which Node already provides.
 import pg from "pg";
+import crypto from "node:crypto";
 
 const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
 
@@ -158,6 +159,82 @@ export function ensureSchema() {
       sim_id TEXT NOT NULL REFERENCES community_sims(id) ON DELETE CASCADE,
       created_at BIGINT NOT NULL,
       PRIMARY KEY (user_email, sim_id)
+    );
+    -- Entitlements (see server/entitlements.js, the actual resolver — these
+    -- columns are raw storage only, never read directly by feature code).
+    -- plan_source records HOW plan was granted (paid_plus/promo_plus/teacher/
+    -- admin/free) so the UI and future support tooling can explain access,
+    -- not just state it. plan_expires_at is set for time-limited grants
+    -- (e.g. a promo code with an access window) and is checked lazily at
+    -- resolution time — no cron/sweep needed, expired rows just read back
+    -- as free from that point on. ai_enabled is intentionally a SEPARATE
+    -- column from plan: Plus (paid or promo) never implies AI access.
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS plan TEXT NOT NULL DEFAULT 'free';
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS plan_source TEXT NOT NULL DEFAULT 'free';
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS plan_expires_at BIGINT;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS ai_enabled BOOLEAN NOT NULL DEFAULT false;
+    CREATE TABLE IF NOT EXISTS promo_codes (
+      code TEXT PRIMARY KEY,
+      active BOOLEAN NOT NULL DEFAULT true,
+      max_redemptions INT,
+      redemption_count INT NOT NULL DEFAULT 0,
+      expires_at BIGINT,
+      -- Days of Plus access granted per redemption; NULL = does not expire
+      -- on its own (still revocable by deactivating the code, which only
+      -- blocks FUTURE redemptions — see redeemPromoCode/deactivate docs).
+      access_days INT,
+      created_at BIGINT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS promo_redemptions (
+      id TEXT PRIMARY KEY,
+      code TEXT NOT NULL REFERENCES promo_codes(code) ON DELETE CASCADE,
+      user_email TEXT NOT NULL REFERENCES users(email) ON DELETE CASCADE,
+      redeemed_at BIGINT NOT NULL,
+      -- Belt-and-suspenders against the same account redeeming the same
+      -- code twice — enforced here at the DB level, not just in app logic,
+      -- so a race between two near-simultaneous requests can't double-book.
+      UNIQUE (code, user_email)
+    );
+    CREATE INDEX IF NOT EXISTS promo_redemptions_code_idx ON promo_redemptions(code);
+    -- AI Tutor cost accounting (see server/aiConfig.js) — accumulates
+    -- ESTIMATED cost per user per calendar-month period. No row here is
+    -- ever produced by a real AI call today (none exist yet); this table
+    -- is architecture, ready for when one does.
+    -- Physics world share codes (Kinetic Plus) — a short, typeable code
+    -- (displayed as e.g. K7P4-X2) that loads a specific world snapshot.
+    -- Deliberately separate from community_sims (that's a permanent public
+    -- gallery listing) and shared_items (that's classroom-membership-
+    -- scoped) — this is neither: anyone with the code can load it once,
+    -- it never appears in any public listing, and generating one requires
+    -- Plus while LOADING one does not (see server.js's /world-share route).
+    CREATE TABLE IF NOT EXISTS world_share_codes (
+      code TEXT PRIMARY KEY,
+      owner_email TEXT NOT NULL REFERENCES users(email) ON DELETE CASCADE,
+      kind TEXT NOT NULL,
+      data JSONB NOT NULL,
+      schema_version INT NOT NULL DEFAULT 1,
+      created_at BIGINT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS ai_usage_periods (
+      user_email TEXT NOT NULL REFERENCES users(email) ON DELETE CASCADE,
+      period_key TEXT NOT NULL,
+      estimated_cost_usd DOUBLE PRECISION NOT NULL DEFAULT 0,
+      request_count INT NOT NULL DEFAULT 0,
+      pricing_version INT NOT NULL DEFAULT 1,
+      updated_at BIGINT NOT NULL,
+      PRIMARY KEY (user_email, period_key)
+    );
+    -- No payment processor is connected yet (see server/checkoutConfig.js).
+    -- This just records "I got to the end of the checkout flow and would
+    -- have paid" so real interest isn't lost while billing isn't live —
+    -- one row per user+plan+period, updated (not duplicated) on repeat visits.
+    CREATE TABLE IF NOT EXISTS upgrade_interest (
+      user_email TEXT NOT NULL REFERENCES users(email) ON DELETE CASCADE,
+      plan TEXT NOT NULL,
+      billing_period TEXT NOT NULL,
+      created_at BIGINT NOT NULL,
+      updated_at BIGINT NOT NULL,
+      PRIMARY KEY (user_email, plan)
     );
   `);
   return readySchema;
@@ -585,5 +662,129 @@ export async function setMeta(key, value) {
     `INSERT INTO app_meta (key, value) VALUES ($1, $2)
      ON CONFLICT (key) DO UPDATE SET value = $2`,
     [key, value]
+  );
+}
+
+// ---------- entitlements / plan ----------
+// Raw storage only — see server/entitlements.js for the actual resolver
+// every route/UI should read through instead of these columns directly.
+
+export async function setUserPlan(email, plan, planSource, expiresAt) {
+  await query(
+    "UPDATE users SET plan = $2, plan_source = $3, plan_expires_at = $4 WHERE email = $1",
+    [email, plan, planSource, expiresAt]
+  );
+}
+
+// ---------- promo codes (admin-managed, see ~/physics-sim-admin) ----------
+
+export async function createPromoCode({ code, maxRedemptions, expiresAt, accessDays }) {
+  await query(
+    `INSERT INTO promo_codes (code, max_redemptions, expires_at, access_days, created_at)
+     VALUES ($1, $2, $3, $4, $5)`,
+    [code, maxRedemptions ?? null, expiresAt ?? null, accessDays ?? null, Date.now()]
+  );
+}
+
+export async function listPromoCodes() {
+  const rows = await query("SELECT * FROM promo_codes ORDER BY created_at DESC");
+  return rows.map((r) => ({
+    code: r.code, active: r.active, maxRedemptions: r.max_redemptions, redemptionCount: r.redemption_count,
+    expiresAt: r.expires_at ? Number(r.expires_at) : null, accessDays: r.access_days, createdAt: Number(r.created_at),
+  }));
+}
+
+export async function getPromoCode(code) {
+  const rows = await query("SELECT * FROM promo_codes WHERE code = $1", [code]);
+  return rows[0] || null;
+}
+
+export async function setPromoCodeActive(code, active) {
+  const rows = await query("UPDATE promo_codes SET active = $2 WHERE code = $1 RETURNING code", [code, active]);
+  return rows.length > 0;
+}
+
+export async function listPromoRedemptions(code) {
+  const rows = await query(
+    `SELECT r.user_email, r.redeemed_at, u.first_name, u.last_name
+     FROM promo_redemptions r JOIN users u ON u.email = r.user_email
+     WHERE r.code = $1 ORDER BY r.redeemed_at DESC`,
+    [code]
+  );
+  return rows.map((r) => ({ email: r.user_email, redeemedAt: Number(r.redeemed_at), name: `${r.first_name} ${r.last_name}`.trim() }));
+}
+
+export async function hasRedeemedPromoCode(code, email) {
+  const rows = await query("SELECT 1 FROM promo_redemptions WHERE code = $1 AND user_email = $2", [code, email]);
+  return rows.length > 0;
+}
+
+// The actual redemption — see the /promo-redeem route in server.js for the
+// full validation sequence (this just performs the DB half once every
+// check has already passed there). Relies on promo_redemptions' UNIQUE
+// (code, user_email) constraint as a last line of defense against a race
+// between two near-simultaneous redemption attempts from the same account;
+// callers should catch a unique-violation error (code '23505') as "already
+// redeemed" rather than a hard failure.
+export async function insertPromoRedemption(code, email) {
+  await query(
+    "INSERT INTO promo_redemptions (id, code, user_email, redeemed_at) VALUES ($1, $2, $3, $4)",
+    [crypto.randomUUID(), code, email, Date.now()]
+  );
+  await query("UPDATE promo_codes SET redemption_count = redemption_count + 1 WHERE code = $1", [code]);
+}
+
+// ---------- world share codes (Kinetic Plus) ----------
+
+export async function worldShareCodeExists(code) {
+  const rows = await query("SELECT 1 FROM world_share_codes WHERE code = $1", [code]);
+  return rows.length > 0;
+}
+
+export async function createWorldShareCode(code, ownerEmail, kind, data) {
+  await query(
+    "INSERT INTO world_share_codes (code, owner_email, kind, data, schema_version, created_at) VALUES ($1, $2, $3, $4, $5, $6)",
+    [code, ownerEmail, kind, JSON.stringify(data), 1, Date.now()]
+  );
+}
+
+export async function getWorldShareCode(code) {
+  const rows = await query("SELECT kind, data, schema_version, created_at FROM world_share_codes WHERE code = $1", [code]);
+  if (!rows.length) return null;
+  return { kind: rows[0].kind, data: rows[0].data, schemaVersion: rows[0].schema_version, createdAt: Number(rows[0].created_at) };
+}
+
+// ---------- AI Tutor usage accounting (architecture only — see server/aiConfig.js) ----------
+
+export async function getAiUsage(email, periodKey) {
+  const rows = await query("SELECT * FROM ai_usage_periods WHERE user_email = $1 AND period_key = $2", [email, periodKey]);
+  if (!rows.length) return { estimatedCostUsd: 0, requestCount: 0 };
+  return { estimatedCostUsd: Number(rows[0].estimated_cost_usd), requestCount: rows[0].request_count };
+}
+
+// Would be called AFTER a real request completes, to add its actual
+// estimated cost to the running monthly total — never called today, since
+// no real request exists yet. Included so the accounting half of this
+// architecture isn't purely theoretical when a real integration lands.
+export async function recordAiUsage(email, periodKey, costUsd, pricingVersion) {
+  await query(
+    `INSERT INTO ai_usage_periods (user_email, period_key, estimated_cost_usd, request_count, pricing_version, updated_at)
+     VALUES ($1, $2, $3, 1, $4, $5)
+     ON CONFLICT (user_email, period_key)
+     DO UPDATE SET estimated_cost_usd = ai_usage_periods.estimated_cost_usd + $3, request_count = ai_usage_periods.request_count + 1, updated_at = $5`,
+    [email, periodKey, costUsd, pricingVersion, Date.now()]
+  );
+}
+
+// ---------- upgrade interest (no payment processor connected — see server/checkoutConfig.js) ----------
+
+export async function recordUpgradeInterest(email, plan, billingPeriod) {
+  const now = Date.now();
+  await query(
+    `INSERT INTO upgrade_interest (user_email, plan, billing_period, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, $4)
+     ON CONFLICT (user_email, plan)
+     DO UPDATE SET billing_period = $3, updated_at = $4`,
+    [email, plan, billingPeriod, now]
   );
 }

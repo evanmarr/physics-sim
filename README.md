@@ -1,203 +1,312 @@
 # Kinetic
 
-Build it. Change it. See what happens.
+**Build it. Change it. See what happens.**
 
-A browser-based sandbox spanning seven real, simulated domains — physics,
-chemistry, astronomy, history, cybersecurity, mathematics, and a gallery of
-D3 force simulations — all reachable from one top bar and one home screen.
+Kinetic is an open-ended educational simulation platform. Where a typical
+"physics sandbox" app hands you one fixed simulation, Kinetic's whole
+premise is that you build the scene, change any real parameter, and watch
+what actually happens — across physics, chemistry, astronomy, and nine
+other real domains, all from one app.
 
-Built with [Matter.js](https://brm.io/matter-js/) for the physics sandbox
-(gravity, collisions, friction, restitution, constraints), [D3.js](https://d3js.org/)
-for rendering/drag/pan/zoom, the Mathematics charts, and the Particle Physics
-demos, and [Three.js](https://threejs.org/) for the 3D atom viewer and the
-Astronomy solar system. No build step — static HTML/JS loaded via ES modules
-and CDN scripts. Light theme by default, with a dark toggle in the top-right
-corner.
+Brand colors: cyan `#38bdf8`, purple `#8b5cf6`, green `#10b981` (see
+`--cool-1/2/3` in `style.css`).
 
-## Running locally
+## Product philosophy
 
-Static files only (no accounts, no saving worlds/charts):
+- **Accuracy is never a paywall.** Factual correctness, sources/citations,
+  and core educational explanations are free for everyone, permanently —
+  see "Plans" below and every module's "How This Model Works" panel.
+- **Real data, not decoration.** Graphs, telemetry, and "how this works"
+  content are drawn from each simulation's actual live state or actual
+  implementation — this codebase does not fabricate data to make a
+  feature look more interesting than the underlying model supports.
+- **No real money or AI moves without saying so.** Nothing in this repo
+  charges a real card, calls a real AI provider, or sends a transactional
+  email without it being documented here as real. See "What's real vs.
+  architecture only" below.
+
+## Subjects/modules
+
+Physics, Chemistry, Astronomy (Solar System + Rocket Simulator), History,
+Cybersecurity, Particle Physics (abstract D3 demos — see disclaimer
+below), Mathematics, Whiteboard, Economics, Zoology, Sound, and
+Sustainability — one top bar, one home screen.
+
+Each core sandbox (Physics especially) follows the same idea: drag a real
+object onto a canvas, edit its real properties, run a real simulation, see
+a real result — not a slideshow of pre-baked outcomes.
+
+## Plans: Free, Plus, Teacher, and Promo Plus
+
+Entitlements are centralized in `server/entitlements.js` — the one place
+in the app that resolves "what can this account do" from a real source
+record, never a bare `plan === "plus"` string check scattered elsewhere.
+
+**Free** is deliberately generous: every subject, the full core 2D Physics
+sandbox, Explore and most of Learn mode, daily challenges, tutorials,
+quizzes, limited saved worlds (6) and Custom Notebook entries (8), basic
+Live Graphs, and — always, regardless of plan — How This Model Works,
+sources, and every factual explanation in the app.
+
+**Kinetic Plus** adds: unlimited saved worlds/Notebook entries, full
+Compare Runs history, advanced graph overlays + CSV export, Physics 3D,
+Custom Physics Items, Physics world share codes, Advanced mode, and other
+non-essential polish. **No real payment processor is connected yet** — the
+Plans screen has a real checkout flow (plan → monthly/annual billing →
+review, with real illustrative pricing from `server/checkoutConfig.js`),
+but it always ends at an explicit "payments aren't live yet" screen
+instead of an actual charge. Clicking "Notify me" there records real
+interest (`upgrade_interest` in Postgres — plan, billing period, per
+account) so demand isn't lost while a processor isn't wired up.
+
+**Teacher** is a superset of Plus, plus classrooms, rosters, and teacher
+controls (assignments/submissions/progress dashboards are a documented
+limitation below — the classroom join/leave/roster mechanics exist, the
+richer LMS-style layer doesn't yet). Students never need Plus to
+participate in a class.
+
+**Promo Plus** — a 6-digit code (entered via the small blue square in the
+Plans screen's top-right corner) grants every **non-AI** Plus feature:
+Physics 3D, Custom Items, advanced graphs, Compare Runs, world share
+codes, and more. **Promo Plus never includes AI, by design** — this is
+enforced in `resolveEntitlements()` itself (`planSource === "promo_plus"`
+hard-blocks `aiEnabled` regardless of any other flag), not just a UI
+convention. Promo codes are created and managed from the separate
+`~/physics-sim-admin` localhost-only dashboard — never from the live site.
+
+Every plan source (`paid_plus`, `promo_plus`, `teacher`, `admin`, and the
+architecture for a future `classroom_assignment` scoped grant) is tracked
+explicitly, so the app — and a future support conversation — can always
+answer *how* an account got its access, not just *that* it has access.
+
+## Physics 3D (Kinetic Plus)
+
+A separate, intentionally simpler 3D sandbox — balls and boxes, real
+gravity/collisions/friction/restitution via [cannon-es](https://github.com/pmndrs/cannon-es),
+rendered with [Three.js](https://threejs.org/) (OrbitControls for
+orbit/pan/zoom). It's a tab inside Physics mode ("Physics 2D" / "Physics
+3D"), fully isolated from the 2D engine's own state so neither can break
+the other. Free accounts see a locked preview explaining the feature;
+Physics 2D itself loses no capability.
+
+## Custom Physics Items (Kinetic Plus)
+
+A polygon editor (`src/customItems.js`): start from a regular N-gon, drag
+vertices to reshape it, save/name/duplicate/reuse it. The collision shape
+*is* the vertices you drew (`Bodies.fromVertices` in `physics.js`) — never
+a circle/rectangle standing in for a custom picture. Shapes are restricted
+to **simple, convex polygons**: Matter's built-in vertex handling only
+guarantees correct decomposition for convex geometry without also taking
+on a `poly-decomp` dependency, so a concave or self-intersecting shape is
+rejected with a clear reason at edit time, live, rather than silently
+producing broken physics.
+
+## Live Graphs, Experiment Notebook, Compare Runs
+
+- **Live Graphs** (`src/graphs.js`) — a reusable line-graph engine driven
+  by real per-tick simulation state. Wired into Physics 2D (selected
+  object's speed/vertical velocity/kinetic energy), Rocket Simulator
+  (altitude/velocity/fuel), Astronomy (a selected planet's real distance
+  from the Sun and its instantaneous orbital speed — the speed is a live
+  numerical derivative of two real Kepler positions, not a canned number),
+  and Economics's Supply & Demand model (equilibrium price/quantity as you
+  move the curve sliders). Free gets a real rolling window (default 60s);
+  Plus gets full history and CSV export. Other modules can plug into the
+  same engine without rework — not yet done for all of them (see
+  Limitations).
+- **Experiment Notebook** (`src/notebook.js`) — Prediction → Experiment →
+  Observation → Explanation → Save, using the same generic saved-items
+  backend as saved worlds. A "Capture current world" button grabs the
+  *actual* live object array and a real rendered thumbnail (not a
+  placeholder). Free: 8 entries. Plus: unlimited.
+- **Compare Runs** — pick any two Notebook entries and see a side-by-side
+  diff (prediction/observation/conclusion, highlighted where they differ)
+  plus both entries' captured final-state snapshots when present.
+
+## Explore / Learn / Advanced
+
+A real, working preference (`src/experienceLevel.js`), not just marketing
+copy — reuses the onboarding quiz's existing "how much science background
+do you have?" answer as a sensible default instead of asking a second,
+redundant question. **Explore** hides Physics's equations panel by
+default for a lower-friction sandbox; **Learn** shows it; **Advanced** is
+Plus-gated and currently exposes the same already-real Plus tooling
+(Physics 3D, advanced graphs) rather than any invented complexity — the
+product rule here is that nothing gets exposed as "Advanced" unless the
+underlying model actually supports it.
+
+## How This Model Works
+
+A standardized panel (`src/modelInfo.js`) — concept, equation, variables,
+constants, assumptions, simplifications, and sources — **never gated by
+plan**. Currently wired into Physics 2D, Rocket Simulator, Astronomy
+(Kepler's equation), Economics (both Supply & Demand and Game Theory,
+switching content with the active tab), and Sustainability (the actual
+scoring formula from its own code, not a paraphrase), with content
+verified against each module's actual implementation (not
+general-knowledge claims); other modules can adopt the same component
+later (see Limitations). Every per-challenge win condition across every
+module's challenge ladder (`challenges.js`, `rocketSim.js`, etc.) has
+carried its own `explanation`/`source` fields since before this pass —
+`How This Model Works` complements that with a per-simulation view, not a
+per-challenge one.
+
+## Physics world share codes (Kinetic Plus to generate; free to load)
+
+A short, typeable code (displayed like `K7P4-X2`) that loads a specific
+world snapshot — separate from Community Sims (a permanent public
+gallery) and classroom sharing (membership-scoped). Generating a code
+needs Plus (Promo Plus included, since it's non-AI); loading one is open
+to anyone, so a link/code shared publicly still works for a free visitor.
+Loading warns before replacing an unsaved current world, and rejects a
+code saved by a newer schema version than this deployment understands.
+
+## Community, challenges, and classrooms
+
+Community Sims (a public gallery with search/favorite/remix/report),
+per-module challenge ladders (`Simple → Impossible`, each with a real
+verified pass/fail condition), and classrooms (join by 6-character code;
+a teacher can push/pull items to/from students) all predate this pass and
+are described in more detail in the code's own module-level comments
+(`server/db.js`, `src/classroom.js`, `src/challengeTiers.js`).
+
+## Rocket Simulator
+
+A real 2D launch-to-orbit sim under Astronomy mode: inverse-square
+gravity, the actual rocket equation, exponential-atmosphere drag,
+staging, and real orbital mechanics (vis-viva, escape velocity). Moon,
+Venus, and Mars are drawn at their real *current* ephemeris position and
+distance (not a fixed illustrative placement); the dotted line shown is
+the rocket's own live orbit around whichever body it's at, not another
+planet's path. See its own in-app "How This Model Works" panel for the
+full equation/assumptions list.
+
+## Kinetic AI Tutor — architecture only, not connected
+
+**No AI provider is called anywhere in this codebase.** What exists is
+cost-safe architecture for a future integration:
+
+- `server/aiConfig.js` centralizes `AI_MONTHLY_COST_CAP_USD = 3.00` (one
+  constant, not scattered `$3` literals), a model/pricing config left
+  intentionally `"unconfigured"` (no future model's exact
+  availability/pricing can be promised today), a mocked cost estimator
+  that returns `0` until real pricing is set, and `canAffordRequest()` —
+  the check a real integration would run *before* ever sending a request.
+- `server/db.js`'s `ai_usage_periods` table accumulates *estimated* cost
+  per user per calendar month — architecture for accounting, never
+  populated by a real call today.
+- AI access (`aiEnabled`) is a field entirely separate from Plus/plan —
+  see `resolveEntitlements()`. Paid Plus may include AI later; **Promo
+  Plus is hard-blocked from AI regardless of any other flag.**
+- The planned interaction model (once connected): Hint → Bigger Hint →
+  Explain It, Socratic by default, aware of your current
+  simulation/world/challenge — never an unlimited-usage promise.
+
+## What's real vs. architecture only
+
+| Area | Status |
+|---|---|
+| Accounts, sessions, saved worlds/Notebook/Custom Items | Real (Postgres/Neon) |
+| Email (verification codes, feedback, newsletter) | Real (Gmail SMTP — predates this pass) |
+| Promo codes, entitlements, world share codes | Real |
+| Checkout flow (plan/billing-period pick, review, interest capture) | Real UI + real DB row, no charge |
+| Actual payment processor / real charges / subscriptions | **Not implemented** — see `server/checkoutConfig.js` |
+| AI Tutor | **Not implemented** — architecture/cost-cap only, zero API calls |
+
+## Accuracy philosophy
+
+Never fabricate a citation. Where a claim can't be verified against this
+project's own real implementation, it's marked for review rather than
+asserted. Two known-simplified visualizations carry an explicit in-app
+caveat rather than a silent omission: the Particle Physics tab's abstract
+D3 demos are labeled as not being real particle physics, and the Chemistry
+Atom Viewer's Bohr-style fixed-orbit electrons are labeled as a
+simplification (real electrons occupy probability clouds, not fixed
+rings).
+
+## Architecture
+
+No bundler — plain ES modules loaded via `<script type="module">`, plus a
+few CDN scripts (Matter.js, D3, Three.js/OrbitControls) as browser
+globals; `cannon-es` (Physics 3D) is the one dependency imported as a real
+ES module straight from its CDN URL. Server-side: `server/server.js`
+(shared by both the always-on local server and `api/[...path].js`'s
+Vercel serverless entry point) and `server/db.js` (Postgres via `pg`).
+Canonical configuration lives in dedicated files, not scattered constants:
+`server/entitlements.js` (plans/limits), `server/aiConfig.js` (AI cost
+config), `server/checkoutConfig.js` (pricing + the one `connected` flag a
+real payment processor integration would flip), `src/objectTypes.js` (the
+Physics object-type registry),
+`src/challengeTiers.js` (the shared challenge-ladder shape every module's
+`CHALLENGES` array is validated against).
+
+## Setup
+
+```bash
+npm install
+npm test               # runs tests/ — pure-logic checks, no live DB needed
+```
+
+Static files only (no accounts):
 
 ```bash
 python3 -m http.server 5173
 ```
 
-With accounts and saving (sign in, save worlds/math items/cities, classrooms):
-accounts are stored in a real Postgres database (Neon), not a local file, so
-this needs a `DATABASE_URL` — run `npm install` once, then `vercel env pull
-.env.local` to fetch it from your Vercel project, then:
+With accounts (sign in, save worlds/Notebook/Custom Items, promo codes,
+classrooms) — needs a real Postgres `DATABASE_URL`:
 
 ```bash
-node --env-file=.env.local server/server.js
+npm start
 ```
 
-Either way, open http://localhost:5173.
+`npm start` runs `node --env-file=.env.local server/server.js` — always
+use it (or pass `--env-file=.env.local` yourself) rather than running
+`node server/server.js` bare. Without that flag, `GMAIL_USER`/
+`GMAIL_APP_PASSWORD` never get loaded even if they're correctly set in
+`.env.local`, so every email (verification codes, feedback, newsletter)
+silently falls back to writing a local file in `server/outbox/` instead
+of actually sending — nothing errors, it just looks like sending doesn't
+work.
 
-## Home
+Open http://localhost:5173 either way.
 
-The landing screen — click the Kinetic logo from any mode to return to it.
-One card per section, each with a small live-rendered thumbnail representing
-what that section actually looks like.
+### Environment variables
 
-## Physics mode
+| Variable | Purpose |
+|---|---|
+| `DATABASE_URL` | Postgres (Neon) connection string |
+| `GMAIL_USER`, `GMAIL_APP_PASSWORD` | Real email sending (see below) — both required together |
+| `PORT` | Local server port (defaults to 5173) |
 
-Drag objects from the left palette onto the grid; click one to edit its
-position, rotation, size, material, and fixed/dynamic state in the right
-panel. A separate **Physics** panel shows the real formulas and numbers
-driving the simulation for whatever's selected (mass, friction, restitution,
-launch vectors, force falloff...). Press **Space** or **Play** to run the
-simulation — stopping reverts to your blueprint, nothing is lost.
+### Email sending
 
-**Objects:** Ball, Board, Triangle, Ball Bearing (pivot point), Peg, Fan
-(continuous wind), Cannon (catch-and-refire), Spring Pad (one-shot launch),
-Bomb, Button, Magnet, Rope, Wire (button↔bomb/cannon link, can't be
-collided with), Lens & Light Source & Mirror (real ray-traced Light Mode),
-and Portal (teleports anything that touches it to its linked partner, exit
-velocity rotated to match the exit portal's facing). Materials (Wood, Metal,
-Rubber, Ice, Glass, Water) carry real relative density, friction, and
-restitution.
+Real, via Gmail SMTP (`server/newsletter/mailer.js`) — this is the same
+`sendEmail()` used for sign-in verification codes, feedback, *and* the
+monthly newsletter. Without both `GMAIL_USER`/`GMAIL_APP_PASSWORD` set, it
+falls back to writing the HTML to `server/outbox/*.html` instead of
+sending, so nothing breaks if they're unset locally. Setup: enable
+2-Step Verification on the Gmail account, generate an App Password at
+`myaccount.google.com/apppasswords`, set both variables (Vercel: Project
+Settings → Environment Variables; locally: `.env.local`, gitignored).
 
-Open **Challenges** for preset puzzles, each tagged with the concept it
-teaches and verified solvable by direct simulation. Completing one earns
-coins spendable in the Shop.
+## Known limitations
 
-## Chemistry mode
-
-Browse the full 118-element periodic table, inspect a rotatable 3D atom
-model, and combine elements on a mixing bench (each slot has its own
-temperature, so results can render as solid/liquid/gas). Combinations are
-exact — the right elements in the wrong ratio tells you the ratio it
-actually needs. 101 two-element and 20 three-element reactions are curated
-with real stoichiometry and structure; anything else falls through to a
-general bonding-rule engine. Reacting animates the atoms flying together
-and bonding, automatically.
-
-## Astronomy mode
-
-Real Keplerian orbital mechanics — every planet, dwarf planet, and major
-moon's position and axial spin is computed live from actual orbital
-elements for whatever date/time is set, not a canned animation. Scrub the
-±50-year slider or set an exact date, and play back time at anything from
-1 second/sec (real time) to 1 year/sec using the speed buttons — **Space**
-pauses/resumes. Includes a "find the next solar eclipse" challenge using
-real new-moon/node geometry.
-
-## History mode
-
-A horizontal timeline per subject — 15 categories (Nobel Prizes, Physics,
-Chemistry, Astronomy, Inventions, Zoology, Mathematics, Medicine,
-Technology, Earth Science, Computer Science, Geography & Exploration,
-Engineering, Psychology, Economics), 185 entries total. Click a tick to
-read about it; History Challenges send you hunting for a specific one from
-just a hint.
-
-## Cybersecurity mode
-
-A searchable, filterable reference of 48 well-documented malware strains,
-hackers, hacker groups, and breaches — free-text search plus category
-toggles instead of a timeline, since "find the one called X" matters more
-here than "when." Cybersecurity Challenges work the same way as History's.
-
-## Particle Physics mode
-
-Eight real, interactive simulations (Disjoint Graph, Force Lattice,
-Pointer Field, Epidemic Spread, Gravity Wells, Swarm Box, Magnetic Charges,
-Percolation), switchable from their own sub-nav under the main top bar. Drag
-anything you see — Epidemic Spread runs a real SIR model over an actual
-contact network, and Percolation shows the same phase transition that
-governs how fluid seeps through rock.
-
-## Mathematics mode
-
-A graphing calculator plus three data-chart types, one visualization at a
-time:
-
-- **Graph** — type any `y = f(x)` expression (implicit multiplication,
-  standard functions/constants, correct operator precedence — a real
-  expression parser, not `eval`). Drag to pan, scroll to zoom, hover to read
-  exact (x, y) values.
-- **Bar Chart** / **Pie Chart** — a shared labeled-value editor (up to 10
-  points) driving either visualization.
-- **Venn Diagram** — 2-set or 3-set, with editable labels and region counts.
-  The circles are a fixed schematic layout, not proportional-area — an
-  exact proportional Venn diagram doesn't exist in general for 3+ sets, so
-  showing true counts per region is the accurate choice.
-
-## Accounts
-
-Sign in (top-right) to save up to 6 Physics worlds and 6 Mathematics items
-to your account — a "My Worlds" / "My Saved Items" button appears in each
-mode once you're signed in. Requires running `node server/server.js`
-(see "Running locally") — the static-only server can't do accounts, since
-passwords need real server-side hashing.
-
-Security notes: passwords are hashed with Node's built-in `crypto.scrypt`
-(a memory-hard KDF, salted per user) — never stored or logged in plain
-text; sessions are random 256-bit tokens in an httpOnly, `SameSite=Strict`
-cookie; failed logins are rate-limited per email; login failures return a
-generic error so an attacker can't tell whether an email is registered.
-Account data lives in `server/data.json`, which is gitignored and never
-committed.
-
-## Monthly newsletter
-
-Anyone who checks "send me occasional updates" at signup gets added to
-`mailingList` in `server/data.json`. Each issue has a Scientist, an
-Equation, and a Fact of the Day (drawn in rotation from
-`server/newsletter/content.json` — add more entries any time), plus a
-Science News section you write yourself in `server/newsletter/news.txt`
-before the 1st, and an Advertisements section that stays hidden while
-`server/newsletter/ads.txt` is empty.
-
-**Sending is wired up via Gmail SMTP**, using the `kinetic.sims@gmail.com`
-account. This same `sendEmail()` (in `server/newsletter/mailer.js`) is also
-what sends sign-in/sign-up verification codes and feedback notifications
-from the main site — not just the newsletter. Setup, one time:
-
-1. On the `kinetic.sims@gmail.com` account, turn on 2-Step Verification
-   (Google requires this before it'll issue App Passwords):
-   `myaccount.google.com/security` → "2-Step Verification".
-2. Create an App Password: `myaccount.google.com/apppasswords` → app
-   "Mail", any device name (e.g. "Kinetic server") → copy the 16-character
-   password it generates (spaces don't matter, shown as `xxxx xxxx xxxx xxxx`).
-3. Set two environment variables:
-   - `GMAIL_USER` = `kinetic.sims@gmail.com`
-   - `GMAIL_APP_PASSWORD` = the 16-character password from step 2 (not the
-     account's normal login password — that won't work here)
-
-   **On Vercel**: Project Settings → Environment Variables → add both,
-   applied to all environments (Production/Preview/Development) → redeploy.
-   **Locally**: both are already in `.env.local` (gitignored) —
-   `GMAIL_USER` is filled in, paste the App Password into
-   `GMAIL_APP_PASSWORD` once you have it.
-
-Without both vars set, `sendEmail()` silently falls back to the old stub
-behavior (writes to `server/outbox/*.html` locally, logs to the Vercel
-function console when deployed) — so nothing breaks if you skip a step,
-it just won't send for real yet.
-
-Gmail's sending limit is 500 messages/day on a regular account — comfortable
-for verification codes, feedback, and a small mailing list's monthly
-newsletter, but worth knowing before doing anything at real bulk scale
-(an API sender like Resend/SendGrid/Mailgun would be the next step then).
-
-**Test it now** (safe — writes local files only, sends nothing):
-
-```bash
-node server/newsletter/send.js
-```
-
-**Automate it** for the 1st of every month once real sending is wired up.
-Run `crontab -e` and add (using this machine's actual `node` path — check
-with `which node`, since cron's minimal environment won't find one on your
-shell's `$PATH`):
-
-```
-0 9 1 * * cd /Users/taylormarr/physics-sandbox && /Users/taylormarr/.nvm/versions/node/v24.19.0/bin/node server/newsletter/send.js >> server/newsletter-log.txt 2>&1
-```
-
-That runs it at 9am on the 1st of each month. Cron only fires while the
-Mac is on and awake — if this laptop is often asleep or shut on the 1st,
-a `launchd` job (macOS's native scheduler, which can wake the machine for
-a scheduled job under Energy Saver settings) is more reliable than cron
-for exactly that reason; ask if you want that set up instead.
+- **A real payment processor is not connected** — see the table above; the
+  checkout UI and interest-capture are real, the charge at the end isn't.
+- **Live Graphs / How This Model Works** are wired into Physics 2D, Rocket
+  Simulator, Astronomy, Economics, and Sustainability (info panel only)
+  so far; the reusable engines exist for every remaining module (Sound,
+  Chemistry, Epidemic Spread, etc.) to adopt without rework.
+- **Classroom assignments/submissions/progress dashboards** aren't built
+  yet — classrooms (join/leave/roster/push-pull items) exist; the
+  entitlement architecture already supports a future
+  `classroom_assignment`-scoped temporary Plus grant
+  (`withClassroomAssignmentScope()` in `server/entitlements.js`), but
+  nothing calls it yet since the assignment feature itself doesn't exist.
+- **Custom Physics Items are convex-polygon only** — concave shapes need
+  a `poly-decomp` dependency this pass didn't add; rejected clearly at
+  edit time rather than silently mishandled.
+- `~/physics-sim-admin` is a separate, localhost-only, unauthenticated
+  admin dashboard (promo codes, Community Sims curation, donor/classroom
+  email) — deliberately not part of the deployed site.

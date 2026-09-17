@@ -4,10 +4,39 @@
 // repeated Prisoner's Dilemma against a choice of classic strategies, with
 // an editable payoff matrix so "why does everyone still defect" is
 // something you can go verify yourself instead of taking on faith.
+import { openModelInfo } from "./modelInfo.js";
+import { LiveGraph } from "./graphs.js";
+import { getUser } from "./auth.js";
+
 const SUB_MODES = [
   { id: "market", label: "Supply & Demand" },
   { id: "gametheory", label: "Game Theory" },
 ];
+
+const MARKET_MODEL_INFO = {
+  title: "Supply & Demand",
+  concept: "A real linear supply-and-demand market: equilibrium is computed exactly from your own slider values every time you move one, and a per-unit tax genuinely shifts the supply curve (not just a labeled cosmetic change) so its deadweight loss triangle is the real geometric consequence of that shift.",
+  equation: "Demand: P = a − b·Q     Supply: P = c + d·Q     Equilibrium: Q* = (a − c) / (b + d)",
+  variables: [
+    { symbol: "a", meaning: "demand curve's choke price — price at which quantity demanded hits zero" },
+    { symbol: "b", meaning: "demand curve's slope — how fast willingness-to-pay drops as quantity rises" },
+    { symbol: "c", meaning: "supply curve's base cost — minimum price sellers will accept at all" },
+    { symbol: "d", meaning: "supply curve's slope — how fast marginal cost rises as quantity rises" },
+  ],
+  assumptions: ["Both curves are linear over their whole visible range.", "A per-unit tax on sellers is modeled as an upward parallel shift of the supply curve by exactly the tax amount."],
+  limitations: ["Only one good, one market, two straight-line curves — no cross-market effects, income effects, or curve elasticity that changes with price.", "Price ceilings/floors are shown as shortage/surplus at that fixed price, not as a full dynamic model of a rationed market."],
+  sources: ["Introductory microeconomics: linear supply/demand, tax incidence, deadweight loss, price controls"],
+};
+const GAME_THEORY_MODEL_INFO = {
+  title: "Game Theory — Prisoner's Dilemma",
+  concept: "A real repeated Prisoner's Dilemma: your payoff matrix is genuinely editable and genuinely used for scoring, and each built-in opponent strategy actually looks at the real move history to decide its next move — nothing here is scripted to a specific outcome.",
+  variables: [
+    { symbol: "(you, opp)", meaning: "the payoff pair awarded for one round's combination of moves, read directly from your editable matrix" },
+  ],
+  assumptions: ["The opponent's strategy is fixed for the whole session unless you change it or reset.", "Moves are simultaneous each round — the opponent's strategy sees only your PAST moves, never your current one."],
+  limitations: ["Only one opponent strategy at a time, not a tournament across all of them.", "No reputation, communication, or repeated-game discounting beyond the visible round history."],
+  sources: ["Axelrod's iterated Prisoner's Dilemma tournaments (the classic result behind Tit-for-Tat's strength)"],
+};
 
 const STRATEGIES = {
   always_cooperate: "Always Cooperates",
@@ -56,6 +85,12 @@ export class EconomicsMode {
       });
       tabs.appendChild(btn);
     }
+    const infoBtn = document.createElement("button");
+    infoBtn.textContent = "ℹ️ How This Model Works";
+    infoBtn.title = "What this simulation actually models";
+    infoBtn.style.marginLeft = "8px";
+    infoBtn.addEventListener("click", () => openModelInfo(this.sub === "market" ? MARKET_MODEL_INFO : GAME_THEORY_MODEL_INFO));
+    tabs.appendChild(infoBtn);
     this.root.appendChild(tabs);
 
     this.stage = document.createElement("div");
@@ -138,6 +173,21 @@ export class EconomicsMode {
     this.marketReadout = div("econ-readout");
     sidebar.appendChild(this.marketReadout);
 
+    sidebar.appendChild(sectionTitle("Live Graph — equilibrium as you adjust sliders"));
+    const graphCanvas = document.createElement("canvas");
+    graphCanvas.width = 260;
+    graphCanvas.height = 120;
+    sidebar.appendChild(graphCanvas);
+    const historySeconds = getUser()?.entitlements?.limits?.graphHistorySeconds ?? 60;
+    this.marketGraph = new LiveGraph(graphCanvas, {
+      seriesDefs: [
+        { key: "price", label: "Equilibrium price", unit: "$" },
+        { key: "qty", label: "Equilibrium quantity", unit: "units" },
+      ],
+      historySeconds,
+    });
+    this._marketGraphStart = performance.now() / 1000;
+
     wrap.appendChild(sidebar);
     const stageEl = div("econ-market-stage");
     const svg = d3.select(stageEl).append("svg").attr("class", "econ-svg");
@@ -213,6 +263,13 @@ export class EconomicsMode {
 
   _renderMarketReadout(qNoTax, pNoTax, qTax, pBuyer, pSeller) {
     const m = this.market;
+    if (this.marketGraph) {
+      this.marketGraph.push(performance.now() / 1000 - this._marketGraphStart, {
+        price: m.tax > 0 ? pBuyer : pNoTax,
+        qty: m.tax > 0 ? qTax : qNoTax,
+      });
+      this.marketGraph.render();
+    }
     const lines = [];
     if (m.tax > 0) {
       lines.push(`Equilibrium without tax: Q=${qNoTax.toFixed(1)}, P=${pNoTax.toFixed(1)}`);

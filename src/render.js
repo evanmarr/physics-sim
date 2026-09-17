@@ -602,7 +602,7 @@ export class Renderer {
   }
 }
 
-const ROTATABLE = new Set(["board", "triangle", "cannon", "button", "springPad", "fan", "lens", "lightSource", "mirror", "portal"]);
+const ROTATABLE = new Set(["board", "triangle", "cannon", "button", "springPad", "fan", "lens", "lightSource", "mirror", "portal", "customPolygon"]);
 const FLEXIBLE_ENDPOINT_TYPES = new Set(["rope", "wire"]); // two independently-draggable ball-bearing ends
 
 // Cold→hot 4-stop gradient (blue → cyan → yellow → red), same family as a
@@ -630,6 +630,7 @@ function handleDistance(d) {
   if (d.type === "lightSource") return 40;
   if (d.type === "triangle") return (2 * (d.height ?? ((d.size ?? 130) * Math.sqrt(3)) / 2)) / 3 + 26;
   if (d.type === "cannon") return d.height / 2 + 26;
+  if (d.type === "customPolygon") return Math.max(...(d.vertices || [{ x: 0, y: 0 }]).map((p) => Math.hypot(p.x, p.y))) + 26;
   return 40;
 }
 
@@ -713,6 +714,9 @@ function buildShape(g, d) {
       g.append("polygon").attr("class", "spring-arrow").attr("fill", "#1b1e24");
       break;
     case "triangle":
+      g.append("polygon").attr("class", "shape");
+      break;
+    case "customPolygon":
       g.append("polygon").attr("class", "shape");
       break;
     case "cannon": {
@@ -870,6 +874,12 @@ function updateShape(g, d, editable) {
     case "triangle": {
       const pts = trianglePoints(d.width ?? d.size ?? 130, d.height).map((p) => `${p.x},${p.y}`).join(" ");
       g.select(".shape").attr("points", pts);
+      break;
+    }
+    case "customPolygon": {
+      const pts = (d.vertices || []).map((p) => `${p.x},${p.y}`).join(" ");
+      g.select(".shape").attr("points", pts);
+      if (d.color) g.select(".shape").style("fill", d.color);
       break;
     }
     case "shard": {

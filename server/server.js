@@ -25,14 +25,14 @@ import { unsubscribeToken } from "./unsubscribe.js";
 import { sendEmail } from "./newsletter/mailer.js";
 import { wrapEmailHtml } from "./emailTemplate.js";
 import * as db from "./db.js";
+import { resolveEntitlements, publicEntitlements, PLAN_SOURCES } from "./entitlements.js";
+import { AI_MONTHLY_COST_CAP_USD, currentPeriodKey } from "./aiConfig.js";
+import { PLAN_PRICING, PAYMENT_PROCESSOR, annualSavingsPct } from "./checkoutConfig.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, "..");
 const PORT = process.env.PORT ? Number(process.env.PORT) : 5173;
 
-const MAX_WORLDS = 6;
-const MAX_MATH_ITEMS = 6;
-const MAX_CITIES = 3;
 const MAX_BODY_BYTES = 2 * 1024 * 1024; // 2MB — generous for a saved scene, small enough to block abuse
 const MAX_SHARED_ITEM_BYTES = 2 * 1024 * 1024;
 const SESSION_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
@@ -60,6 +60,11 @@ function publicUser(u) {
     // null = hasn't been through the onboarding quiz yet (see
     // src/onboarding.js) — {} means they explicitly skipped it.
     preferences: u.preferences ?? null,
+    // See server/entitlements.js — the one source of truth for plan/AI
+    // access. Never expose raw plan/plan_source/ai_enabled columns
+    // directly; always route through resolveEntitlements first so lazy
+    // expiry and the promo-can't-have-AI rule are actually applied.
+    entitlements: publicEntitlements(resolveEntitlements(u)),
   };
 }
 
@@ -257,8 +262,15 @@ async function listItems(email, kind) {
 }
 
 async function createItem(email, kind, max, name, data, snapshot) {
-  const count = await db.countSavedItems(email, kind);
-  if (count >= max) return { error: `You already have ${max} saved — delete one first.` };
+  // max === null means unlimited (see server/entitlements.js's LIMITS) —
+  // handled explicitly rather than falling into `count >= max`, since
+  // `count >= null` coerces null to 0 and would wrongly block everyone.
+  if (max !== null) {
+    const count = await db.countSavedItems(email, kind);
+    if (count >= max) {
+      return { error: max === 0 ? "This is a Kinetic Plus feature." : `You already have ${max} saved — delete one first.` };
+    }
+  }
   const item = { id: crypto.randomUUID(), name: clampName(name), data, updatedAt: Date.now() };
   await db.insertSavedItem(item.id, email, kind, item.name, item.data, item.updatedAt, snapshot);
   return { item };
@@ -292,6 +304,17 @@ async function generateClassCode() {
   do {
     code = Array.from({ length: 6 }, () => CODE_ALPHABET[crypto.randomInt(CODE_ALPHABET.length)]).join("");
   } while (await db.classCodeExists(code));
+  return code;
+}
+
+// Same unambiguous alphabet/length as classroom codes — displayed to the
+// user with a hyphen after the 4th character (e.g. "K7P4-X2") for
+// readability, but stored/looked-up as the plain 6-character string.
+async function generateWorldShareCode() {
+  let code;
+  do {
+    code = Array.from({ length: 6 }, () => CODE_ALPHABET[crypto.randomInt(CODE_ALPHABET.length)]).join("");
+  } while (await db.worldShareCodeExists(code));
   return code;
 }
 
@@ -409,7 +432,8 @@ async function remixCommunitySim(email, simId) {
   if (!sim) return { error: "Not found" };
   const savedKind = SAVED_ITEM_KIND[sim.kind] || sim.kind;
   const count = await db.countSavedItems(email, savedKind);
-  const max = sim.kind === "worlds" ? MAX_WORLDS : MAX_MATH_ITEMS;
+  const limits = resolveEntitlements(await db.getUser(email)).limits;
+  const max = sim.kind === "worlds" ? limits.maxWorlds : limits.maxMathItems;
   if (count >= max) return { error: `You already have ${max} saved ${sim.kind === "worlds" ? "worlds" : "items"} — delete one first, then remix.` };
   const item = { id: crypto.randomUUID(), name: clampName(`${sim.name} (remix)`), data: sim.data, updatedAt: Date.now() };
   // Propagate the original's lock (if any) onto the remixed copy too — a
@@ -603,6 +627,18 @@ export async function handleApi(req, res, url) {
     return sendJson(res, 200, { sims: await db.listCommunitySims({ featuredOnly: true }) });
   }
 
+  // Loading a Physics world share code is deliberately public (no sign-in
+  // required) — generating one is the Plus-gated half (see the
+  // authenticated /world-share POST route below). Anyone with the code
+  // can load it; it never appears in any listing regardless.
+  if (parts[1] === "world-share" && req.method === "GET") {
+    const code = String(url.searchParams.get("code") || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+    if (!/^[A-Z0-9]{6}$/.test(code)) return sendJson(res, 400, { error: "Enter a 6-character code." });
+    const found = await db.getWorldShareCode(code);
+    if (!found) return sendJson(res, 404, { error: "That code doesn't match a shared world." });
+    return sendJson(res, 200, found);
+  }
+
   // Everything past this point requires a signed-in session.
   const email = await sessionUser(req);
   if (parts[1] === "me") {
@@ -628,6 +664,99 @@ export async function handleApi(req, res, url) {
     if (JSON.stringify(body.preferences).length > 4000) return sendJson(res, 400, { error: "That's too much data." });
     await db.setUserPreferences(email, body.preferences);
     return sendJson(res, 200, publicUser(await db.getUser(email)));
+  }
+
+  // AI Tutor status — architecture only (see server/aiConfig.js). Reflects
+  // real entitlement/usage state, but nothing behind this route ever
+  // calls a real AI provider; aiEnabled is false for every account today
+  // since nothing sets the ai_enabled column true yet.
+  if (parts[1] === "ai-status" && req.method === "GET") {
+    const ents = resolveEntitlements(await db.getUser(email));
+    const periodKey = currentPeriodKey();
+    const usage = await db.getAiUsage(email, periodKey);
+    return sendJson(res, 200, {
+      aiEnabled: ents.aiEnabled,
+      capUsd: AI_MONTHLY_COST_CAP_USD,
+      usedUsd: usage.estimatedCostUsd,
+      remainingUsd: Math.max(0, AI_MONTHLY_COST_CAP_USD - usage.estimatedCostUsd),
+      periodKey,
+    });
+  }
+
+  // Checkout pricing — public (shown on the Plans page before sign-in).
+  // `connected: false` is what the client actually uses to decide whether
+  // to route to a real payment step or the "not live yet" placeholder — see
+  // server/checkoutConfig.js.
+  if (parts[1] === "checkout-config" && req.method === "GET") {
+    return sendJson(res, 200, {
+      pricing: PLAN_PRICING,
+      annualSavingsPct: { plus: annualSavingsPct("plus"), teacher: annualSavingsPct("teacher") },
+      processorConnected: PAYMENT_PROCESSOR.connected,
+    });
+  }
+
+  // Records "reached the end of checkout and would have paid" so real
+  // demand isn't lost while no payment processor is connected (see
+  // server/checkoutConfig.js) — never a charge, just a signal for when
+  // billing goes live. Needs a session since it's tied to a real account.
+  if (parts[1] === "upgrade-interest" && req.method === "POST") {
+    if (!email) return sendJson(res, 401, { error: "Sign in first." });
+    const body = await readJsonBody(req);
+    const plan = String(body.plan || "");
+    const billingPeriod = String(body.billingPeriod || "");
+    if (!PLAN_PRICING[plan]) return sendJson(res, 400, { error: "Unknown plan." });
+    if (!["monthly", "annual"].includes(billingPeriod)) return sendJson(res, 400, { error: "Unknown billing period." });
+    await db.recordUpgradeInterest(email, plan, billingPeriod);
+    return sendJson(res, 200, { ok: true });
+  }
+
+  // Promo code redemption — see src/plans.js for the client side and
+  // ~/physics-sim-admin for where codes are actually created/managed.
+  // Deliberately server-only validation: the valid-code list never reaches
+  // browser JS, and every failure mode returns a generic-enough message
+  // that it doesn't help an attacker distinguish "wrong code" from "right
+  // code, already used by someone else." Throttled the same way
+  // login/admin-code/unlock-code already are, keyed per account, so
+  // brute-forcing the 6-digit space isn't practical from one session.
+  if (parts[1] === "promo-redeem" && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const code = String(body.code || "").trim();
+    if (!/^\d{6}$/.test(code)) return sendJson(res, 400, { error: "Enter a 6-digit code." });
+    const throttleKey = `promo:${email}`;
+    if (await isLockedOut(throttleKey)) return sendJson(res, 429, { error: "Too many attempts. Try again in a few minutes." });
+
+    const promo = await db.getPromoCode(code);
+    if (!promo) {
+      await recordFailedLogin(throttleKey);
+      return sendJson(res, 200, { ok: false, reason: "invalid" });
+    }
+    if (!promo.active) return sendJson(res, 200, { ok: false, reason: "deactivated" });
+    if (promo.expires_at && Date.now() >= Number(promo.expires_at)) return sendJson(res, 200, { ok: false, reason: "expired" });
+    if (await db.hasRedeemedPromoCode(code, email)) return sendJson(res, 200, { ok: false, reason: "already_redeemed" });
+    if (promo.max_redemptions != null && promo.redemption_count >= promo.max_redemptions) {
+      return sendJson(res, 200, { ok: false, reason: "limit_reached" });
+    }
+
+    try {
+      await db.insertPromoRedemption(code, email);
+    } catch (err) {
+      // Unique-violation on (code, user_email) — a race between two
+      // near-simultaneous redemption attempts from the same account lost
+      // to the DB's own constraint; treat it exactly like "already redeemed."
+      if (err?.code === "23505") return sendJson(res, 200, { ok: false, reason: "already_redeemed" });
+      throw err;
+    }
+    await clearFailedLogins(throttleKey);
+
+    // Never downgrade a stronger existing grant (paid Plus, or Teacher) —
+    // the redemption above is still recorded either way, so it doesn't
+    // look like the code failed; it just doesn't need to change anything.
+    const current = resolveEntitlements(await db.getUser(email));
+    if (!current.isPlus) {
+      const expiresAt = promo.access_days ? Date.now() + promo.access_days * 24 * 60 * 60 * 1000 : null;
+      await db.setUserPlan(email, "plus", PLAN_SOURCES.PROMO_PLUS, expiresAt);
+    }
+    return sendJson(res, 200, { ok: true, user: publicUser(await db.getUser(email)) });
   }
 
   if (parts[1] === "classrooms") {
@@ -724,12 +853,36 @@ export async function handleApi(req, res, url) {
     }
   }
 
-  const collectionKey = parts[1] === "worlds" ? "worlds" : parts[1] === "math-items" ? "mathItems" : parts[1] === "cities" ? "cities" : null;
-  const max = collectionKey === "worlds" ? MAX_WORLDS : collectionKey === "cities" ? MAX_CITIES : MAX_MATH_ITEMS;
+  // Generating a Physics world share code — Plus only. Promo Plus counts
+  // (shareCodesEnabled is a normal non-AI Plus limit), matching the
+  // product rule that promo access includes every non-AI Plus feature.
+  if (parts[1] === "world-share" && req.method === "POST") {
+    const limits = resolveEntitlements(await db.getUser(email)).limits;
+    if (!limits.shareCodesEnabled) return sendJson(res, 403, { error: "World sharing codes are a Kinetic Plus feature." });
+    const body = await readJsonBody(req);
+    const kind = String(body.kind || "worlds");
+    if (!body.data || typeof body.data !== "object") return sendJson(res, 400, { error: "Nothing to share." });
+    if (JSON.stringify(body.data).length > MAX_BODY_BYTES) return sendJson(res, 400, { error: "That world is too large to share." });
+    const code = await generateWorldShareCode();
+    await db.createWorldShareCode(code, email, kind, body.data);
+    return sendJson(res, 200, { code });
+  }
+
+  // "custom-items" (Kinetic Plus's saved Custom Physics Items — see
+  // src/customItems.js) reuses this exact same generic saved_items
+  // machinery as worlds/math-items/cities. Free's maxCustomItems is 0 (see
+  // server/entitlements.js), so createItem's own over-limit check is
+  // already the entitlement gate here — no separate 403 branch needed.
+  const collectionKey = parts[1] === "worlds" ? "worlds" : parts[1] === "math-items" ? "mathItems" : parts[1] === "cities" ? "cities"
+    : parts[1] === "custom-items" ? "customItems" : parts[1] === "notebook" ? "notebookEntries" : null;
   if (collectionKey) {
     if (req.method === "GET") return sendJson(res, 200, { items: await listItems(email, collectionKey) });
     if (req.method === "POST") {
       const body = await readJsonBody(req);
+      const limits = resolveEntitlements(await db.getUser(email)).limits;
+      const max = collectionKey === "worlds" ? limits.maxWorlds : collectionKey === "cities" ? limits.maxCities
+        : collectionKey === "customItems" ? limits.maxCustomItems
+        : collectionKey === "notebookEntries" ? limits.notebookEntries : limits.maxMathItems;
       const result = await createItem(email, collectionKey, max, body.name, body.data, body.snapshot);
       return sendJson(res, result.error ? 400 : 200, result.error ? result : { item: result.item });
     }

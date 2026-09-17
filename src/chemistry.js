@@ -81,6 +81,10 @@ export class ChemistryMode {
     title.textContent = "Atom Viewer";
     this.centerPanel.appendChild(title);
 
+    const modelCaveat = div("chem-hint");
+    modelCaveat.textContent = "Simplified Bohr-style model: electrons shown as points orbiting on fixed rings, one per shell. Real electrons don't have a fixed orbit or exact position — they exist in probability clouds (orbitals) that this simplified view doesn't attempt to render.";
+    this.centerPanel.appendChild(modelCaveat);
+
     this.atomViewerEl = div("chem-atom-viewer");
     this.centerPanel.appendChild(this.atomViewerEl);
     this.atomViewer = new AtomViewer(this.atomViewerEl);

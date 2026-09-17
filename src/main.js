@@ -3,6 +3,7 @@ import { renderPalette } from "./palette.js";
 import { renderPanel, renderPhysicsMathPanel } from "./panel.js";
 import { CHALLENGES, findChallenge, ChallengeTracker } from "./challenges.js";
 import { OBJECT_DEFS, createSpec, cloneSpec, makeId } from "./objectTypes.js";
+import { materialOf } from "./materials.js";
 import { PhysicsSim } from "./physics.js";
 import { loadState, saveState, clearSave } from "./storage.js";
 import { snap, WORLD } from "./world.js";
@@ -21,6 +22,14 @@ import { openQuiz } from "./quiz.js";
 import { initAuthUI, openSavesPanel, sendFeedback, fetchCommunitySimById, verifyUnlockCode, escapeHtml, getUser, onAuthChange, fetchFeaturedSims, fetchCommunitySims, fetchMyFavoriteIds, fetchItems } from "./auth.js";
 import { difficultyBadgeHtml } from "./challengeTiers.js";
 import { initClassroomUI } from "./classroom.js";
+import { initPlansUI } from "./plans.js";
+import { Physics3DMode } from "./physics3d.js";
+import { initCustomItemsUI, openCustomItemsHome } from "./customItems.js";
+import { initPhysicsGraphPanel, renderPhysicsGraphPanel, pushGraphSample, resetGraphPanel } from "./physicsGraphPanel.js";
+import { initNotebookUI, openNotebookHome } from "./notebook.js";
+import { initModelInfoUI, openModelInfo } from "./modelInfo.js";
+import { renderExperienceLevelPicker, getExperienceLevel } from "./experienceLevel.js";
+import { initWorldShareUI } from "./worldShare.js";
 import { initDashboardUI, registerShareApplier } from "./dashboard.js";
 import { initOnboarding } from "./onboarding.js";
 import { initTutorial } from "./tutorial.js";
@@ -39,6 +48,7 @@ const state = {
   completedChallenges: new Set(),
   activeChallengeId: null,
   mathPanelOpen: true,
+  graphPanelOpen: false,
   lightMode: false,
   showMagneticField: false,
   grabToolActive: false,
@@ -57,6 +67,7 @@ let tracker = null;
 let clipboard = null; // in-app copy/paste buffer — an array of specs, not the OS clipboard
 let chemistryMode = null;
 let astronomyMode = null;
+let physics3dMode = null; // lazily created on first "Physics 3D" tab click, within Physics mode itself — see initPhysics3DTabs
 let historyMode = null;
 let cybersecurityMode = null;
 let mathematicsMode = null;
@@ -320,6 +331,7 @@ function scheduleSave() {
 function renderPaletteUI() {
   renderPalette(document.getElementById("palette"), state, {
     onDragStart: (type, pointerEvent) => beginPaletteDrag(type, pointerEvent),
+    onOpenCustomItems: () => openCustomItemsHome(),
   });
 }
 
@@ -666,6 +678,33 @@ function wireTopbar(renderer) {
 
   initAuthUI();
   initClassroomUI();
+  initPlansUI();
+  initPhysics3DTabs();
+  initCustomItemsUI(placeCustomPolygon);
+  initPhysicsGraphPanel(document.getElementById("physics-graph-panel"));
+  initNotebookUI(() => (state.mode === "physics" ? { objects: state.objects, gravity: state.gravity } : null));
+  document.getElementById("notebook-btn").addEventListener("click", openNotebookHome);
+  initModelInfoUI();
+  document.getElementById("physics-model-info-btn").addEventListener("click", () => openModelInfo(PHYSICS_MODEL_INFO));
+  // Explore hides the equations panel by default (low-friction sandbox);
+  // Learn/Advanced show it (per the product's Explore/Learn/Advanced
+  // definitions) — a real behavioral difference, not just a label, tied to
+  // a panel that already existed rather than inventing new complexity.
+  state.mathPanelOpen = getExperienceLevel() !== "explore";
+  renderExperienceLevelPicker(document.getElementById("experience-level-picker"), (level) => {
+    state.mathPanelOpen = level !== "explore";
+    renderMathPanelUI();
+  });
+  initWorldShareUI({
+    getWorldData: () => ({ objects: state.objects, gravity: state.gravity }),
+    applyWorldData: (data) => applyPhysicsWorldData(window._renderer, data),
+    hasUnsavedWork: () => state.objects.length > 0,
+  });
+  document.getElementById("graph-panel-btn").addEventListener("click", () => {
+    state.graphPanelOpen = !state.graphPanelOpen;
+    document.getElementById("graph-panel-btn").classList.toggle("active", state.graphPanelOpen);
+    renderPhysicsGraphPanel(state);
+  });
   initDashboardUI();
   initOnboarding();
   initTutorial();
@@ -818,6 +857,11 @@ function togglePlay(renderer) {
     sim = new PhysicsSim(clones, state.gravity, {
       onFrame: (items) => {
         renderer.render(items, { editable: false });
+        if (state.graphPanelOpen && state.selectedId) {
+          const item = items.find((it) => it.id === state.selectedId);
+          const spec = state.objects.find((o) => o.id === state.selectedId);
+          if (item) pushGraphSample(sim.simTime, item, spec ? massEstimate(spec) : null);
+        }
         checkChallengeFrame(items);
         if (state.lightMode) updateLightRays(items);
         if (state.showMagneticField) updateMagneticField(items);
@@ -844,6 +888,7 @@ function resetPhysics(renderer) {
   sim?.stop();
   sim = null;
   state.playing = false;
+  resetGraphPanel();
   const playBtn = document.getElementById("play-btn");
   playBtn.textContent = "▶ Play";
   playBtn.classList.remove("playing");
@@ -885,6 +930,48 @@ function onGrabPointerMove(ev) {
   if (!sim) return;
   const { x, y } = window._renderer.screenToWorld(ev.clientX, ev.clientY);
   sim.setGrabTarget(x, y);
+}
+
+// Real facts about THIS sandbox's actual implementation (src/physics.js) —
+// every figure here is verified against that file, not asserted from
+// general physics knowledge. Where something can't be stated precisely
+// (e.g. the exact real-world equivalence of the gravity slider's "1.0x"),
+// it's left as an adjustable multiplier rather than a specific claimed value.
+const PHYSICS_MODEL_INFO = {
+  title: "Physics 2D Sandbox",
+  concept: "A real 2D rigid-body physics simulation — every object is a genuine Matter.js physics body with real mass, friction, and restitution, not a scripted animation.",
+  equation: "F = ma   (Newton's second law, applied every simulation step)",
+  variables: [
+    { symbol: "F", meaning: "net force on a body", unit: "N (Matter.js internal units)" },
+    { symbol: "m", meaning: "mass, from material density × the object's own area", unit: "kg-equivalent" },
+    { symbol: "a", meaning: "resulting acceleration" },
+  ],
+  constants: [
+    { name: "Wood density / friction / restitution", value: "0.6 / 0.45 / 0.25" },
+    { name: "Metal density / friction / restitution", value: "7.8 / 0.3 / 0.1" },
+    { name: "Rubber density / friction / restitution", value: "1.1 / 0.95 / 0.92" },
+    { name: "Glass density / friction / restitution", value: "2.5 / 0.1 / 0.15" },
+  ],
+  assumptions: [
+    "Gravity is a constant downward acceleration, adjustable as a multiplier (default 1.0x) rather than varying with height.",
+    "Collisions are resolved by Matter.js's iterative constraint solver (10 position, 8 velocity, 6 constraint iterations per step).",
+  ],
+  limitations: [
+    "Two-dimensional only — no motion or rotation out of the plane.",
+    "Uses a fixed, discrete timestep (semi-implicit Euler integration), not a continuous/analytic solution — fast-moving thin objects can occasionally tunnel through each other in one frame.",
+    "Material presets (wood/metal/rubber/glass) are illustrative relative values chosen to feel right, not measured samples of a specific real material.",
+  ],
+  sources: ["Newtonian mechanics (F = ma, momentum, restitution)", "Matter.js — the actual physics engine this sandbox runs on"],
+};
+
+// A relative mass proxy for the Live Graphs panel's kinetic-energy series
+// — material density × on-screen area. Real ratios (denser material really
+// does weigh more here), but not a calibrated real-world kilogram figure,
+// which is why that series is labeled "relative units," not Joules.
+function massEstimate(spec) {
+  const density = materialOf(spec.material).density;
+  const area = spec.radius ? Math.PI * spec.radius * spec.radius : (spec.width || 40) * (spec.height || 40);
+  return density * area;
 }
 
 function handleSimEvent(event) {
@@ -1594,6 +1681,39 @@ function buildHomeThumbnail(el, section) {
   }
 }
 
+// Physics 2D / Physics 3D is a tab switch WITHIN Physics mode, not a
+// separate top-level mode — deliberately isolated from the 2D sandbox's
+// own (much larger, more load-bearing) state machine: swapping tabs only
+// toggles two sibling DOM roots and mounts/unmounts a self-contained
+// Physics3DMode instance, touching none of the 2D engine's own variables.
+function unmountPhysics3D() {
+  physics3dMode?.unmount();
+  document.getElementById("physics3d-root")?.classList.add("hidden");
+  document.getElementById("workspace-body")?.classList.remove("hidden");
+  document.getElementById("physics-toolbar")?.classList.remove("hidden");
+  document.getElementById("physics-dim-2d-btn")?.classList.add("active");
+  document.getElementById("physics-dim-3d-btn")?.classList.remove("active");
+}
+
+function initPhysics3DTabs() {
+  const tab2d = document.getElementById("physics-dim-2d-btn");
+  const tab3d = document.getElementById("physics-dim-3d-btn");
+  const root3d = document.getElementById("physics3d-root");
+  const body2d = document.getElementById("workspace-body");
+  const toolbar2d = document.getElementById("physics-toolbar");
+
+  tab2d.addEventListener("click", unmountPhysics3D);
+  tab3d.addEventListener("click", () => {
+    if (!physics3dMode) physics3dMode = new Physics3DMode(root3d, {});
+    tab3d.classList.add("active");
+    tab2d.classList.remove("active");
+    toolbar2d.classList.add("hidden");
+    body2d.classList.add("hidden");
+    root3d.classList.remove("hidden");
+    physics3dMode.mount();
+  });
+}
+
 function wireModeTabs() {
   window._setMode = (mode) => setMode(mode); // exposed so code outside this closure (the dashboard's "load a shared item" flow) can switch modes too
   const brandHomeBtn = document.getElementById("brand-home-btn");
@@ -1630,6 +1750,8 @@ function wireModeTabs() {
 
   const physicsOnlyControls = [
     document.getElementById("run-controls"),
+    document.getElementById("graph-controls"),
+    document.getElementById("experience-level-picker"),
     document.getElementById("gravity-controls"),
     document.getElementById("speed-controls"),
     document.getElementById("light-mode-toggle-wrap"),
@@ -1644,6 +1766,7 @@ function wireModeTabs() {
   function setMode(mode) {
     if (state.mode === mode) return;
     if (state.mode === "physics" && state.playing) togglePlay(window._renderer);
+    if (state.mode === "physics" && mode !== "physics") unmountPhysics3D();
     state.mode = mode;
     recordRecentlyViewed(mode);
 
@@ -1862,6 +1985,29 @@ function _pasteWithOffset(dx, dy) {
   renderPanelUI();
   scheduleSave();
   return pasted;
+}
+
+// Places a Custom Physics Item (see src/customItems.js) at the center of
+// the current view — the same end state as a palette drag-drop
+// (createSpec → undo snapshot → push → select → re-render → autosave),
+// just without an actual drag gesture, since this is invoked from the
+// Custom Item editor's "Place in world" button instead.
+export function placeCustomPolygon({ vertices, name, material }) {
+  const spec = createSpec("customPolygon");
+  spec.vertices = vertices;
+  spec.customItemName = name || spec.customItemName;
+  if (material) spec.material = material;
+  const rect = document.getElementById("canvas-wrap").getBoundingClientRect();
+  const center = window._renderer.screenToWorld(rect.left + rect.width / 2, rect.top + rect.height / 2);
+  spec.x = snap(center.x);
+  spec.y = snap(center.y);
+  pushUndoNow();
+  state.objects.push(spec);
+  state.selectedIds = new Set([spec.id]);
+  syncSelectedId();
+  renderAll();
+  renderPanelUI();
+  scheduleSave();
 }
 
 function beginPaletteDrag(type, pointerEvent) {

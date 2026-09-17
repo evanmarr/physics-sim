@@ -8,6 +8,19 @@ const SUB_MODES = [
 const MAX_RECORD_MS = 10000;
 const SAMPLE_INTERVAL_MS = 40; // ~25 samples/sec of amplitude history — plenty dense for a 10s strip
 
+// One real equal-tempered octave-plus (C4 through D5) for the tile-assignment
+// piano and the default Tile Pad layout — same A4=440 formula as noteNameFor
+// below, just run in reverse (semitone offset from C4 -> frequency).
+const PIANO_KEYS = [
+  { name: "C4", semis: 0 }, { name: "C#4", semis: 1, black: true }, { name: "D4", semis: 2 },
+  { name: "D#4", semis: 3, black: true }, { name: "E4", semis: 4 }, { name: "F4", semis: 5 },
+  { name: "F#4", semis: 6, black: true }, { name: "G4", semis: 7 }, { name: "G#4", semis: 8, black: true },
+  { name: "A4", semis: 9 }, { name: "A#4", semis: 10, black: true }, { name: "B4", semis: 11 },
+  { name: "C5", semis: 12 }, { name: "C#5", semis: 13, black: true }, { name: "D5", semis: 14 },
+];
+const freqForSemis = (semis) => 440 * Math.pow(2, (semis - 9) / 12);
+const DEFAULT_TILE_KEYS = PIANO_KEYS.filter((k) => !k.black); // the 9 white keys, C4..D5
+
 function div(cls) {
   const el = document.createElement("div");
   if (cls) el.className = cls;
@@ -41,6 +54,12 @@ export class SoundMode {
     this._playbackAudioCtx = null;
     this._mediaRecorder = null;
     this._redrawStaticBars = null;
+    if (this._tileKeydownHandler) {
+      window.removeEventListener("keydown", this._tileKeydownHandler);
+      this._tileKeydownHandler = null;
+    }
+    this._tileOscillators?.forEach((o) => { try { o.stop(); } catch {} });
+    this._tileOscillators = null;
   }
 
   _build() {
@@ -495,6 +514,118 @@ export class SoundMode {
       playBtn.textContent = "■ Stop tone";
     });
 
+    wrap.appendChild(this._buildTilePad(currentWave, () => currentWave));
+
     this.body.appendChild(wrap);
+  }
+
+  // A 3x3 grid of playable tiles ("Tile Pad") — each tile holds one real
+  // note (a Web Audio oscillator + a short attack/decay envelope, not a
+  // toggled drone, so multiple presses in quick succession sound like an
+  // actual instrument instead of needing a manual stop). Tiles are
+  // reassigned by selecting one, then clicking a note on the piano strip
+  // below it. Number keys 1-9 play the matching tile the same way a click
+  // does. getWaveType is a closure so the pad always uses whatever
+  // waveform is currently selected up in the main controls.
+  _buildTilePad(initialWave, getWaveType) {
+    const section = div("sound-tilepad");
+    const heading = document.createElement("p");
+    heading.className = "econ-intro";
+    heading.textContent = "Tile Pad — click a tile to select it, then click a piano key below to assign that note. Press 1-9 on your keyboard to play the tiles.";
+    section.appendChild(heading);
+
+    this._tileNotes = DEFAULT_TILE_KEYS.map((k) => ({ name: k.name, semis: k.semis }));
+    let selectedTile = 0;
+
+    const grid = div("sound-tile-grid");
+    const tileButtons = [];
+    for (let i = 0; i < 9; i++) {
+      const tile = document.createElement("button");
+      tile.className = "sound-tile" + (i === selectedTile ? " selected" : "");
+      tile.innerHTML = `<span class="sound-tile-key">${i + 1}</span><span class="sound-tile-note">${this._tileNotes[i].name}</span>`;
+      tile.addEventListener("click", () => {
+        selectedTile = i;
+        tileButtons.forEach((b, j) => b.classList.toggle("selected", j === i));
+        this._playTileTone(freqForSemis(this._tileNotes[i].semis), getWaveType());
+      });
+      tileButtons.push(tile);
+      grid.appendChild(tile);
+    }
+    section.appendChild(grid);
+
+    const pianoHint = document.createElement("p");
+    pianoHint.className = "sound-hint";
+    pianoHint.textContent = `Assigning tile ${selectedTile + 1} — click a key:`;
+    section.appendChild(pianoHint);
+
+    const piano = div("sound-piano");
+    const whiteKeys = PIANO_KEYS.filter((k) => !k.black);
+    const whiteWidth = 100 / whiteKeys.length;
+    let whiteIndex = -1;
+    for (const k of PIANO_KEYS) {
+      const key = document.createElement("button");
+      if (!k.black) whiteIndex++;
+      key.className = k.black ? "sound-piano-key sound-piano-key-black" : "sound-piano-key sound-piano-key-white";
+      key.title = k.name;
+      if (k.black) {
+        key.style.left = `${whiteIndex * whiteWidth + whiteWidth - (whiteWidth * 0.3)}%`;
+        key.style.width = `${whiteWidth * 0.6}%`;
+      } else {
+        key.style.left = `${whiteIndex * whiteWidth}%`;
+        key.style.width = `${whiteWidth}%`;
+      }
+      key.addEventListener("click", () => {
+        this._tileNotes[selectedTile] = { name: k.name, semis: k.semis };
+        tileButtons[selectedTile].querySelector(".sound-tile-note").textContent = k.name;
+        this._playTileTone(freqForSemis(k.semis), getWaveType());
+      });
+      piano.appendChild(key);
+    }
+    section.appendChild(piano);
+
+    tileButtons.forEach((b, i) => b.addEventListener("click", () => {
+      pianoHint.textContent = `Assigning tile ${i + 1} — click a key:`;
+    }));
+
+    this._tileKeydownHandler = (e) => {
+      if (e.repeat) return;
+      if (document.activeElement && ["INPUT", "TEXTAREA"].includes(document.activeElement.tagName)) return;
+      const n = Number(e.key);
+      if (!Number.isInteger(n) || n < 1 || n > 9) return;
+      const i = n - 1;
+      selectedTile = i;
+      tileButtons.forEach((b, j) => b.classList.toggle("selected", j === i));
+      pianoHint.textContent = `Assigning tile ${i + 1} — click a key:`;
+      this._playTileTone(freqForSemis(this._tileNotes[i].semis), getWaveType());
+    };
+    window.addEventListener("keydown", this._tileKeydownHandler);
+
+    return section;
+  }
+
+  // A short, real percussive-style tone: a genuine OscillatorNode with an
+  // exponential decay envelope (fast attack, ~0.5s decay) rather than the
+  // sustained drone the main Play/Stop button uses — appropriate for a
+  // playable tile you tap repeatedly, not a held note.
+  _playTileTone(freq, waveType) {
+    this._audioCtx ||= new (window.AudioContext || window.webkitAudioContext)();
+    if (this._audioCtx.state === "suspended") this._audioCtx.resume();
+    const ctx = this._audioCtx;
+    const osc = ctx.createOscillator();
+    osc.type = waveType;
+    osc.frequency.value = freq;
+    const gain = ctx.createGain();
+    const now = ctx.currentTime;
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.25, now + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.5);
+    osc.connect(gain).connect(ctx.destination);
+    osc.start(now);
+    osc.stop(now + 0.55);
+    this._tileOscillators ||= [];
+    this._tileOscillators.push(osc);
+    osc.addEventListener("ended", () => {
+      this._tileOscillators = this._tileOscillators?.filter((o) => o !== osc) || null;
+    });
   }
 }

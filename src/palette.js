@@ -5,7 +5,24 @@ export function renderPalette(container, state, handlers) {
   container.innerHTML = "";
 
   for (const [type, def] of Object.entries(OBJECT_DEFS)) {
+    // customPolygon (Kinetic Plus's Custom Physics Items) is deliberately
+    // NOT a draggable palette primitive — dragging one out would always
+    // produce the same default hexagon, and it needs Plus-gating besides.
+    // It's placed instead via the dedicated Custom Items button (see
+    // src/customItems.js), which calls placeCustomPolygon() directly. The
+    // type stays in OBJECT_DEFS so panel.js/physics.js/render.js can still
+    // work with an existing one once placed (editing, saved worlds, etc).
+    if (type === "customPolygon") continue;
     container.appendChild(buildItem(type, def, handlers));
+  }
+
+  if (handlers.onOpenCustomItems) {
+    const btn = document.createElement("button");
+    btn.id = "open-custom-items-btn";
+    btn.className = "palette-custom-items-btn";
+    btn.innerHTML = `⬠ Custom Items <span class="physics-dim-plus-badge">PLUS</span>`;
+    btn.addEventListener("click", handlers.onOpenCustomItems);
+    container.appendChild(btn);
   }
 
   const shortcuts = document.createElement("div");

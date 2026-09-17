@@ -110,6 +110,21 @@ export const verifyUnlockCode = (kind, id, code) =>
 // session email automatically if there is one.
 export const sendFeedback = (message) => api("/feedback", { method: "POST", body: { message } }).catch((e) => ({ error: e.message }));
 
+// Server validates and applies the redemption; on success it returns the
+// full updated user object (setUser here so `entitlements` everywhere else
+// in the app updates immediately, same as savePreferences above) — see
+// src/plans.js for the UI and server/entitlements.js for what this can and
+// can't grant (Promo Plus never includes AI).
+export const redeemPromoCode = (code) =>
+  api("/promo-redeem", { method: "POST", body: { code } })
+    .then((res) => { if (res.ok && res.user) setUser(res.user); return res; })
+    .catch((e) => ({ ok: false, reason: "error", error: e.message }));
+
+// ---------- checkout (no payment processor connected — see server/checkoutConfig.js) ----------
+export const fetchCheckoutConfig = () => api("/checkout-config");
+export const recordUpgradeInterest = (plan, billingPeriod) =>
+  api("/upgrade-interest", { method: "POST", body: { plan, billingPeriod } }).catch((e) => ({ error: e.message }));
+
 // ---------- classrooms ----------
 export const fetchClassrooms = () => api("/classrooms"); // { teaching: [...], joined: [...] }
 export const createClassroom = (name) => api("/classrooms", { method: "POST", body: { name } }).catch((e) => ({ error: e.message }));
@@ -522,8 +537,8 @@ export async function openSavesPanel({ kind, title, itemNoun, serialize, apply, 
 
   function wireCommunityActions(sims) {
     box.querySelectorAll(".community-open").forEach((btn) => btn.addEventListener("click", async () => {
-      const full = await api(`/community-sims/${btn.dataset.id}`).catch(() => null);
-      if (full?.sim) { apply(full.sim.data, { kind: "community-sim", id: full.sim.id, hasLock: !!full.sim.hasLock }); modal.classList.add("hidden"); }
+      const sim = await fetchCommunitySimById(btn.dataset.id).catch(() => null);
+      if (sim) { apply(sim.data, { kind: "community-sim", id: sim.id, hasLock: !!sim.hasLock }); modal.classList.add("hidden"); }
     }));
     box.querySelectorAll(".community-remix").forEach((btn) => btn.addEventListener("click", async () => {
       const result = await remixCommunitySim(btn.dataset.id);

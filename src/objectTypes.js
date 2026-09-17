@@ -11,6 +11,42 @@ export function cannonCatchRadius(spec) {
   return Math.max(spec.width, spec.height) * 0.55;
 }
 
+// A regular N-gon's vertices as {x,y} points, local/centroid-relative
+// coords — same convention render.js's trianglePoints() and physics.js's
+// Bodies.fromVertices calls already use for every other vertex-based
+// shape in this app. The starting shape src/customItems.js's editor lets
+// you drag away from regular into something irregular.
+export function regularPolygon(sides, radius) {
+  const pts = [];
+  for (let i = 0; i < sides; i++) {
+    const a = (i / sides) * Math.PI * 2 - Math.PI / 2;
+    pts.push({ x: Math.round(Math.cos(a) * radius), y: Math.round(Math.sin(a) * radius) });
+  }
+  return pts;
+}
+
+// Real geometry validation for Custom Physics Items (src/customItems.js) —
+// extracted here (rather than left inline in the editor) so it's a plain,
+// testable pure function with no DOM dependency. Checks that turning at
+// every vertex goes the same rotational direction the whole way around,
+// which is true for a convex polygon and false for either a concave one
+// or a self-intersecting one — exactly the two failure modes
+// Bodies.fromVertices (physics.js) can't safely handle without also
+// depending on poly-decomp.
+export function isConvexSimplePolygon(pts) {
+  if (!Array.isArray(pts) || pts.length < 3) return false;
+  let sign = 0;
+  for (let i = 0; i < pts.length; i++) {
+    const a = pts[i], b = pts[(i + 1) % pts.length], c = pts[(i + 2) % pts.length];
+    const cross = (b.x - a.x) * (c.y - b.y) - (b.y - a.y) * (c.x - b.x);
+    if (Math.abs(cross) < 1e-6) continue; // collinear — neither sign, skip
+    const s = cross > 0 ? 1 : -1;
+    if (sign === 0) sign = s;
+    else if (s !== sign) return false;
+  }
+  return sign !== 0;
+}
+
 // Each definition describes: palette label/icon, default spec, and which
 // property-panel fields apply to it. Specs are the *authored blueprint* —
 // physics bodies are (re)built from specs each time Play starts.
@@ -165,6 +201,20 @@ export const OBJECT_DEFS = {
     // rotated. Only visible/active while Light Mode is on.
     defaultSpec: () => ({ type: "lightSource", x: 0, y: 0, rotation: 0, beamWidth: 120, rayCount: 9, material: "metal", radius: 15 }),
     fields: ["beamWidth", "rayCount"],
+  },
+  // Kinetic Plus's Custom Physics Items — a user-authored convex polygon
+  // (see src/customItems.js for the shape editor). `vertices` are LOCAL
+  // coordinates (relative to the object's own x,y, unrotated) so the same
+  // saved shape can be placed and rotated independently of how it was
+  // drawn — physics.js's _createBody passes these straight to Matter's
+  // Bodies.fromVertices, so the collision shape is exactly the visible
+  // shape, never a circle/rectangle standing in for it.
+  customPolygon: {
+    label: "Custom Item",
+    icon: "⬠",
+    category: "custom",
+    defaultSpec: () => ({ type: "customPolygon", x: 0, y: 0, rotation: 0, vertices: regularPolygon(6, 40), material: "wood", fixed: false, color: null, customItemName: "Custom Item" }),
+    fields: ["material", "fixed"],
   },
   mirror: {
     label: "Mirror",

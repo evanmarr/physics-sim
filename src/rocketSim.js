@@ -20,6 +20,7 @@
 
 import { assertFullLadder, difficultyBadgeHtml } from "./challengeTiers.js";
 import { PLANETS, planetPosition, moonOffsetFromEarth, dateToJulianDate } from "./astronomyData.js";
+import { openModelInfo } from "./modelInfo.js";
 
 const G = 6.674e-11; // universal gravitational constant
 const G0 = 9.80665; // standard gravity, used by the rocket equation itself (Isp is defined against this, not local surface gravity)
@@ -239,6 +240,31 @@ const CHALLENGES = [
   },
 ];
 assertFullLadder(CHALLENGES, "Rocket Simulator");
+
+// Content here is drawn directly from this file's own top-of-file
+// implementation comment — the same claims stated there, just structured
+// for the panel, not new/separate claims about the sandbox.
+const ROCKET_MODEL_INFO = {
+  title: "Rocket Simulator",
+  concept: "A real 2D launch-to-orbit simulator: genuine inverse-square gravity, the actual rocket equation for fuel/thrust/mass depletion, exponential-atmosphere drag, staging, and real orbital mechanics — not a projectile-motion toy.",
+  equation: "a = F_thrust/m − GM/r²·r̂ − F_drag/m,     ṁ = F_thrust/(Isp·g₀)",
+  variables: [
+    { symbol: "G", meaning: "universal gravitational constant", unit: "6.674×10⁻¹¹ m³/(kg·s²)" },
+    { symbol: "M, r", meaning: "the body's mass and your current distance from its center" },
+    { symbol: "Isp, g₀", meaning: "specific impulse and standard gravity (9.80665 m/s²) — Isp is always defined against g₀, not local surface gravity" },
+  ],
+  assumptions: [
+    "Pitch is a single fixed angle relative to the rocket's OWN current local vertical for the whole burn — no interactive steering/gravity-turn program.",
+    "Atmosphere density falls off exponentially with altitude (ρ = ρ₀·e^(−h/H)); the Moon has none at all.",
+  ],
+  limitations: [
+    "Numerical integration is semi-implicit Euler with a small fixed timestep, not an adaptive/RK4 integrator.",
+    "Drag uses one constant cross-section/drag-coefficient figure, not a real vehicle's full aerodynamic model.",
+    "Planets use real mass/radius; the rocket itself (stage mass/thrust/Isp) is an illustrative small-launcher figure, not any specific real vehicle's spec sheet.",
+    "Companion body (Moon/Venus/Mars) positions are real current ephemeris (direction AND distance), but this sim only tracks gravity around ONE body at a time — it isn't a full N-body solar system.",
+  ],
+  sources: ["Newton's law of universal gravitation", "The Tsiolkovsky rocket equation", "Vis-viva / specific orbital energy for apoapsis, periapsis, and escape velocity"],
+};
 
 export class RocketSimMode {
   constructor(root, ctx) {
@@ -579,9 +605,11 @@ export class RocketSimMode {
     p.appendChild(this.challengeList);
     this._renderChallengePanel();
 
-    const note = div("chem-hint");
-    note.textContent = "Simplified model: fixed pitch relative to local vertical (no active steering), semi-implicit Euler integration, one constant drag figure — real inverse-square gravity, real rocket-equation fuel burn, and real orbital mechanics throughout. See the code comments for the full list.";
-    p.appendChild(note);
+    const infoBtn = document.createElement("button");
+    infoBtn.textContent = "ℹ️ How This Model Works";
+    infoBtn.style.marginTop = "10px";
+    infoBtn.addEventListener("click", () => openModelInfo(ROCKET_MODEL_INFO));
+    p.appendChild(infoBtn);
   }
 
   _renderChallengePanel() {
@@ -702,6 +730,44 @@ export class RocketSimMode {
       dragging = false;
       this.canvas.style.cursor = "grab";
     });
+
+    // Touch equivalents of the mouse pan/zoom above — one finger drags to
+    // pan (same math as the mouse path), two fingers pinch to zoom (scaling
+    // viewZoom by the change in finger-to-finger distance since the last
+    // move, same clamp range as wheel/buttons).
+    let pinchStartDist = null, pinchStartZoom = null;
+    const touchDist = (t0, t1) => Math.hypot(t1.clientX - t0.clientX, t1.clientY - t0.clientY);
+    this.canvas.addEventListener("touchstart", (e) => {
+      e.preventDefault();
+      if (e.touches.length === 1) {
+        dragging = true;
+        dragStart = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+        panStart = { x: this.viewPanX, y: this.viewPanY };
+      } else if (e.touches.length === 2) {
+        dragging = false;
+        pinchStartDist = touchDist(e.touches[0], e.touches[1]);
+        pinchStartZoom = this.viewZoom;
+      }
+    }, { passive: false });
+    this.canvas.addEventListener("touchmove", (e) => {
+      e.preventDefault();
+      if (e.touches.length === 1 && dragging) {
+        const scale = this._currentScale();
+        this.viewPanX = panStart.x - (e.touches[0].clientX - dragStart.x) / scale;
+        this.viewPanY = panStart.y + (e.touches[0].clientY - dragStart.y) / scale;
+        this._renderCanvas();
+      } else if (e.touches.length === 2 && pinchStartDist) {
+        const factor = touchDist(e.touches[0], e.touches[1]) / pinchStartDist;
+        this.viewZoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, pinchStartZoom * factor));
+        this._renderCanvas();
+      }
+    }, { passive: false });
+    const touchEnd = (e) => {
+      if (e.touches.length === 0) { dragging = false; pinchStartDist = null; }
+      else if (e.touches.length === 1) { pinchStartDist = null; }
+    };
+    this.canvas.addEventListener("touchend", touchEnd);
+    this.canvas.addEventListener("touchcancel", touchEnd);
 
     const zoomRow = div("chem-hint");
     zoomRow.style.display = "flex";

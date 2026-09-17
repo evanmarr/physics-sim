@@ -1,5 +1,34 @@
 import { PLANETS, DWARF_PLANETS, MOONS, planetPosition, moonOffsetFromEarth, moonPhaseAngleRad, dateToJulianDate, julianDateToDate, orbitalPeriodDays, findNextSolarEclipse } from "./astronomyData.js";
 import { RocketSimMode } from "./rocketSim.js";
+import { openModelInfo } from "./modelInfo.js";
+import { LiveGraph } from "./graphs.js";
+import { getUser } from "./auth.js";
+
+const AU_KM = 149597870.7;
+
+const ASTRONOMY_MODEL_INFO = {
+  title: "Solar System",
+  concept: "Every body's position is computed live from its real Keplerian orbital elements for whatever date/time is set — not a canned animation or a fixed orbit path. Scrubbing the date instantly recomputes where everything actually was or will be.",
+  equation: "M = E − e·sin(E)   (Kepler's equation, solved for eccentric anomaly E)",
+  variables: [
+    { symbol: "M", meaning: "mean anomaly — a body's position expressed as elapsed orbital fraction" },
+    { symbol: "E", meaning: "eccentric anomaly — solved numerically (Newton's method) since Kepler's equation has no closed-form solution" },
+    { symbol: "e", meaning: "orbital eccentricity — how far from circular the orbit is (0 = circle)" },
+  ],
+  constants: [
+    { name: "1 AU", value: AU_KM.toLocaleString(), unit: "km" },
+    { name: "Orbital elements", value: "epoch-J2000 semi-major axis, eccentricity, inclination, etc. per body" },
+  ],
+  assumptions: [
+    "Each body orbits the Sun (or, for moons, its host planet) independently — real two-body Kepler mechanics per orbit, not an N-body gravitational simulation, so orbits don't perturb each other.",
+    "Orbital elements are fixed at their J2000 epoch values rather than updated for their own slow real-world precession.",
+  ],
+  limitations: [
+    "Distances between orbits are compressed for visibility (true-to-scale would put Neptune far off-screen) — sizes of the bodies themselves are on one consistent real-world scale.",
+    "No orbital resonances, gravitational perturbation between planets, or relativistic corrections (e.g. Mercury's perihelion precession) are modeled.",
+  ],
+  sources: ["Kepler's laws of planetary motion", "J2000 orbital elements (NASA JPL / standard astronomical almanac values)"],
+};
 
 // One linear world-units-per-km factor applied to EVERY body — Sun
 // included — so relative sizes are all physically accurate at once:
@@ -568,6 +597,14 @@ export class AstronomyMode {
     title.textContent = "Details";
     this.infoPanel.appendChild(title);
 
+    const infoBtn = document.createElement("button");
+    infoBtn.textContent = "ℹ️ How This Model Works";
+    infoBtn.title = "What this simulation actually models";
+    infoBtn.style.width = "100%";
+    infoBtn.style.marginBottom = "8px";
+    infoBtn.addEventListener("click", () => openModelInfo(ASTRONOMY_MODEL_INFO));
+    this.infoPanel.appendChild(infoBtn);
+
     this.dateLabel = div("astro-date-label");
     this.dateLabel.textContent = this.date.toUTCString();
     this.infoPanel.appendChild(this.dateLabel);
@@ -576,10 +613,31 @@ export class AstronomyMode {
       const empty = div("panel-empty");
       empty.textContent = "Click a planet in the view to see details.";
       this.infoPanel.appendChild(empty);
+      this.graph = null;
       return;
     }
     this.infoCard = div("chem-info-card");
     this.infoPanel.appendChild(this.infoCard);
+
+    const graphTitle = div("chem-panel-title");
+    graphTitle.style.marginTop = "10px";
+    graphTitle.textContent = "Live Graph";
+    this.infoPanel.appendChild(graphTitle);
+    const graphCanvas = document.createElement("canvas");
+    graphCanvas.width = 260;
+    graphCanvas.height = 120;
+    this.infoPanel.appendChild(graphCanvas);
+    const historySeconds = getUser()?.entitlements?.limits?.graphHistorySeconds ?? 60;
+    this.graph = new LiveGraph(graphCanvas, {
+      seriesDefs: [
+        { key: "dist", label: "Distance from Sun", unit: "AU" },
+        { key: "speed", label: "Orbital speed", unit: "km/s" },
+      ],
+      historySeconds,
+    });
+    this._graphStart = null;
+    this._prevOrbitSample = null;
+
     this._refreshInfoNumbers();
 
     const focusBtn = document.createElement("button");
@@ -614,13 +672,36 @@ export class AstronomyMode {
     const jd = dateToJulianDate(this.date);
     const pos = planetPosition(p, jd);
     const dist = Math.hypot(pos.x, pos.y, pos.z);
+
+    // Orbital speed isn't returned directly by planetPosition — it's a real
+    // numerical derivative (finite difference between this call and the
+    // last one, both real positions from the same Kepler solver) rather
+    // than a fabricated number, using whatever real jd/position gap the
+    // simulation's own date actually advanced by (works at any playback
+    // speed, including a manual date scrub).
+    let speedKmS = null;
+    if (this._prevOrbitSample && this._prevOrbitSample.jd !== jd) {
+      const dDays = jd - this._prevOrbitSample.jd;
+      const dAu = Math.hypot(pos.x - this._prevOrbitSample.x, pos.y - this._prevOrbitSample.y, pos.z - this._prevOrbitSample.z);
+      const auPerDay = dAu / dDays;
+      speedKmS = Math.abs((auPerDay * AU_KM) / 86400);
+    }
+    this._prevOrbitSample = { jd, x: pos.x, y: pos.y, z: pos.z };
+
     this.infoCard.innerHTML = `
       <div class="chem-info-title">${p.name}</div>
       <div class="chem-info-row"><span>Distance from Sun</span><b>${dist.toFixed(3)} AU</b></div>
       <div class="chem-info-row"><span>Orbital period</span><b>${(orbitalPeriodDays(p) / 365.25).toFixed(2)} years</b></div>
       <div class="chem-info-row"><span>Orbital eccentricity</span><b>${pos.e.toFixed(3)}</b></div>
       <div class="chem-info-row"><span>Radius</span><b>${p.radiusKm.toLocaleString()} km</b></div>
+      ${speedKmS != null ? `<div class="chem-info-row"><span>Orbital speed (instantaneous)</span><b>${speedKmS.toFixed(2)} km/s</b></div>` : ""}
     `;
+
+    if (this.graph) {
+      if (this._graphStart === null) this._graphStart = performance.now() / 1000;
+      this.graph.push(performance.now() / 1000 - this._graphStart, { dist, speed: speedKmS });
+      this.graph.render();
+    }
   }
 
   _setSpeedIndex(i) {
