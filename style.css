@@ -669,7 +669,16 @@ button:disabled { opacity: .4; cursor: default; }
   background: linear-gradient(160deg, var(--panel) 0%, var(--panel-alt) 100%);
   border: 1px solid var(--border);
   position: relative;
-  overflow: visible;
+  /* The base .modal-box's overflow-y:auto is what we actually need here —
+     without it, content taller than the inherited 70vh max-height (easy to
+     hit: three plan cards plus the AI Tutor blurb) was simply clipped with
+     no way to scroll to it, hiding the Close button entirely. overflow-x
+     stays visible so .plan-card-plus's glow (a box-shadow, which any
+     ancestor with overflow other than visible clips) isn't cut off
+     sideways; only a scrolled vertical edge can still clip the glow
+     top/bottom, an acceptable tradeoff next to a genuinely unusable modal. */
+  overflow-y: auto;
+  overflow-x: visible;
 }
 .plans-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .plans-header h2 { margin: 0; }
