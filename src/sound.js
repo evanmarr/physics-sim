@@ -10,18 +10,25 @@ const SUB_MODES = [
 const MAX_RECORD_MS = 10000;
 const SAMPLE_INTERVAL_MS = 40; // ~25 samples/sec of amplitude history — plenty dense for a 10s strip
 
-// One real equal-tempered octave-plus (C4 through D5) for the tile-assignment
-// piano and the default Tile Pad layout — same A4=440 formula as noteNameFor
-// below, just run in reverse (semitone offset from C4 -> frequency).
-const PIANO_KEYS = [
-  { name: "C4", semis: 0 }, { name: "C#4", semis: 1, black: true }, { name: "D4", semis: 2 },
-  { name: "D#4", semis: 3, black: true }, { name: "E4", semis: 4 }, { name: "F4", semis: 5 },
-  { name: "F#4", semis: 6, black: true }, { name: "G4", semis: 7 }, { name: "G#4", semis: 8, black: true },
-  { name: "A4", semis: 9 }, { name: "A#4", semis: 10, black: true }, { name: "B4", semis: 11 },
-  { name: "C5", semis: 12 }, { name: "C#5", semis: 13, black: true }, { name: "D5", semis: 14 },
-];
+// A real equal-tempered piano keyboard for the tile-assignment UI — same
+// A4=440 formula as noteNameFor below, just run in reverse (semitone
+// offset from C4 -> frequency). Three full octaves (C3-C6) gives a real
+// "wider selection" to assign tiles from — generated rather than hardcoded
+// per-note so widening/narrowing the range later is a one-line change.
+const NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+const PIANO_LOW_OCTAVE = 3, PIANO_HIGH_OCTAVE = 6; // inclusive C3..C6
+const PIANO_KEYS = [];
+for (let octave = PIANO_LOW_OCTAVE; octave <= PIANO_HIGH_OCTAVE; octave++) {
+  for (let i = 0; i < 12; i++) {
+    if (octave === PIANO_HIGH_OCTAVE && i > 0) break; // stop at C6, not B6
+    PIANO_KEYS.push({ name: `${NOTE_NAMES[i]}${octave}`, semis: (octave - 4) * 12 + i, black: NOTE_NAMES[i].includes("#") });
+  }
+}
 const freqForSemis = (semis) => 440 * Math.pow(2, (semis - 9) / 12);
-const DEFAULT_TILE_KEYS = PIANO_KEYS.filter((k) => !k.black); // the 9 white keys, C4..D5
+// The default Tile Pad layout stays the same familiar one-octave C4..D5
+// diatonic scale even though the piano itself now spans much wider — nine
+// tiles, nine white keys, easy to reason about before anyone reassigns one.
+const DEFAULT_TILE_KEYS = PIANO_KEYS.filter((k) => !k.black && k.semis >= 0 && k.semis <= 14);
 
 const RECORD_MODEL_INFO = {
   title: "Record & Visualize",
@@ -585,9 +592,15 @@ export class SoundMode {
     pianoHint.textContent = `Assigning tile ${selectedTile + 1} — click a key:`;
     section.appendChild(pianoHint);
 
+    // Fixed pixel-width keys (not percentage-of-container) so widening the
+    // note range doesn't squeeze every key thinner — the scroll wrapper
+    // below lets the now-3-octave range stay scrollable instead, same as a
+    // real physical keyboard wider than its stand.
+    const WHITE_KEY_PX = 26;
+    const pianoScroll = div("sound-piano-scroll");
     const piano = div("sound-piano");
     const whiteKeys = PIANO_KEYS.filter((k) => !k.black);
-    const whiteWidth = 100 / whiteKeys.length;
+    piano.style.width = `${whiteKeys.length * WHITE_KEY_PX}px`;
     let whiteIndex = -1;
     for (const k of PIANO_KEYS) {
       const key = document.createElement("button");
@@ -595,11 +608,11 @@ export class SoundMode {
       key.className = k.black ? "sound-piano-key sound-piano-key-black" : "sound-piano-key sound-piano-key-white";
       key.title = k.name;
       if (k.black) {
-        key.style.left = `${whiteIndex * whiteWidth + whiteWidth - (whiteWidth * 0.3)}%`;
-        key.style.width = `${whiteWidth * 0.6}%`;
+        key.style.left = `${whiteIndex * WHITE_KEY_PX + WHITE_KEY_PX - WHITE_KEY_PX * 0.3}px`;
+        key.style.width = `${WHITE_KEY_PX * 0.6}px`;
       } else {
-        key.style.left = `${whiteIndex * whiteWidth}%`;
-        key.style.width = `${whiteWidth}%`;
+        key.style.left = `${whiteIndex * WHITE_KEY_PX}px`;
+        key.style.width = `${WHITE_KEY_PX}px`;
       }
       key.addEventListener("click", () => {
         this._tileNotes[selectedTile] = { name: k.name, semis: k.semis };
@@ -608,7 +621,8 @@ export class SoundMode {
       });
       piano.appendChild(key);
     }
-    section.appendChild(piano);
+    pianoScroll.appendChild(piano);
+    section.appendChild(pianoScroll);
 
     tileButtons.forEach((b, i) => b.addEventListener("click", () => {
       pianoHint.textContent = `Assigning tile ${i + 1} — click a key:`;

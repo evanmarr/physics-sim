@@ -1590,8 +1590,9 @@ button:disabled { opacity: .4; cursor: default; }
 .sound-tile.selected { border-color: var(--accent); background: rgba(79,140,255,.15); }
 .sound-tile-key { font-size: 11px; color: var(--text-dim); }
 .sound-tile-note { font-size: 16px; font-weight: 600; }
+.sound-piano-scroll { max-width: 100%; overflow-x: auto; border-radius: 6px; }
 .sound-piano {
-  position: relative; height: 90px; max-width: 480px;
+  position: relative; height: 90px;
   background: var(--panel-alt); border: 1px solid var(--border); border-radius: 6px;
 }
 .sound-piano-key { position: absolute; top: 0; cursor: pointer; border-radius: 0 0 4px 4px; }
