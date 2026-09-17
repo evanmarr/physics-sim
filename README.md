@@ -211,8 +211,11 @@ full equation/assumptions list.
 
 ## Kinetic AI Tutor — real chat UI, no AI provider connected
 
-**No AI provider is called anywhere in this codebase.** A real "AI Tutor"
-tab exists inside Physics mode (`src/aiTutor.js`) — a real chat UI with
+**No AI provider is called anywhere in this codebase.** A real "🤖 AI
+Tutor" button lives in the global top bar (`src/aiTutor.js`) — reachable
+from anywhere in the app, not nested inside any one subject mode, and
+Plus-gated the same way Physics 3D and Custom Items are (a locked
+"See Plans" screen for a free account). It opens a real chat UI with
 message history, a disabled-while-waiting input, and a real round trip to
 `POST /api/ai-chat` — but that route never calls a real provider and
 always returns the same honest, static reply: *"Sorry, I encountered a

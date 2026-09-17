@@ -242,6 +242,12 @@ button:disabled { opacity: .4; cursor: default; }
 .field-arrow { fill: #8b5cf6; opacity: 0.7; }
 #file-controls { display: flex; gap: 8px; }
 #account-controls { display: flex; align-items: center; gap: 8px; }
+#ai-tutor-btn {
+  display: flex; align-items: center; gap: 4px; font-size: 12.5px; font-weight: 600;
+  padding: 6px 10px; border-radius: 7px; border: 1px solid color-mix(in srgb, var(--cool-2) 45%, var(--border));
+  background: color-mix(in srgb, var(--cool-2) 12%, transparent); color: var(--text);
+}
+#ai-tutor-btn:hover { background: color-mix(in srgb, var(--cool-2) 22%, transparent); }
 #account-email-wrap { position: relative; }
 #account-email {
   max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -331,10 +337,11 @@ button:disabled { opacity: .4; cursor: default; }
 
 #physics3d-root.physics3d-locked { display: flex; align-items: center; justify-content: center; height: 100%; background: var(--bg); }
 
-.ai-tutor-wrap { display: flex; flex-direction: column; height: 100%; padding: 20px; box-sizing: border-box; max-width: 720px; margin: 0 auto; width: 100%; }
-.ai-tutor-header h2 { margin: 0 0 4px; }
+.ai-tutor-box { width: 560px; max-width: calc(100vw - 32px); box-sizing: border-box; display: flex; flex-direction: column; max-height: 80vh; }
+.ai-tutor-close-x { background: none; border: none; font-size: 20px; line-height: 1; color: var(--text-dim); padding: 0 4px; }
+.ai-tutor-close-x:hover { color: var(--text); }
 .ai-tutor-history {
-  flex: 1; min-height: 0; overflow-y: auto; margin: 12px 0; padding: 12px;
+  min-height: 220px; max-height: 45vh; overflow-y: auto; margin: 12px 0; padding: 12px;
   background: var(--panel-alt); border: 1px solid var(--border); border-radius: 10px;
   display: flex; flex-direction: column; gap: 8px;
 }
