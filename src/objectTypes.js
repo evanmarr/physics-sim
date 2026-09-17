@@ -47,6 +47,45 @@ export function isConvexSimplePolygon(pts) {
   return sign !== 0;
 }
 
+// Whether two segments (a1-a2) and (b1-b2) properly cross — used below to
+// reject a self-intersecting (bowtie) polygon while still allowing a
+// concave one. General cross-product orientation test, not a bounding-box
+// approximation, so it catches a real crossing at any angle.
+function segmentsIntersect(a1, a2, b1, b2) {
+  const d = (p, q, r) => (q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x);
+  const d1 = d(b1, b2, a1), d2 = d(b1, b2, a2), d3 = d(a1, a2, b1), d4 = d(a1, a2, b2);
+  return ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) && ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0));
+}
+
+// A concave (but still simple, non-self-intersecting) polygon is real
+// geometry Bodies.fromVertices (physics.js) CAN safely handle once
+// Matter.Common.setDecomp is wired to poly-decomp (see src/customItems.js)
+// — it decomposes into convex parts automatically. Self-intersection
+// (a bowtie) is the one shape that's never safe: poly-decomp itself
+// requires simple input, so that's still rejected here, just no longer
+// convexity itself.
+export function isSimplePolygon(pts) {
+  if (!Array.isArray(pts) || pts.length < 3) return false;
+  const n = pts.length;
+  for (let i = 0; i < n; i++) {
+    const a1 = pts[i], a2 = pts[(i + 1) % n];
+    for (let j = i + 1; j < n; j++) {
+      if (j === i) continue;
+      const adjacent = j === i || (j + 1) % n === i || (i + 1) % n === j;
+      if (adjacent) continue;
+      const b1 = pts[j], b2 = pts[(j + 1) % n];
+      if (segmentsIntersect(a1, a2, b1, b2)) return false;
+    }
+  }
+  // Degenerate zero-area (every point collinear) is still not a real polygon.
+  let area2 = 0;
+  for (let i = 0; i < n; i++) {
+    const a = pts[i], b = pts[(i + 1) % n];
+    area2 += a.x * b.y - b.x * a.y;
+  }
+  return Math.abs(area2) > 1e-6;
+}
+
 // Each definition describes: palette label/icon, default spec, and which
 // property-panel fields apply to it. Specs are the *authored blueprint* —
 // physics bodies are (re)built from specs each time Play starts.

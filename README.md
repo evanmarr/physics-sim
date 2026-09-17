@@ -94,12 +94,14 @@ Physics 2D itself loses no capability.
 A polygon editor (`src/customItems.js`): start from a regular N-gon, drag
 vertices to reshape it, save/name/duplicate/reuse it. The collision shape
 *is* the vertices you drew (`Bodies.fromVertices` in `physics.js`) — never
-a circle/rectangle standing in for a custom picture. Shapes are restricted
-to **simple, convex polygons**: Matter's built-in vertex handling only
-guarantees correct decomposition for convex geometry without also taking
-on a `poly-decomp` dependency, so a concave or self-intersecting shape is
-rejected with a clear reason at edit time, live, rather than silently
-producing broken physics.
+a circle/rectangle standing in for a custom picture. Shapes may be any
+**simple (non-self-intersecting) polygon, concave included** — Matter's
+built-in vertex handling only guarantees correct decomposition for convex
+geometry on its own, so `poly-decomp` (loaded via CDN, wired in through
+`Matter.Common.setDecomp`) automatically splits a concave shape into
+convex parts before it ever reaches the physics engine. Only a genuinely
+self-intersecting (bowtie) outline is rejected — poly-decomp itself
+requires simple input — with a clear reason shown live at edit time.
 
 ## Live Graphs, Experiment Notebook, Compare Runs
 
@@ -319,9 +321,6 @@ Settings → Environment Variables; locally: `.env.local`, gitignored).
   `classroom_assignment`-scoped temporary Plus grant
   (`withClassroomAssignmentScope()` in `server/entitlements.js`), but
   nothing calls it yet since the assignment feature itself doesn't exist.
-- **Custom Physics Items are convex-polygon only** — concave shapes need
-  a `poly-decomp` dependency this pass didn't add; rejected clearly at
-  edit time rather than silently mishandled.
 - `~/physics-sim-admin` is a separate, localhost-only, unauthenticated
   admin dashboard (promo codes, Community Sims curation, donor/classroom
   email) — deliberately not part of the deployed site.

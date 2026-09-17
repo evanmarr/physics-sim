@@ -5,18 +5,20 @@
 // Bodies.fromVertices. Deliberately NOT a CAD tool: one editable shape at
 // a time, no boolean ops, no curves.
 //
-// Geometry is restricted to simple, CONVEX polygons. This is a real
-// engineering constraint, not laziness: Matter's built-in vertex handling
-// (Bodies.fromVertices with flagInternal=true, used here) only guarantees
-// correct decomposition for convex shapes without also taking on a
-// poly-decomp dependency for concave support. Rejecting a concave/
-// self-intersecting shape at save time (with a clear reason) keeps the
-// visible shape and the collision shape ALWAYS identical — the one
-// invariant this feature must never break.
+// Geometry is restricted to SIMPLE (non-self-intersecting) polygons —
+// concave is allowed. Matter.Common.setDecomp (below) hands Bodies.
+// fromVertices poly-decomp, which decomposes a concave-but-simple polygon
+// into convex parts automatically; poly-decomp itself requires simple
+// input, so a self-intersecting (bowtie) shape is the one case that's
+// still rejected at save time. Keeping the visible shape and the
+// collision shape identical is the one invariant this feature must never
+// break, which is exactly what "simple" (vs. self-intersecting) buys us.
 import { getUser, fetchItems, createItem, updateSavedItem, deleteSavedItem } from "./auth.js";
-import { regularPolygon, isConvexSimplePolygon } from "./objectTypes.js";
+import { regularPolygon, isSimplePolygon } from "./objectTypes.js";
 import { alertPopup, confirmPopup, promptPopup } from "./popup.js";
 import { materialOf, MATERIAL_LIST } from "./materials.js";
+
+if (window.decomp) Matter.Common.setDecomp(window.decomp);
 
 let modal, box, placeFn;
 const EDITOR_SIZE = 280;
@@ -120,7 +122,7 @@ function openEditor(existing) {
 
   box.innerHTML = `
     <h2>${existing ? "Edit" : "Create"} Custom Item</h2>
-    <p class="saves-hint">Drag any point to reshape it. Must stay convex (no caving-in corners) — that's what keeps the collision shape exactly matching what you see.</p>
+    <p class="saves-hint">Drag any point to reshape it — concave shapes (caving-in corners) are fine, just no crossed/self-intersecting edges. That's what keeps the collision shape exactly matching what you see.</p>
     <svg id="ci-svg" width="${EDITOR_SIZE}" height="${EDITOR_SIZE}" style="background:var(--panel-alt);border:1px solid var(--border);border-radius:8px;display:block;margin:0 auto;touch-action:none;"></svg>
     <div id="ci-validity" class="promo-feedback" style="text-align:center"></div>
     <div style="display:flex;gap:8px;justify-content:center;margin-top:8px">
@@ -153,7 +155,7 @@ function openEditor(existing) {
     svg.innerHTML = "";
     const poly = document.createElementNS(svgNS, "polygon");
     poly.setAttribute("points", state.vertices.map((p) => `${p.x},${p.y}`).join(" "));
-    const valid = isConvexSimplePolygon(state.vertices);
+    const valid = isSimplePolygon(state.vertices);
     poly.setAttribute("fill", valid ? "color-mix(in srgb, var(--cool-1) 35%, transparent)" : "color-mix(in srgb, var(--danger) 30%, transparent)");
     poly.setAttribute("stroke", valid ? "var(--cool-1)" : "var(--danger)");
     poly.setAttribute("stroke-width", "2");
@@ -184,7 +186,7 @@ function openEditor(existing) {
     });
 
     const feedback = box.querySelector("#ci-validity");
-    feedback.textContent = valid ? "" : "This shape isn't valid — corners must turn the same way all the way around (convex, no self-crossing).";
+    feedback.textContent = valid ? "" : "This shape isn't valid — edges can't cross each other. Concave (caving-in) corners are fine, just not a self-crossing outline.";
     feedback.className = "promo-feedback " + (valid ? "" : "promo-feedback-err");
     box.querySelector("#ci-save").disabled = !valid;
     box.querySelector("#ci-remove-vertex").disabled = state.vertices.length <= 3;
@@ -215,7 +217,7 @@ function openEditor(existing) {
   });
   box.querySelector("#ci-cancel").addEventListener("click", renderHome);
   box.querySelector("#ci-save").addEventListener("click", async () => {
-    if (!isConvexSimplePolygon(state.vertices)) return;
+    if (!isSimplePolygon(state.vertices)) return;
     let name = state.name;
     if (!name) {
       name = await promptPopup("Name this custom item:", { title: "Save Custom Item", placeholder: "My Shape", maxLength: 60 });
