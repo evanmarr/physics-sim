@@ -691,10 +691,18 @@ function wireTopbar(renderer) {
   // definitions) — a real behavioral difference, not just a label, tied to
   // a panel that already existed rather than inventing new complexity.
   state.mathPanelOpen = getExperienceLevel() !== "explore";
-  renderExperienceLevelPicker(document.getElementById("experience-level-picker"), (level) => {
+  const rerenderExperiencePicker = () => renderExperienceLevelPicker(document.getElementById("experience-level-picker"), (level) => {
     state.mathPanelOpen = level !== "explore";
     renderMathPanelUI();
   });
+  rerenderExperiencePicker();
+  // This panel is built once at startup, not per Physics-mode visit — so
+  // without this, signing into (or out of) a Plus account after the app
+  // has already loaded left the Advanced pill showing its stale locked/
+  // unlocked state until a hard refresh happened to race the auth fetch
+  // correctly. onAuthChange already exists for exactly this kind of thing
+  // (see buildHomeRails's own subscription).
+  onAuthChange(rerenderExperiencePicker);
   initWorldShareUI({
     getWorldData: () => ({ objects: state.objects, gravity: state.gravity }),
     applyWorldData: (data) => applyPhysicsWorldData(window._renderer, data),

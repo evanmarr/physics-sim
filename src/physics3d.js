@@ -44,6 +44,10 @@ export class Physics3DMode {
   unmount() {
     this._running = false;
     if (this._raf) cancelAnimationFrame(this._raf);
+    if (this._keydownHandler) {
+      window.removeEventListener("keydown", this._keydownHandler);
+      this._keydownHandler = null;
+    }
   }
 
   _hasAccess() {
@@ -97,6 +101,24 @@ export class Physics3DMode {
     this._buildPhysicsWorld();
     this._renderPanel();
     this._animate();
+    this._wireKeyboard();
+  }
+
+  // Space to play/pause, R to reset — same keys as Physics 2D. Scoped to
+  // this instance's own window listener (added on build, removed on
+  // unmount) rather than the app's global handler, since that one only
+  // fires while state.mode === "physics" and has no idea Physics 3D exists.
+  _wireKeyboard() {
+    if (this._keydownHandler) window.removeEventListener("keydown", this._keydownHandler);
+    this._keydownHandler = (e) => {
+      if (!this._built) return;
+      const tag = document.activeElement?.tagName;
+      if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return;
+      if (e.metaKey || e.ctrlKey) return;
+      if (e.code === "Space") { e.preventDefault(); this._togglePlay(); }
+      else if (e.code === "KeyR") { e.preventDefault(); this._reset(); }
+    };
+    window.addEventListener("keydown", this._keydownHandler);
   }
 
   _buildToolbar() {
@@ -122,7 +144,7 @@ export class Physics3DMode {
     clearBtn.addEventListener("click", () => this._clear());
 
     const note = div("physics3d-note");
-    note.textContent = "Drag to orbit · scroll to zoom · right-drag to pan";
+    note.textContent = "Drag empty space to orbit · drag an object to move it · scroll to zoom · right-drag or shift+two-finger to pan · space to play/pause · R to reset";
 
     p.appendChild(addBallBtn);
     p.appendChild(addBoxBtn);
@@ -147,6 +169,11 @@ export class Physics3DMode {
     this.controls.dampingFactor = 0.08;
     this.controls.target.set(0, 1.5, 0);
     this.controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN };
+    // Two-finger touch defaults to combined dolly+pan; holding Shift swaps
+    // it to a plain two-finger pan instead (checked fresh at the start of
+    // every two-finger touch, via the capture-phase touchstart below, so it
+    // can change mid-session without rebuilding OrbitControls).
+    this.controls.touches = { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN };
     this.controls.minDistance = 2;
     this.controls.maxDistance = 60;
 
@@ -184,17 +211,65 @@ export class Physics3DMode {
     }
     this._wallSpecs = walls;
 
-    // Raycasting to select an object by click (a short drag is treated as
-    // an orbit gesture, not a selection — same "did the pointer actually
-    // move" distinction astronomy.js's planet-picking uses).
+    // Click-drag on an object moves it (same feel as Physics 2D's object
+    // dragging); click-drag on empty space orbits the camera (OrbitControls'
+    // own job, untouched). Both start on the same pointerdown, so this
+    // listener runs in the CAPTURE phase — before OrbitControls' own
+    // bubble-phase pointerdown handler — specifically so it can set
+    // `controls.enabled = false` before OrbitControls ever begins a rotate
+    // gesture for the same press.
+    this._dragObj = null;
+    this._dragPlane = new THREE.Plane();
+    this._dragOffset = new THREE.Vector3();
     let downPos = null;
-    this.renderer.domElement.addEventListener("pointerdown", (e) => { downPos = { x: e.clientX, y: e.clientY }; });
-    this.renderer.domElement.addEventListener("pointerup", (e) => {
+    this.renderer.domElement.addEventListener("pointerdown", (e) => {
+      downPos = { x: e.clientX, y: e.clientY };
+      const hit = this._hitTestObject(e);
+      if (!hit) return;
+      this.selectedId = hit.id;
+      this._renderPanel();
+      this._dragObj = hit;
+      this.controls.enabled = false;
+      this._dragPlane.setFromNormalAndCoplanarPoint(new THREE.Vector3(0, 1, 0), hit.mesh.position);
+      const hitPoint = this._raycastPlane(e, this._dragPlane);
+      this._dragOffset.copy(hitPoint ? hit.mesh.position.clone().sub(hitPoint) : new THREE.Vector3());
+    }, { capture: true });
+
+    this.renderer.domElement.addEventListener("pointermove", (e) => {
+      if (!this._dragObj) return;
+      const hitPoint = this._raycastPlane(e, this._dragPlane);
+      if (!hitPoint) return;
+      const obj = this._dragObj;
+      const nx = hitPoint.x + this._dragOffset.x, nz = hitPoint.z + this._dragOffset.z;
+      obj.mesh.position.x = nx;
+      obj.mesh.position.z = nz;
+      obj.body.position.x = nx;
+      obj.body.position.z = nz;
+      obj.body.velocity.set(0, 0, 0);
+      obj.body.angularVelocity.set(0, 0, 0);
+    });
+
+    const endDrag = (e) => {
+      if (this._dragObj) {
+        this._dragObj = null;
+        this.controls.enabled = true;
+        downPos = null;
+        return;
+      }
       if (!downPos) return;
       const moved = Math.hypot(e.clientX - downPos.x, e.clientY - downPos.y);
       downPos = null;
       if (moved < 6) this._pick(e);
-    });
+    };
+    this.renderer.domElement.addEventListener("pointerup", endDrag);
+    this.renderer.domElement.addEventListener("pointercancel", endDrag);
+
+    // Shift + two-finger drag pans instead of the default dolly+pan blend —
+    // checked fresh at the start of each two-finger touch (capture phase,
+    // same reasoning as above) so OrbitControls picks it up for that gesture.
+    this.renderer.domElement.addEventListener("touchstart", (e) => {
+      if (e.touches.length === 2) this.controls.touches.TWO = e.shiftKey ? THREE.TOUCH.PAN : THREE.TOUCH.DOLLY_PAN;
+    }, { capture: true, passive: true });
 
     const resize = () => {
       const w = this.viewerWrap.clientWidth || 400, h = this.viewerWrap.clientHeight || 400;
@@ -223,7 +298,9 @@ export class Physics3DMode {
     }
   }
 
-  _pick(e) {
+  // Shared by both click-to-select/deselect (_pick) and the drag-start
+  // check in _buildScene's pointerdown listener.
+  _raycasterFromEvent(e) {
     const rect = this.renderer.domElement.getBoundingClientRect();
     const mouse = new THREE.Vector2(
       ((e.clientX - rect.left) / rect.width) * 2 - 1,
@@ -231,9 +308,27 @@ export class Physics3DMode {
     );
     const raycaster = new THREE.Raycaster();
     raycaster.setFromCamera(mouse, this.camera);
+    return raycaster;
+  }
+
+  _hitTestObject(e) {
+    const raycaster = this._raycasterFromEvent(e);
     const meshes = this.objects.map((o) => o.mesh);
     const hits = raycaster.intersectObjects(meshes);
-    this.selectedId = hits.length ? this.objects.find((o) => o.mesh === hits[0].object)?.id ?? null : null;
+    return hits.length ? this.objects.find((o) => o.mesh === hits[0].object) ?? null : null;
+  }
+
+  // Where the pointer's ray crosses a given horizontal plane — used to drag
+  // an object along the ground-parallel plane it's currently sitting at.
+  _raycastPlane(e, plane) {
+    const raycaster = this._raycasterFromEvent(e);
+    const point = new THREE.Vector3();
+    return raycaster.ray.intersectPlane(plane, point) ? point : null;
+  }
+
+  _pick(e) {
+    const hit = this._hitTestObject(e);
+    this.selectedId = hit?.id ?? null;
     this._renderPanel();
   }
 
@@ -241,7 +336,11 @@ export class Physics3DMode {
     const id = this.nextId++;
     const color = ["#38bdf8", "#8b5cf6", "#10b981", "#f97316", "#f43f5e"][id % 5];
     const spawn = { x: (Math.random() - 0.5) * 4, y: 4 + Math.random() * 2, z: (Math.random() - 0.5) * 4 };
-    const obj = { id, type, color, mass: 1, friction: 0.3, restitution: 0.5, radius: 0.5, size: 0.8, spawn };
+    // Balls only ever get bigger/smaller (radius) — a sphere has no
+    // separate shape to speak of. Boxes get independent X/Y/Z dimensions,
+    // so "shape" (not just size) is real: a 2x0.5x2 box is a genuinely
+    // different shape from a 1x1x1 cube, not just a scaled copy.
+    const obj = { id, type, color, mass: 1, friction: 0.3, restitution: 0.5, radius: 0.5, sizeX: 0.8, sizeY: 0.8, sizeZ: 0.8, spawn };
     this._instantiate(obj);
     this.objects.push(obj);
     this.selectedId = id;
@@ -251,7 +350,12 @@ export class Physics3DMode {
   // Builds (or rebuilds, after a property edit) the actual mesh + body for
   // one object spec. Split out from _addObject so editing mass/friction/etc
   // can just re-instantiate rather than mutating a live cannon body's shape.
-  _instantiate(obj) {
+  // Preserves the object's current position/rotation (if it already has a
+  // mesh) instead of snapping back to its original spawn point — editing a
+  // property mid-fall shouldn't teleport the object.
+  _instantiate(obj, { toSpawn = false } = {}) {
+    const pos = (obj.mesh && !toSpawn) ? obj.mesh.position.clone() : new THREE.Vector3(obj.spawn.x, obj.spawn.y, obj.spawn.z);
+    const quat = (obj.mesh && !toSpawn) ? obj.mesh.quaternion.clone() : new THREE.Quaternion();
     if (obj.mesh) this.scene.remove(obj.mesh);
     if (obj.body) this.world.removeBody(obj.body);
 
@@ -264,14 +368,16 @@ export class Physics3DMode {
       mesh = new THREE.Mesh(new THREE.SphereGeometry(obj.radius, 24, 16), new THREE.MeshStandardMaterial({ color: obj.color }));
       shape = new CANNON.Sphere(obj.radius);
     } else {
-      mesh = new THREE.Mesh(new THREE.BoxGeometry(obj.size, obj.size, obj.size), new THREE.MeshStandardMaterial({ color: obj.color }));
-      shape = new CANNON.Box(new CANNON.Vec3(obj.size / 2, obj.size / 2, obj.size / 2));
+      mesh = new THREE.Mesh(new THREE.BoxGeometry(obj.sizeX, obj.sizeY, obj.sizeZ), new THREE.MeshStandardMaterial({ color: obj.color }));
+      shape = new CANNON.Box(new CANNON.Vec3(obj.sizeX / 2, obj.sizeY / 2, obj.sizeZ / 2));
     }
-    mesh.position.set(obj.spawn.x, obj.spawn.y, obj.spawn.z);
+    mesh.position.copy(pos);
+    mesh.quaternion.copy(quat);
     this.scene.add(mesh);
 
     const body = new CANNON.Body({ mass: obj.mass, shape, material });
-    body.position.set(obj.spawn.x, obj.spawn.y, obj.spawn.z);
+    body.position.set(pos.x, pos.y, pos.z);
+    body.quaternion.set(quat.x, quat.y, quat.z, quat.w);
     this.world.addBody(body);
 
     obj.mesh = mesh;
@@ -286,7 +392,7 @@ export class Physics3DMode {
   _reset() {
     this.playing = false;
     this.playBtn.textContent = "▶ Play";
-    for (const obj of this.objects) this._instantiate(obj);
+    for (const obj of this.objects) this._instantiate(obj, { toSpawn: true });
   }
 
   _clear() {
@@ -316,6 +422,19 @@ export class Physics3DMode {
       p.innerHTML = `<p class="panel-empty">Click an object to edit its properties.</p>`;
       return;
     }
+    // Balls only ever change size (radius) — there's no separate "shape" to
+    // speak of for a sphere. Boxes get independent X/Y/Z dimensions, so
+    // this is real shape editing (a flat slab vs. a tall pillar vs. a cube
+    // are genuinely different shapes), not just a uniform scale slider.
+    const sizeFields = obj.type === "ball"
+      ? `<label>Radius (m)</label>
+         <input type="number" id="p3d-radius" min="0.1" step="0.1" value="${obj.radius}" />`
+      : `<label>Size X / Y / Z (m)</label>
+         <div class="physics3d-size-row">
+           <input type="number" id="p3d-size-x" min="0.1" step="0.1" value="${obj.sizeX}" />
+           <input type="number" id="p3d-size-y" min="0.1" step="0.1" value="${obj.sizeY}" />
+           <input type="number" id="p3d-size-z" min="0.1" step="0.1" value="${obj.sizeZ}" />
+         </div>`;
     p.innerHTML = `
       <h3>${obj.type === "ball" ? "Ball" : "Box"}</h3>
       <label>Fixed (mass = 0)</label>
@@ -326,6 +445,7 @@ export class Physics3DMode {
       <input type="range" id="p3d-friction" min="0" max="1" step="0.05" value="${obj.friction}" />
       <label>Restitution (bounciness)</label>
       <input type="range" id="p3d-restitution" min="0" max="1" step="0.05" value="${obj.restitution}" />
+      ${sizeFields}
       <label>Color</label>
       <input type="color" id="p3d-color" value="${obj.color}" />
       <button id="p3d-delete">Delete</button>
@@ -347,6 +467,20 @@ export class Physics3DMode {
       obj.restitution = Number(e.target.value);
       this._instantiate(obj);
     });
+    if (obj.type === "ball") {
+      p.querySelector("#p3d-radius").addEventListener("input", (e) => {
+        obj.radius = Math.max(0.1, Number(e.target.value) || 0.1);
+        this._instantiate(obj);
+      });
+    } else {
+      const sizeKeys = { "#p3d-size-x": "sizeX", "#p3d-size-y": "sizeY", "#p3d-size-z": "sizeZ" };
+      for (const [sel, key] of Object.entries(sizeKeys)) {
+        p.querySelector(sel).addEventListener("input", (e) => {
+          obj[key] = Math.max(0.1, Number(e.target.value) || 0.1);
+          this._instantiate(obj);
+        });
+      }
+    }
     p.querySelector("#p3d-color").addEventListener("input", (e) => {
       obj.color = e.target.value;
       obj.mesh.material.color.set(obj.color);

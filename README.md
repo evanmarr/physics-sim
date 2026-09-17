@@ -84,10 +84,20 @@ answer *how* an account got its access, not just *that* it has access.
 A separate, intentionally simpler 3D sandbox — balls and boxes, real
 gravity/collisions/friction/restitution via [cannon-es](https://github.com/pmndrs/cannon-es),
 rendered with [Three.js](https://threejs.org/) (OrbitControls for
-orbit/pan/zoom). It's a tab inside Physics mode ("Physics 2D" / "Physics
+orbit/zoom). It's a tab inside Physics mode ("Physics 2D" / "Physics
 3D"), fully isolated from the 2D engine's own state so neither can break
 the other. Free accounts see a locked preview explaining the feature;
 Physics 2D itself loses no capability.
+
+Controls deliberately mirror Physics 2D's own feel rather than a generic
+3D-editor scheme: **drag empty space to orbit, drag an object to move it**
+(along the horizontal plane it's currently sitting at — the same
+live-visual-during-drag, commit-on-release model 2D's object dragging
+uses), **scroll to zoom**, **right-click-drag (mouse) or shift+two-finger
+drag (touch) to pan**, and **Space to play/pause, R to reset** — the same
+two keys Physics 2D uses. Balls resize via radius; boxes get independent
+X/Y/Z dimensions, so a box is real shape editing (a flat slab vs. a tall
+pillar vs. a cube), not just a uniform scale slider.
 
 ## Custom Physics Items (Kinetic Plus)
 
@@ -131,11 +141,15 @@ A real, working preference (`src/experienceLevel.js`), not just marketing
 copy — reuses the onboarding quiz's existing "how much science background
 do you have?" answer as a sensible default instead of asking a second,
 redundant question. **Explore** hides Physics's equations panel by
-default for a lower-friction sandbox; **Learn** shows it; **Advanced** is
-Plus-gated and currently exposes the same already-real Plus tooling
-(Physics 3D, advanced graphs) rather than any invented complexity — the
-product rule here is that nothing gets exposed as "Advanced" unless the
-underlying model actually supports it.
+default for a lower-friction sandbox; **Learn** shows it, with each
+editable variable (density, friction, restitution, etc.) as a slider
+constrained to its real valid range; **Advanced** is Plus-gated and shows
+the exact same variables as a plain number input instead — real
+fine-grained typed control, but still only over that one variable, never
+free-text on the formula itself. Advanced also exposes the other already-
+real Plus tooling (Physics 3D, advanced graphs) — the product rule here is
+that nothing gets exposed as "Advanced" unless the underlying model
+actually supports it.
 
 ## How This Model Works
 

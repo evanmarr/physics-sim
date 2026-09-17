@@ -2,6 +2,7 @@ import { MATERIAL_LIST, materialOf } from "./materials.js";
 import { OBJECT_DEFS } from "./objectTypes.js";
 import { physicsMath } from "./physicsEdu.js";
 import { distanceUnitScale, distanceUnitSuffix, weightUnitScale, weightUnitSuffix } from "./units.js";
+import { getExperienceLevel } from "./experienceLevel.js";
 
 const ROTATABLE = new Set(["board", "triangle", "cannon", "button", "springPad", "fan", "lens", "lightSource", "mirror", "portal"]);
 
@@ -239,17 +240,32 @@ export function renderPhysicsMathPanel(container, spec, onClose, onEdit) {
     if (edit && onEdit) {
       const editRow = document.createElement("div");
       editRow.className = "math-edit-row";
+      // Learn keeps slider-only editing (drag a value within its real
+      // range, can't type something the model doesn't expect). Advanced
+      // swaps the SAME variable for a plain number input — real
+      // fine-grained control, but still only over this one variable, never
+      // free-text on the formula itself.
+      const advanced = getExperienceLevel() === "advanced";
       const input = document.createElement("input");
-      input.type = "range";
+      input.type = advanced ? "number" : "range";
       input.min = edit.min; input.max = edit.max; input.step = edit.step;
       input.value = edit.value;
+      if (advanced) input.className = "math-edit-input";
       const valSpan = document.createElement("span");
       valSpan.className = "math-edit-value";
-      valSpan.textContent = Math.round(edit.value * 100) / 100;
-      input.addEventListener("input", () => {
-        valSpan.textContent = Math.round(parseFloat(input.value) * 100) / 100;
-        onEdit(edit.key, parseFloat(input.value));
-      });
+      if (!advanced) valSpan.textContent = Math.round(edit.value * 100) / 100;
+      const commit = () => {
+        const clamped = Math.min(edit.max, Math.max(edit.min, parseFloat(input.value) || 0));
+        input.value = clamped;
+        if (!advanced) valSpan.textContent = Math.round(clamped * 100) / 100;
+        onEdit(edit.key, clamped);
+      };
+      // A range slider can't produce an out-of-bounds value, so it commits
+      // live on every "input" event same as before. A typed number CAN, so
+      // it only clamps/commits on "change" (blur or Enter) — clamping every
+      // keystroke would otherwise snap "125" back to "100" mid-type before
+      // you finish typing it.
+      input.addEventListener(advanced ? "change" : "input", commit);
       const resetBtn = document.createElement("button");
       resetBtn.className = "math-edit-reset";
       resetBtn.textContent = "↺";
@@ -261,7 +277,7 @@ export function renderPhysicsMathPanel(container, spec, onClose, onEdit) {
       resetBtn.title = edit.resetValue !== undefined ? "Reset to default" : "Reset to material default";
       resetBtn.addEventListener("click", () => onEdit(edit.key, edit.resetValue));
       editRow.appendChild(input);
-      editRow.appendChild(valSpan);
+      if (!advanced) editRow.appendChild(valSpan);
       editRow.appendChild(resetBtn);
       row.appendChild(editRow);
     }
