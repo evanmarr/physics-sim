@@ -308,7 +308,20 @@ button:disabled { opacity: .4; cursor: default; }
   position: absolute; right: 16px; top: 56px; width: 220px;
   background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px;
   box-shadow: 0 8px 24px -8px rgba(0,0,0,.4);
+  max-height: calc(100% - 72px); overflow-y: auto; box-sizing: border-box;
 }
+/* The floating absolute-positioned panel above overlaps the toolbar and
+   the 3D view itself on a narrow phone screen — there's no room beside
+   the viewport for it to float over without covering something. On
+   mobile it drops into the normal document flow instead, as a full-width
+   panel stacked below the 3D view (toolbar -> 3D view -> panel), same
+   idea as Physics 2D's own mobile stacking. */
+:root[data-device="mobile"] .physics3d-panel {
+  position: static; width: 100%; max-height: none; border-radius: 0;
+  border-left: none; border-right: none; box-shadow: none;
+}
+:root[data-device="mobile"] .physics3d-viewer { min-height: 45vh; flex: 1 1 45vh; }
+:root[data-device="mobile"] .physics3d-wrap { overflow-y: auto; }
 .physics3d-panel h3 { margin: 0 0 8px; font-size: 13px; }
 .physics3d-panel label { display: block; font-size: 11px; color: var(--text-dim); margin: 8px 0 3px; }
 .physics3d-panel input[type="number"], .physics3d-panel input[type="range"] { width: 100%; }
@@ -647,7 +660,11 @@ button:disabled { opacity: .4; cursor: default; }
 .about-placeholder-note { font-size: 12px; font-style: italic; color: var(--danger); margin: 0 0 6px; }
 .about-actions { display: flex; gap: 8px; margin-top: 4px; }
 
-.classroom-box { width: 460px; }
+/* Shared by Classroom, Custom Items, Notebook, How This Model Works, and
+   Dashboard (see index.html) — a fixed width with no responsive cap meant
+   every one of these five modals overflowed the viewport on a phone-width
+   screen, same class of bug .plans-box already had to work around. */
+.classroom-box { width: 460px; max-width: calc(100vw - 32px); box-sizing: border-box; }
 .classroom-box h3 { margin: 18px 0 8px; font-size: 13px; }
 .classroom-row {
   display: flex; align-items: center; gap: 10px; padding: 10px;
