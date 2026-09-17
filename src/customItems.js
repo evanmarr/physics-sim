@@ -35,7 +35,7 @@ export function openCustomItemsHome() {
   if (!user) { document.getElementById("account-btn").click(); return; }
   if (!user.entitlements?.limits?.customItemsEnabled) {
     box.innerHTML = `
-      <h2>Custom Physics Items</h2>
+      <h2>Custom Physics Items <span class="plus-badge">PLUS</span></h2>
       <p class="panel-empty">A Kinetic Plus feature — build your own polygon-shaped physics object, vertex by vertex, with real collision geometry matching exactly what you draw.</p>
       <button id="ci-see-plans" class="primary">See Plans</button>
       <button id="ci-close">Close</button>

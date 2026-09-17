@@ -39,7 +39,7 @@ export function renderPhysicsGraphPanel(state) {
       <div class="chem-panel-title">Live Graphs</div>
       <canvas id="physics-graph-canvas" width="260" height="150"></canvas>
       <p class="saves-hint" id="physics-graph-hint"></p>
-      <button id="physics-graph-export">Export data (.csv) — Plus</button>
+      <button id="physics-graph-export">Export data (.csv) <span class="plus-badge">PLUS</span></button>
     `;
     const canvas = panelEl.querySelector("#physics-graph-canvas");
     graph = new LiveGraph(canvas, { seriesDefs: SERIES, historySeconds });
@@ -49,9 +49,9 @@ export function renderPhysicsGraphPanel(state) {
   graph.setHistorySeconds(historySeconds);
   const hint = panelEl.querySelector("#physics-graph-hint");
   if (hint) {
-    hint.textContent = Number.isFinite(historySeconds)
-      ? `Free: last ${historySeconds}s shown. Kinetic Plus keeps the full run and lets you export it.`
-      : "Full run history (Kinetic Plus).";
+    hint.innerHTML = Number.isFinite(historySeconds)
+      ? `Free: last ${historySeconds}s shown. <span class="plus-badge">PLUS</span> keeps the full run and lets you export it.`
+      : 'Full run history <span class="plus-badge">PLUS</span>';
   }
   const exportBtn = panelEl.querySelector("#physics-graph-export");
   if (exportBtn) exportBtn.disabled = !entitlements?.isPlus;

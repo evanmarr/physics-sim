@@ -45,7 +45,7 @@ async function renderHome() {
   const cap = limits?.notebookEntries;
   box.innerHTML = `
     <h2>Experiment Notebook</h2>
-    <p class="saves-hint">Prediction → Experiment → Observation → Explanation. ${cap != null ? `Free: ${items.length}/${cap} entries used.` : "Kinetic Plus: unlimited entries."}</p>
+    <p class="saves-hint">Prediction → Experiment → Observation → Explanation. ${cap != null ? `Free: ${items.length}/${cap} entries used.` : 'Unlimited entries <span class="plus-badge">PLUS</span>'}</p>
     <div style="display:flex;gap:8px;margin-bottom:10px">
       <button id="nb-new" class="primary">+ New Entry</button>
       <button id="nb-compare-toggle">${compareMode ? "Cancel compare" : "Compare two entries"}</button>
