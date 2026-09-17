@@ -1,6 +1,8 @@
 // Real audio, not a canned waveform image: a live AnalyserNode drives the
 // waveform canvas straight from your microphone or from an oscillator this
 // mode builds itself — same Web Audio API a DAW uses under the hood.
+import { openModelInfo } from "./modelInfo.js";
+
 const SUB_MODES = [
   { id: "record", label: "Record & Visualize" },
   { id: "make", label: "Make Your Own Sound" },
@@ -20,6 +22,25 @@ const PIANO_KEYS = [
 ];
 const freqForSemis = (semis) => 440 * Math.pow(2, (semis - 9) / 12);
 const DEFAULT_TILE_KEYS = PIANO_KEYS.filter((k) => !k.black); // the 9 white keys, C4..D5
+
+const RECORD_MODEL_INFO = {
+  title: "Record & Visualize",
+  concept: "The waveform you see is drawn live from a real AnalyserNode reading either your actual microphone input or an oscillator this mode builds itself — the same Web Audio API a DAW uses, not a decorative animation standing in for sound.",
+  variables: [{ symbol: "amplitude", meaning: "the raw waveform sample value at each instant, read via getByteTimeDomainData" }],
+  assumptions: ["The recorded strip samples amplitude roughly 25 times/second — dense enough to show real shape over a 10-second window without keeping every raw audio sample in memory."],
+  limitations: ["No frequency-domain (spectrum) view — only the time-domain waveform shape is shown, not which frequencies make it up."],
+  sources: ["Web Audio API — AnalyserNode, MediaStream microphone input"],
+};
+const MAKE_MODEL_INFO = {
+  title: "Make Your Own Sound",
+  concept: "A real OscillatorNode generates every tone here live. Waveform shape is the actual signal driving the speaker, not a picture of one: a sine wave really is a single pure frequency, while square/sawtooth/triangle are genuinely mixtures of many harmonic frequencies layered together — which is the real reason they sound \"buzzier\" than a sine at the same pitch. The Tile Pad's frequencies use the same real equal-tempered formula as the frequency slider's note readout.",
+  equation: "f(n) = 440 · 2^(n/12)   (equal temperament: frequency of the note n semitones from A4)",
+  variables: [{ symbol: "n", meaning: "semitone distance from A4 (440 Hz) — negative below A4, positive above" }],
+  constants: [{ name: "A4 reference pitch", value: 440, unit: "Hz" }],
+  assumptions: ["12-tone equal temperament (the standard modern tuning) — each semitone is exactly the 12th root of 2 apart in frequency, not a just-intonation ratio."],
+  limitations: ["Tile Pad notes use a short fixed attack/decay envelope (~0.5s) rather than sustaining for as long as a key is held, since it's built for quick repeated taps rather than a held-note instrument."],
+  sources: ["Web Audio API — OscillatorNode, GainNode envelopes", "12-tone equal temperament (standard Western musical tuning)"],
+};
 
 function div(cls) {
   const el = document.createElement("div");
@@ -79,6 +100,12 @@ export class SoundMode {
       btn.addEventListener("click", () => { this._teardown(); this.sub = m.id; this._renderSub(); });
       tabs.appendChild(btn);
     }
+    const infoBtn = document.createElement("button");
+    infoBtn.textContent = "ℹ️ How This Model Works";
+    infoBtn.title = "What this simulation actually models";
+    infoBtn.style.marginLeft = "8px";
+    infoBtn.addEventListener("click", () => openModelInfo(this.sub === "record" ? RECORD_MODEL_INFO : MAKE_MODEL_INFO));
+    tabs.appendChild(infoBtn);
     this.root.appendChild(tabs);
 
     this.body = div("econ-body");

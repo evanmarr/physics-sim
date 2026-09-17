@@ -141,8 +141,11 @@ A standardized panel (`src/modelInfo.js`) — concept, equation, variables,
 constants, assumptions, simplifications, and sources — **never gated by
 plan**. Currently wired into Physics 2D, Rocket Simulator, Astronomy
 (Kepler's equation), Economics (both Supply & Demand and Game Theory,
-switching content with the active tab), and Sustainability (the actual
-scoring formula from its own code, not a paraphrase), with content
+switching content with the active tab), Sustainability (the actual
+scoring formula from its own code, not a paraphrase), Chemistry (the real
+121-reaction curated table plus the general bonding-rule engine it falls
+back to), and Sound (switching between Record & Visualize and Make Your
+Own Sound, including the equal-temperament formula), with content
 verified against each module's actual implementation (not
 general-knowledge claims); other modules can adopt the same component
 later (see Limitations). Every per-challenge win condition across every
@@ -294,10 +297,12 @@ Settings → Environment Variables; locally: `.env.local`, gitignored).
 
 - **A real payment processor is not connected** — see the table above; the
   checkout UI and interest-capture are real, the charge at the end isn't.
-- **Live Graphs / How This Model Works** are wired into Physics 2D, Rocket
-  Simulator, Astronomy, Economics, and Sustainability (info panel only)
-  so far; the reusable engines exist for every remaining module (Sound,
-  Chemistry, Epidemic Spread, etc.) to adopt without rework.
+- **Live Graphs** are wired into Physics 2D, Rocket Simulator, Astronomy,
+  and Economics; **How This Model Works** additionally covers
+  Sustainability, Chemistry, and Sound (info panel only, no time-series
+  graph — those modules don't have a natural one). The reusable engines
+  exist for every remaining module (Epidemic Spread, History,
+  Cybersecurity, etc.) to adopt without rework.
 - **Classroom assignments/submissions/progress dashboards** aren't built
   yet — classrooms (join/leave/roster/push-pull items) exist; the
   entitlement architecture already supports a future

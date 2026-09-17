@@ -1,6 +1,24 @@
 import { ELEMENTS, CATEGORY_COLORS, CATEGORY_LABELS, elementBySymbol, evaluateMix, meltingBoiling, phaseAt, ROOM_TEMP_K } from "./chemistryData.js";
 import { AtomViewer } from "./atomViewer.js";
 import { CHEMISTRY_CHALLENGES } from "./chemistryChallenges.js";
+import { openModelInfo } from "./modelInfo.js";
+
+const CHEMISTRY_MODEL_INFO = {
+  title: "Mixing Bench Reactions",
+  concept: "121 specific reactions (101 two-element, 20 three-element) are curated with real stoichiometry, structure, and energy release. Any other pair falls through to a general bonding-rule engine that classifies the pair (metal+metal, metal+nonmetal, nonmetal+nonmetal, noble gas, same element) and predicts a plausible formula from real oxidation states — it's a real prediction, not a guess dressed up, but it's explicitly labeled as unverified for that specific pair since it isn't one of the 121 curated reactions.",
+  variables: [
+    { symbol: "oxidation state", meaning: "an element's typical ionic charge when bonding — used to charge-balance a predicted ionic formula" },
+  ],
+  assumptions: [
+    "Two nonmetals with no curated formula are assumed to bond 1:1 (the simplest covalent case) — not the correct ratio for every real nonmetal pair.",
+    "A metal + nonmetal pair with no curated formula picks the metal's first positive oxidation state and the nonmetal's first negative one to charge-balance a predicted formula.",
+  ],
+  limitations: [
+    "Only the 121 curated reactions have a verified real-world formula, structure, and energy classification — everything else is a rule-based prediction, clearly labeled as such in the result.",
+    "No reaction kinetics, equilibrium, or multi-step mechanisms — a reaction either 'happens' (with a formula) or doesn't, instantly.",
+  ],
+  sources: ["Standard ionic/covalent bonding rules and periodic-table oxidation states", "Curated reaction data verified against real chemistry (water, salt, rust, combustion products, etc.)"],
+};
 
 const WATER_SYMBOL = "H2O"; // a synthetic pseudo-element the mixing bench can use
 const MIN_SLOTS = 4;
@@ -100,9 +118,17 @@ export class ChemistryMode {
   }
 
   _buildMixPanel() {
-    const title = div("chem-panel-title");
+    const titleRow = div("chem-panel-title");
+    titleRow.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:8px";
+    const title = document.createElement("span");
     title.textContent = "Mixing Bench";
-    this.mixPanel.appendChild(title);
+    titleRow.appendChild(title);
+    const infoBtn = document.createElement("button");
+    infoBtn.textContent = "ℹ️ How This Model Works";
+    infoBtn.title = "What this simulation actually models";
+    infoBtn.addEventListener("click", () => openModelInfo(CHEMISTRY_MODEL_INFO));
+    titleRow.appendChild(infoBtn);
+    this.mixPanel.appendChild(titleRow);
 
     const hint = div("chem-hint");
     hint.innerHTML = "Combinations are exact: water is H₂O only with a 2:1 ratio of hydrogen to oxygen, not any two elements.<br>Each slot has its own temperature, which sets whether that element is solid, liquid, or gas.";
