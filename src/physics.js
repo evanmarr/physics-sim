@@ -537,6 +537,15 @@ export class PhysicsSim {
         holeRatio: spec.holeRatio,
         fixed: !!spec.fixed,
         power: spec.power, range: spec.range,
+        // A customPolygon has no width/height/radius — its whole shape IS
+        // this vertex list. collectRenderItems() below reads it back onto
+        // every simulated frame's item; without this, a placed custom item
+        // rendered fine in the editor (using the spec directly) but went
+        // completely invisible (an empty polygon, `points=""`) the moment
+        // Play built its per-frame items from the live body instead — it
+        // kept colliding correctly the whole time since the physics body
+        // itself was never missing anything, only its render info was.
+        vertices: spec.type === "customPolygon" ? spec.vertices : undefined,
         // A wire has no explicit length field — like rope, it's the live
         // distance between its two endpoints, needed here so
         // collectRenderItems can reconstruct x2/y2 from the body's actual
@@ -1239,6 +1248,7 @@ export class PhysicsSim {
         width: r.width, height: r.height, radius: r.radius, shape: r.shape,
         material: r.material,
         holeRatio: r.holeRatio,
+        vertices: r.vertices,
         fixed: body.isStatic,
         transient: !!body.plugin.transient,
         opacity,
