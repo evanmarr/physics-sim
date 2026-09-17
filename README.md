@@ -209,10 +209,19 @@ the rocket's own live orbit around whichever body it's at, not another
 planet's path. See its own in-app "How This Model Works" panel for the
 full equation/assumptions list.
 
-## Kinetic AI Tutor — architecture only, not connected
+## Kinetic AI Tutor — real chat UI, no AI provider connected
 
-**No AI provider is called anywhere in this codebase.** What exists is
-cost-safe architecture for a future integration:
+**No AI provider is called anywhere in this codebase.** A real "AI Tutor"
+tab exists inside Physics mode (`src/aiTutor.js`) — a real chat UI with
+message history, a disabled-while-waiting input, and a real round trip to
+`POST /api/ai-chat` — but that route never calls a real provider and
+always returns the same honest, static reply: *"Sorry, I encountered a
+problem. Please try again later, or contact kinetic.sims@gmail.com"*.
+This is a stub, not a mock of a working feature — the chat mechanics are
+already built and tested for whenever a real provider is wired in; that
+day's change is to that one server route, not a client rewrite.
+
+Cost-safe architecture for that future integration already exists too:
 
 - `server/aiConfig.js` centralizes `AI_MONTHLY_COST_CAP_USD = 3.00` (one
   constant, not scattered `$3` literals), a model/pricing config left
@@ -239,7 +248,8 @@ cost-safe architecture for a future integration:
 | Promo codes, entitlements, world share codes | Real |
 | Checkout flow (plan/billing-period pick, review, interest capture) | Real UI + real DB row, no charge |
 | Actual payment processor / real charges / subscriptions | **Not implemented** — see `server/checkoutConfig.js` |
-| AI Tutor | **Not implemented** — architecture/cost-cap only, zero API calls |
+| AI Tutor chat UI (tab, message history, send) | Real UI + real server round trip |
+| An actual AI provider behind that chat | **Not implemented** — always returns a static error, zero API calls |
 
 ## Accuracy philosophy
 

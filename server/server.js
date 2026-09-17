@@ -683,6 +683,19 @@ export async function handleApi(req, res, url) {
     });
   }
 
+  // AI Tutor chat — architecture only, same as ai-status above. No real AI
+  // provider is wired up anywhere in this codebase (see server/aiConfig.js),
+  // so this deliberately never attempts a real call and always returns the
+  // same honest, non-fabricated error — a stub, not a mock of a working
+  // feature. Kept server-side (rather than a client-only canned string) so
+  // swapping in a real provider later is a change to this one route, not a
+  // client rewrite.
+  if (parts[1] === "ai-chat" && req.method === "POST") {
+    if (!email) return sendJson(res, 401, { error: "Sign in first." });
+    await readJsonBody(req); // drain the request body; the message itself is never used or stored
+    return sendJson(res, 200, { reply: "Sorry, I encountered a problem. Please try again later, or contact kinetic.sims@gmail.com" });
+  }
+
   // Checkout pricing — public (shown on the Plans page before sign-in).
   // `connected: false` is what the client actually uses to decide whether
   // to route to a real payment step or the "not live yet" placeholder — see

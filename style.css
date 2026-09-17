@@ -317,6 +317,20 @@ button:disabled { opacity: .4; cursor: default; }
 .physics3d-size-row input[type="number"] { width: 0; flex: 1; min-width: 0; }
 
 #physics3d-root.physics3d-locked { display: flex; align-items: center; justify-content: center; height: 100%; background: var(--bg); }
+
+.ai-tutor-wrap { display: flex; flex-direction: column; height: 100%; padding: 20px; box-sizing: border-box; max-width: 720px; margin: 0 auto; width: 100%; }
+.ai-tutor-header h2 { margin: 0 0 4px; }
+.ai-tutor-history {
+  flex: 1; min-height: 0; overflow-y: auto; margin: 12px 0; padding: 12px;
+  background: var(--panel-alt); border: 1px solid var(--border); border-radius: 10px;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.ai-tutor-msg { max-width: 80%; padding: 8px 12px; border-radius: 10px; font-size: 13.5px; line-height: 1.5; white-space: pre-wrap; }
+.ai-tutor-msg-user { align-self: flex-end; background: linear-gradient(120deg, var(--cool-1), var(--cool-2)); color: #0b1220; }
+.ai-tutor-msg-assistant { align-self: flex-start; background: var(--panel); border: 1px solid var(--border); color: var(--text); }
+.ai-tutor-composer { display: flex; gap: 8px; align-items: flex-end; }
+.ai-tutor-input { flex: 1; resize: vertical; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel-alt); color: var(--text); font: inherit; }
+.ai-tutor-composer button { flex-shrink: 0; }
 .physics3d-locked-box {
   max-width: 420px; text-align: center; padding: 32px 28px; border-radius: 14px;
   background: var(--panel); border: 1px solid var(--border);

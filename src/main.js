@@ -24,6 +24,7 @@ import { difficultyBadgeHtml } from "./challengeTiers.js";
 import { initClassroomUI } from "./classroom.js";
 import { initPlansUI } from "./plans.js";
 import { Physics3DMode } from "./physics3d.js";
+import { AITutorMode } from "./aiTutor.js";
 import { initCustomItemsUI, openCustomItemsHome } from "./customItems.js";
 import { initPhysicsGraphPanel, renderPhysicsGraphPanel, pushGraphSample, resetGraphPanel } from "./physicsGraphPanel.js";
 import { initNotebookUI, openNotebookHome } from "./notebook.js";
@@ -68,6 +69,7 @@ let clipboard = null; // in-app copy/paste buffer — an array of specs, not the
 let chemistryMode = null;
 let astronomyMode = null;
 let physics3dMode = null; // lazily created on first "Physics 3D" tab click, within Physics mode itself — see initPhysics3DTabs
+let aiTutorMode = null; // lazily created on first "AI Tutor" tab click, same pattern as physics3dMode
 let historyMode = null;
 let cybersecurityMode = null;
 let mathematicsMode = null;
@@ -1695,36 +1697,57 @@ function buildHomeThumbnail(el, section) {
   }
 }
 
-// Physics 2D / Physics 3D is a tab switch WITHIN Physics mode, not a
-// separate top-level mode — deliberately isolated from the 2D sandbox's
-// own (much larger, more load-bearing) state machine: swapping tabs only
-// toggles two sibling DOM roots and mounts/unmounts a self-contained
-// Physics3DMode instance, touching none of the 2D engine's own variables.
+// Physics 2D / Physics 3D / AI Tutor is a tab switch WITHIN Physics mode,
+// not a separate top-level mode — deliberately isolated from the 2D
+// sandbox's own (much larger, more load-bearing) state machine: swapping
+// tabs only toggles sibling DOM roots and mounts/unmounts a self-contained
+// mode instance, touching none of the 2D engine's own variables.
 function unmountPhysics3D() {
   physics3dMode?.unmount();
+  aiTutorMode?.unmount();
   document.getElementById("physics3d-root")?.classList.add("hidden");
+  document.getElementById("ai-tutor-root")?.classList.add("hidden");
   document.getElementById("workspace-body")?.classList.remove("hidden");
   document.getElementById("physics-toolbar")?.classList.remove("hidden");
   document.getElementById("physics-dim-2d-btn")?.classList.add("active");
   document.getElementById("physics-dim-3d-btn")?.classList.remove("active");
+  document.getElementById("physics-dim-ai-btn")?.classList.remove("active");
 }
 
 function initPhysics3DTabs() {
   const tab2d = document.getElementById("physics-dim-2d-btn");
   const tab3d = document.getElementById("physics-dim-3d-btn");
+  const tabAi = document.getElementById("physics-dim-ai-btn");
   const root3d = document.getElementById("physics3d-root");
+  const rootAi = document.getElementById("ai-tutor-root");
   const body2d = document.getElementById("workspace-body");
   const toolbar2d = document.getElementById("physics-toolbar");
+  const allTabs = [tab2d, tab3d, tabAi];
+
+  const hideAllRoots = () => {
+    root3d.classList.add("hidden");
+    rootAi.classList.add("hidden");
+    toolbar2d.classList.add("hidden");
+    body2d.classList.add("hidden");
+    physics3dMode?.unmount();
+    aiTutorMode?.unmount();
+    allTabs.forEach((t) => t.classList.remove("active"));
+  };
 
   tab2d.addEventListener("click", unmountPhysics3D);
   tab3d.addEventListener("click", () => {
+    hideAllRoots();
     if (!physics3dMode) physics3dMode = new Physics3DMode(root3d, {});
     tab3d.classList.add("active");
-    tab2d.classList.remove("active");
-    toolbar2d.classList.add("hidden");
-    body2d.classList.add("hidden");
     root3d.classList.remove("hidden");
     physics3dMode.mount();
+  });
+  tabAi.addEventListener("click", () => {
+    hideAllRoots();
+    if (!aiTutorMode) aiTutorMode = new AITutorMode(rootAi);
+    tabAi.classList.add("active");
+    rootAi.classList.remove("hidden");
+    aiTutorMode.mount();
   });
 }
 
