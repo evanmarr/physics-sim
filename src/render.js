@@ -372,8 +372,22 @@ export class Renderer {
     if (!objects || !objects.length) { this.centerOn(0, WORLD.groundY - 300, 0.7); return; }
     let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
     for (const o of objects) {
-      const halfW = (o.width ?? o.radius * 2 ?? 60) / 2;
-      const halfH = (o.height ?? o.radius * 2 ?? 60) / 2;
+      // A vertex-based shape (customPolygon) has neither width/height nor
+      // radius — `o.radius * 2` would silently evaluate to NaN (nullish
+      // coalescing only skips null/undefined, never NaN), which propagated
+      // into minX/maxX/minY/maxY here and corrupted the WHOLE fit-to-view
+      // transform to NaN, hiding every object on the canvas (not just the
+      // custom one) the moment a loaded world contained one. Compute its
+      // real bounding box from the actual vertices instead of guessing.
+      if (o.vertices?.length) {
+        for (const v of o.vertices) {
+          minX = Math.min(minX, o.x + v.x); maxX = Math.max(maxX, o.x + v.x);
+          minY = Math.min(minY, o.y + v.y); maxY = Math.max(maxY, o.y + v.y);
+        }
+        continue;
+      }
+      const halfW = (o.width ?? (o.radius != null ? o.radius * 2 : 60)) / 2;
+      const halfH = (o.height ?? (o.radius != null ? o.radius * 2 : 60)) / 2;
       minX = Math.min(minX, o.x - halfW); maxX = Math.max(maxX, o.x + halfW);
       minY = Math.min(minY, o.y - halfH); maxY = Math.max(maxY, o.y + halfH);
     }
