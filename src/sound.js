@@ -684,7 +684,7 @@ export class SoundMode {
       if (this._oscillator) this._oscillator.frequency.setValueAtTime(f, this._audioCtx.currentTime);
     });
 
-    playBtn.addEventListener("click", () => {
+    playBtn.addEventListener("click", async () => {
       if (this._oscillator) {
         this._oscillator.stop();
         this._oscillator = null;
@@ -693,6 +693,7 @@ export class SoundMode {
         return;
       }
       this._audioCtx ||= new (window.AudioContext || window.webkitAudioContext)();
+      if (this._audioCtx.state === "suspended") await this._audioCtx.resume();
       const osc = this._audioCtx.createOscillator();
       osc.type = currentWave;
       osc.frequency.value = Number(freqSlider.value);
@@ -824,9 +825,16 @@ export class SoundMode {
   // appropriate for a playable tile you tap repeatedly (a short ~0.15s
   // hold before release) as much as for a scheduled MIDI note (whatever
   // hold length that note's own duration calls for — see _scheduleMidiNote).
-  _playTileTone(freq, instrumentKey = this._currentInstrument || DEFAULT_INSTRUMENT, { holdSec = 0.15, startTime, peakGain = 0.25 } = {}) {
+  async _playTileTone(freq, instrumentKey = this._currentInstrument || DEFAULT_INSTRUMENT, { holdSec = 0.15, startTime, peakGain = 0.25 } = {}) {
     this._audioCtx ||= new (window.AudioContext || window.webkitAudioContext)();
-    if (this._audioCtx.state === "suspended") this._audioCtx.resume();
+    // Awaiting this matters: scheduling osc.start(now) against ctx.currentTime
+    // while the context is still actually suspended (resume() takes a beat
+    // to complete, it's not synchronous) could get silently dropped in some
+    // browsers even though the context resumes moments later — which is
+    // exactly why a note might play on the 2nd tap but not the 1st, or only
+    // "unlock" after some *other* audio flow (like Record & Visualize's own
+    // getUserMedia gesture) happened to leave the context already running.
+    if (this._audioCtx.state === "suspended") await this._audioCtx.resume();
     const ctx = this._audioCtx;
     const instrument = INSTRUMENTS[instrumentKey] || INSTRUMENTS[DEFAULT_INSTRUMENT];
     const osc = ctx.createOscillator();
@@ -934,9 +942,9 @@ export class SoundMode {
   // + offset) — genuine Web Audio scheduling, not a setTimeout-per-note
   // approximation that would drift under load. A live waveform trace runs
   // via a shared AnalyserNode all the notes route through.
-  _playMidi(parsed, canvas, onDone) {
+  async _playMidi(parsed, canvas, onDone) {
     this._audioCtx ||= new (window.AudioContext || window.webkitAudioContext)();
-    if (this._audioCtx.state === "suspended") this._audioCtx.resume();
+    if (this._audioCtx.state === "suspended") await this._audioCtx.resume();
     const ctx = this._audioCtx;
     const analyser = ctx.createAnalyser();
     analyser.fftSize = 2048;
