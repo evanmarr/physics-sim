@@ -717,7 +717,7 @@ input[type="range"] { accent-color: var(--accent); cursor: pointer; }
 
 .modal { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: flex; align-items: center; justify-content: center; z-index: 50; }
 /* alertPopup/confirmPopup can be triggered from inside another already-open
-   modal (e.g. Donate from inside About) — same z-index as every other
+   modal (e.g. a confirm from inside a saves panel) — same z-index as every other
    .modal would leave it stacking by DOM order, not open-order, so whichever
    modal happens to come later in the HTML would always paint on top
    regardless of which was actually opened last. This needs to always win. */
@@ -1733,7 +1733,7 @@ input[type="range"] { accent-color: var(--accent); cursor: pointer; }
   border-radius: 8px; overflow: hidden; flex: 1 1 420px; max-width: 560px; aspect-ratio: 12 / 8;
 }
 .sustain-cell {
-  background: var(--panel-alt); border: none; font-size: 18px; display: flex;
+  background: var(--panel-alt); border: none; font-size: 12px; font-weight: 700; color: var(--text-dim); display: flex;
   align-items: center; justify-content: center; cursor: pointer; padding: 0; aspect-ratio: 1;
 }
 .sustain-cell:hover { background: var(--panel); }

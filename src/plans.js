@@ -118,7 +118,7 @@ async function render() {
     </div>
     ${current.plan !== "free" ? `<p class="plans-source-note">Access source: ${describeSource(current.planSource)}${current.aiEnabled ? "" : " · AI Tutor: not enabled"}</p>` : ""}
     <div class="ai-tutor-preview">
-      <strong>Kinetic AI Tutor</strong> — <em>real chat UI in the top bar (🤖 AI Tutor), not connected to a real AI yet.</em>
+      <strong>Kinetic AI Tutor</strong> — <em>real chat UI in the top bar (AI Tutor), not connected to a real AI yet.</em>
       <p>Hint → Bigger Hint → Explain It, aware of your current simulation and challenge, once it's live — try it now and it'll tell you honestly it isn't connected yet, from anywhere in the app, not just Physics. Planned for paid Plus, capped around $3/month in estimated usage — not unlimited, and never promised as unlimited. <strong>Promo Plus does not include AI</strong>, even once it's live for paid Plus.</p>
     </div>
     <button id="plans-close">Close</button>

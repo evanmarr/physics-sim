@@ -113,13 +113,13 @@ function openEditor(items, existing) {
     <label>Variables changed</label>
     <textarea id="nb-variables" rows="2">${escapeHtml(entry.variablesChanged || "")}</textarea>
     <div style="display:flex;gap:8px;margin:6px 0">
-      <button id="nb-capture-initial">📸 Capture current world as Initial State</button>
+      <button id="nb-capture-initial">Capture current world as Initial State</button>
     </div>
     <div id="nb-initial-preview">${entry.initialState ? `<img src="${entry.initialState.snapshot}" style="width:100%;border-radius:6px;border:1px solid var(--border)" />` : '<p class="saves-hint">No initial state captured yet.</p>'}</div>
     <label>Observation — what actually happened?</label>
     <textarea id="nb-observation" rows="2">${escapeHtml(entry.observation || "")}</textarea>
     <div style="display:flex;gap:8px;margin:6px 0">
-      <button id="nb-capture-final">📸 Capture current world as Final State</button>
+      <button id="nb-capture-final">Capture current world as Final State</button>
     </div>
     <div id="nb-final-preview">${entry.finalState ? `<img src="${entry.finalState.snapshot}" style="width:100%;border-radius:6px;border:1px solid var(--border)" />` : '<p class="saves-hint">No final state captured yet.</p>'}</div>
     <label>Explanation / conclusion</label>

@@ -39,7 +39,7 @@ export function renderPanel(container, spec, state, handlers) {
   // is free too UNLESS this world came from a published/remixed Community
   // Sim that had a 6-digit code set on it, in which case handlers.onUnlock
   // (wired in main.js) prompts for that code before it's allowed through.
-  container.appendChild(checkboxField(spec.locked ? "🔒 Locked" : "Locked (protect from editing)", spec.locked, async (checked) => {
+  container.appendChild(checkboxField(spec.locked ? "Locked" : "Locked (protect from editing)", spec.locked, async (checked) => {
     if (checked) { set({ locked: true }); renderPanel(container, spec, state, handlers); return; }
     const ok = await handlers.onUnlock(spec);
     if (ok) set({ locked: false });
@@ -184,7 +184,7 @@ export function renderPanel(container, spec, state, handlers) {
   if (mathLines && mathLines.length && handlers.mathPanelOpen === false) {
     const link = document.createElement("button");
     link.className = "reopen-math-link";
-    link.textContent = "▸ Show the physics panel";
+    link.textContent = "Show the physics panel";
     link.addEventListener("click", () => handlers.onOpenMath());
     container.appendChild(link);
   }
@@ -268,7 +268,7 @@ export function renderPhysicsMathPanel(container, spec, onClose, onEdit) {
       input.addEventListener(advanced ? "change" : "input", commit);
       const resetBtn = document.createElement("button");
       resetBtn.className = "math-edit-reset";
-      resetBtn.textContent = "↺";
+      resetBtn.textContent = "Reset";
       // Density/friction/restitution are material *overrides* — undefined
       // correctly falls back to the material preset (see effectiveDensity
       // etc.). Type-specific values like a bomb's power aren't overrides of

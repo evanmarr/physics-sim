@@ -395,13 +395,13 @@ export async function openSavesPanel({ kind, title, itemNoun, serialize, apply, 
           <div class="saves-item-name">${escapeHtml(sim.name)}</div>
           <div class="saves-item-date">by ${escapeHtml(sim.creatorName)}${sim.subject ? ` · ${escapeHtml(sim.subject)}` : ""} · ${timeAgo(sim.createdAt)}</div>
           ${sim.description ? `<div class="saves-item-date">${escapeHtml(sim.description)}</div>` : ""}
-          <div class="saves-item-date">★ ${sim.favoriteCount} · 🔀 ${sim.remixCount} remix${sim.remixCount === 1 ? "" : "es"}</div>
+          <div class="saves-item-date">★ ${sim.favoriteCount} · ${sim.remixCount} remix${sim.remixCount === 1 ? "" : "es"}</div>
         </div>
         <div class="saves-item-actions">
           <button class="community-open" data-id="${sim.id}">Open</button>
           <button class="community-remix" data-id="${sim.id}">Remix</button>
           <button class="community-favorite" data-id="${sim.id}">${isFavorited ? "★ Favorited" : "☆ Favorite"}</button>
-          <button class="community-share" data-id="${sim.id}">🔗 Share</button>
+          <button class="community-share" data-id="${sim.id}">Share</button>
           ${mine ? `<button class="community-unpublish danger" data-id="${sim.id}">Unpublish</button>` : `<button class="community-report" data-id="${sim.id}">Report</button>`}
         </div>
       </div>`;

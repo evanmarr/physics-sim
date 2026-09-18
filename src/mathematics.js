@@ -106,7 +106,7 @@ export class MathematicsMode {
     sidebar.appendChild(typeRow);
 
     const infoBtn = document.createElement("button");
-    infoBtn.textContent = "ℹ️ How This Model Works";
+    infoBtn.textContent = "How This Model Works";
     infoBtn.title = "What this visualization actually does";
     infoBtn.style.marginBottom = "10px";
     infoBtn.addEventListener("click", () => openModelInfo(this.chartType === "function" ? GRAPH_MODEL_INFO : CHART_MODEL_INFO));

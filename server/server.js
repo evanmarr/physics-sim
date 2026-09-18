@@ -146,6 +146,21 @@ async function sendVerificationEmail(email, code) {
   });
 }
 
+// Fires on every blocked login attempt from a banned account, not just the
+// first — mirrors sendVerificationEmail's per-attempt style. A banned
+// account can only trigger this by attempting to sign in with its own
+// correct password, so this never reaches anyone but the account holder.
+async function sendBanNotice(email) {
+  await sendEmail({
+    to: email,
+    subject: "Your Kinetic account has been suspended",
+    html: wrapEmailHtml(`
+      <p>Your Kinetic account (${email}) has been suspended and you will not be able to sign in.</p>
+      <p style="color:#6b7280;">If you think this is a mistake, reply to this email.</p>
+    `),
+  });
+}
+
 // ---------- sessions ----------
 
 async function createSession(email) {
@@ -175,7 +190,11 @@ async function sessionUser(req) {
   const session = await db.getSession(token);
   if (!session || Number(session.expires) < Date.now()) return null;
   const user = await db.getUser(session.email);
-  return user ? session.email : null;
+  // Every authenticated route funnels through here, so this is also where
+  // a ban placed mid-session takes effect — without it, banning someone
+  // would only stop their NEXT login, not anything they're already doing.
+  if (!user || user.banned) return null;
+  return session.email;
 }
 
 function parseCookies(header) {
@@ -522,6 +541,14 @@ export async function handleApi(req, res, url) {
       return genericError();
     }
     await clearFailedLogins(email);
+    // Checked only after the password's already confirmed valid, so a
+    // banned account's login attempt doesn't leak anything a wrong
+    // password attempt wouldn't (both would otherwise look identical from
+    // the outside, this just says which one this particular case is).
+    if (user.banned) {
+      await sendBanNotice(email);
+      return sendJson(res, 403, { error: "Your account was banned." });
+    }
     // A password alone got them this far, but this browser needs to have
     // proven it can read the inbox at least once before — at this account's
     // signup, or a prior login here — to skip straight past the code step.
@@ -558,6 +585,15 @@ export async function handleApi(req, res, url) {
       const createdAt = Date.now();
       await db.createUser(email, { ...pending.signupData, createdAt });
       if (pending.signupData.subscribed) await db.addToMailingList(email);
+    } else {
+      // A login can only reach this step after a password was already
+      // verified, so re-check ban status here too — otherwise a ban placed
+      // between that step and code entry would go unenforced.
+      const user = await db.getUser(pending.email);
+      if (user?.banned) {
+        await sendBanNotice(pending.email);
+        return sendJson(res, 403, { error: "Your account was banned." });
+      }
     }
     const token = await createSession(pending.email);
     setSessionCookie(res, req, token, SESSION_MAX_AGE_MS / 1000);

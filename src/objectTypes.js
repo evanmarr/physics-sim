@@ -47,14 +47,35 @@ export function isConvexSimplePolygon(pts) {
   return sign !== 0;
 }
 
-// Whether two segments (a1-a2) and (b1-b2) properly cross — used below to
+// Whether two segments (p1-q1) and (p2-q2) intersect — used below to
 // reject a self-intersecting (bowtie) polygon while still allowing a
-// concave one. General cross-product orientation test, not a bounding-box
-// approximation, so it catches a real crossing at any angle.
-function segmentsIntersect(a1, a2, b1, b2) {
-  const d = (p, q, r) => (q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x);
-  const d1 = d(b1, b2, a1), d2 = d(b1, b2, a2), d3 = d(a1, a2, b1), d4 = d(a1, a2, b2);
-  return ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) && ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0));
+// concave one. The standard general-position-plus-collinear-special-case
+// algorithm, not just a strict "do they properly cross" test: an earlier
+// version here only checked strict opposite-side inequalities, which
+// missed the degenerate cases where a vertex lands exactly ON another
+// edge, or two edges briefly overlap along the same line (both real,
+// reachable results of freely dragging a vertex in the editor) — those
+// are just as invalid a shape as a clean crossing, and poly-decomp can't
+// safely handle them either.
+function orientation(p, q, r) {
+  const val = (q.y - p.y) * (r.x - q.x) - (q.x - p.x) * (r.y - q.y);
+  if (Math.abs(val) < 1e-9) return 0; // collinear
+  return val > 0 ? 1 : 2;
+}
+function onSegment(p, q, r) {
+  // Assumes p, q, r are already known collinear — is q within segment p-r?
+  return Math.min(p.x, r.x) - 1e-9 <= q.x && q.x <= Math.max(p.x, r.x) + 1e-9 &&
+         Math.min(p.y, r.y) - 1e-9 <= q.y && q.y <= Math.max(p.y, r.y) + 1e-9;
+}
+function segmentsIntersect(p1, q1, p2, q2) {
+  const o1 = orientation(p1, q1, p2), o2 = orientation(p1, q1, q2);
+  const o3 = orientation(p2, q2, p1), o4 = orientation(p2, q2, q1);
+  if (o1 !== o2 && o3 !== o4) return true;
+  if (o1 === 0 && onSegment(p1, p2, q1)) return true;
+  if (o2 === 0 && onSegment(p1, q2, q1)) return true;
+  if (o3 === 0 && onSegment(p2, p1, q2)) return true;
+  if (o4 === 0 && onSegment(p2, q1, q2)) return true;
+  return false;
 }
 
 // A concave (but still simple, non-self-intersecting) polygon is real

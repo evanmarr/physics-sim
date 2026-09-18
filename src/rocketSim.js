@@ -573,7 +573,7 @@ export class RocketSimMode {
     btnRow.style.marginTop = "10px";
     this.launchBtn = document.createElement("button");
     this.launchBtn.className = "primary";
-    this.launchBtn.textContent = "🚀 Launch";
+    this.launchBtn.textContent = "Launch";
     this.launchBtn.addEventListener("click", () => {
       if (this.crashed || (this.launched && this._status() !== "On the pad")) return;
       this.launched = true;
@@ -606,7 +606,7 @@ export class RocketSimMode {
     this._renderChallengePanel();
 
     const infoBtn = document.createElement("button");
-    infoBtn.textContent = "ℹ️ How This Model Works";
+    infoBtn.textContent = "How This Model Works";
     infoBtn.style.marginTop = "10px";
     infoBtn.addEventListener("click", () => openModelInfo(ROCKET_MODEL_INFO));
     p.appendChild(infoBtn);
@@ -629,7 +629,7 @@ export class RocketSimMode {
       `;
 
       const armBtn = document.createElement("button");
-      armBtn.textContent = this.activeChallenge?.id === ch.id ? "Armed ✓" : "Arm this challenge";
+      armBtn.textContent = this.activeChallenge?.id === ch.id ? "Armed" : "Arm this challenge";
       armBtn.style.marginTop = "6px";
       armBtn.addEventListener("click", () => {
         this.activeChallenge = ch;

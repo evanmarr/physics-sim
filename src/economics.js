@@ -86,7 +86,7 @@ export class EconomicsMode {
       tabs.appendChild(btn);
     }
     const infoBtn = document.createElement("button");
-    infoBtn.textContent = "ℹ️ How This Model Works";
+    infoBtn.textContent = "How This Model Works";
     infoBtn.title = "What this simulation actually models";
     infoBtn.style.marginLeft = "8px";
     infoBtn.addEventListener("click", () => openModelInfo(this.sub === "market" ? MARKET_MODEL_INFO : GAME_THEORY_MODEL_INFO));

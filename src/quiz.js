@@ -486,7 +486,7 @@ function selectAnswer(opt, btn, box) {
   });
 
   const expl = box.querySelector(".quiz-explanation");
-  expl.textContent = (correct ? "✓ Correct. " : "✗ Not quite. ") + q.explanation;
+  expl.textContent = (correct ? "Correct. " : "Not quite. ") + q.explanation;
   expl.classList.remove("hidden");
   expl.classList.toggle("quiz-correct", correct);
   expl.classList.toggle("quiz-incorrect", !correct);

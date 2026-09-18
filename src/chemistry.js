@@ -124,7 +124,7 @@ export class ChemistryMode {
     title.textContent = "Mixing Bench";
     titleRow.appendChild(title);
     const infoBtn = document.createElement("button");
-    infoBtn.textContent = "ℹ️ How This Model Works";
+    infoBtn.textContent = "How This Model Works";
     infoBtn.title = "What this simulation actually models";
     infoBtn.addEventListener("click", () => openModelInfo(CHEMISTRY_MODEL_INFO));
     titleRow.appendChild(infoBtn);
@@ -192,7 +192,7 @@ export class ChemistryMode {
     if (this.lastMolecule) {
       const link = document.createElement("button");
       link.className = "reopen-math-link";
-      link.textContent = `▸ Show last reaction (${this.lastMolecule.result.name || this.lastMolecule.result.formula})`;
+      link.textContent = `Show last reaction (${this.lastMolecule.result.name || this.lastMolecule.result.formula})`;
       link.addEventListener("click", () => this._showLastReaction());
       this.elementInfo.appendChild(link);
     }
@@ -512,7 +512,7 @@ function buildChallengeModal(economy) {
       const completed = economy.state.completedChallenges.has("chem_" + c.id);
       const info = div("info");
       info.innerHTML = `
-        <div class="name">${c.name}${completed ? " ✓" : ""}</div>
+        <div class="name">${c.name}${completed ? " (Completed)" : ""}</div>
         <div class="concept-tag">${c.concept}</div>
         <div class="desc">${c.description}</div>
       `;

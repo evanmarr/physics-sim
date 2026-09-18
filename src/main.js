@@ -720,9 +720,6 @@ function wireTopbar(renderer) {
   initTutorial();
   document.getElementById("about-btn").addEventListener("click", () => document.getElementById("about-modal").classList.remove("hidden"));
   document.getElementById("about-close").addEventListener("click", () => document.getElementById("about-modal").classList.add("hidden"));
-  document.getElementById("donate-btn").addEventListener("click", () => {
-    window.open("https://gl.me/u/GSNTMHh9xg5J", "_blank", "noopener");
-  });
   wireFeedback();
 
   wireMenu();
@@ -848,13 +845,13 @@ function togglePlay(renderer) {
   if (state.playing) {
     sim?.pause();
     state.playing = false;
-    playBtn.textContent = "▶ Play";
+    playBtn.textContent = "Play";
     playBtn.classList.remove("playing");
     banner.textContent = "PAUSED — space to resume";
   } else if (sim) {
     sim.resume();
     state.playing = true;
-    playBtn.textContent = "❚❚ Pause";
+    playBtn.textContent = "Pause";
     playBtn.classList.add("playing");
     banner.textContent = "SIMULATING — space to pause";
   } else {
@@ -890,7 +887,7 @@ function togglePlay(renderer) {
     sim.start();
     if (state.grabToolActive) sim.enableGrabTool(state.grabShape);
     state.playing = true;
-    playBtn.textContent = "❚❚ Pause";
+    playBtn.textContent = "Pause";
     playBtn.classList.add("playing");
     banner.textContent = "SIMULATING — space to pause";
     banner.classList.remove("hidden");
@@ -906,7 +903,7 @@ function resetPhysics(renderer) {
   state.playing = false;
   resetGraphPanel();
   const playBtn = document.getElementById("play-btn");
-  playBtn.textContent = "▶ Play";
+  playBtn.textContent = "Play";
   playBtn.classList.remove("playing");
   document.getElementById("mode-banner").classList.add("hidden");
   window._renderer.renderRopeTubes([]);
@@ -1057,7 +1054,7 @@ function wireChallenges() {
       info.className = "info";
       const name = document.createElement("div");
       name.className = "name";
-      name.innerHTML = `${escapeHtml(c.name)}${c.difficulty ? " " + difficultyBadgeHtml(c.difficulty) : ""}${state.completedChallenges.has(c.id) ? " ✓" : ""}`;
+      name.innerHTML = `${escapeHtml(c.name)}${c.difficulty ? " " + difficultyBadgeHtml(c.difficulty) : ""}${state.completedChallenges.has(c.id) ? " (Completed)" : ""}`;
       const concept = document.createElement("div");
       concept.className = "concept-tag";
       concept.textContent = c.concept;
@@ -1229,7 +1226,7 @@ function buildHomePage(root, onNavigate) {
         <div class="home-hero-ctas">
           <button class="home-cta home-cta-primary" id="home-cta-create">Create</button>
           <button class="home-cta home-cta-secondary" id="home-cta-explore">Explore</button>
-          <button class="home-cta home-cta-surprise" id="home-cta-surprise">🎲 Surprise Me</button>
+          <button class="home-cta home-cta-surprise" id="home-cta-surprise">Surprise Me</button>
         </div>
       </div>
       <div class="home-rails"></div>

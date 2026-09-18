@@ -464,7 +464,7 @@ function buildFirewallSimulator() {
         <span>from ${rule.ip || "any"}</span>
       `;
       const del = document.createElement("button");
-      del.textContent = "✕";
+      del.textContent = "×";
       del.title = "Remove rule";
       del.addEventListener("click", () => { rules.splice(i, 1); renderRules(); });
       row.appendChild(del);

@@ -132,7 +132,7 @@ export class Physics3DMode {
 
     this.playBtn = document.createElement("button");
     this.playBtn.className = "primary";
-    this.playBtn.textContent = "▶ Play";
+    this.playBtn.textContent = "Play";
     this.playBtn.addEventListener("click", () => this._togglePlay());
 
     const resetBtn = document.createElement("button");
@@ -386,12 +386,12 @@ export class Physics3DMode {
 
   _togglePlay() {
     this.playing = !this.playing;
-    this.playBtn.textContent = this.playing ? "⏸ Pause" : "▶ Play";
+    this.playBtn.textContent = this.playing ? "Pause" : "Play";
   }
 
   _reset() {
     this.playing = false;
-    this.playBtn.textContent = "▶ Play";
+    this.playBtn.textContent = "Play";
     for (const obj of this.objects) this._instantiate(obj, { toSpawn: true });
   }
 

@@ -20,14 +20,14 @@ export function renderPalette(container, state, handlers) {
     const btn = document.createElement("button");
     btn.id = "open-custom-items-btn";
     btn.className = "palette-custom-items-btn";
-    btn.innerHTML = `⬠ Custom Items <span class="physics-dim-plus-badge">PLUS</span>`;
+    btn.innerHTML = `Custom Items <span class="physics-dim-plus-badge">PLUS</span>`;
     btn.addEventListener("click", handlers.onOpenCustomItems);
     container.appendChild(btn);
   }
 
   const shortcuts = document.createElement("div");
   shortcuts.className = "palette-shortcuts";
-  shortcuts.innerHTML = "<div>⌘C copy · ⌘V paste</div><div>Del delete · Esc deselect</div><div>⇧+click or ⇧+drag: multi-select</div>";
+  shortcuts.innerHTML = "<div>Cmd+C copy · Cmd+V paste</div><div>Del delete · Esc deselect</div><div>Shift+click or Shift+drag: multi-select</div>";
   container.appendChild(shortcuts);
 }
 

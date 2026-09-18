@@ -223,7 +223,7 @@ function buildChallengeModal(ctx, onGo) {
       const row = div("shop-item");
       row.innerHTML = `
         <div class="info">
-          <div class="name">${done ? "✓ Solved" : "Unsolved"}</div>
+          <div class="name">${done ? "Solved" : "Unsolved"}</div>
           <div class="desc">${challenge.hint}</div>
         </div>
       `;

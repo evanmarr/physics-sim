@@ -94,7 +94,7 @@ export class AstronomyMode {
     solarTab.addEventListener("click", () => this._showSolarSystem(solarTab, rocketTab));
     const rocketTab = document.createElement("button");
     rocketTab.className = "econ-tab";
-    rocketTab.textContent = "🚀 Rocket Simulator";
+    rocketTab.textContent = "Rocket Simulator";
     rocketTab.addEventListener("click", () => this._showRocketSim(solarTab, rocketTab));
     tabs.appendChild(solarTab);
     tabs.appendChild(rocketTab);
@@ -598,7 +598,7 @@ export class AstronomyMode {
     this.infoPanel.appendChild(title);
 
     const infoBtn = document.createElement("button");
-    infoBtn.textContent = "ℹ️ How This Model Works";
+    infoBtn.textContent = "How This Model Works";
     infoBtn.title = "What this simulation actually models";
     infoBtn.style.width = "100%";
     infoBtn.style.marginBottom = "8px";

@@ -78,3 +78,18 @@ test("isSimplePolygon rejects fewer than 3 vertices", () => {
   assert.equal(isSimplePolygon([]), false);
   assert.equal(isSimplePolygon([{ x: 0, y: 0 }, { x: 1, y: 1 }]), false);
 });
+
+// A real gap in an earlier version of segmentsIntersect: it only checked
+// strict opposite-side inequalities, so a vertex landing exactly ON a
+// non-adjacent edge (a "touching" self-intersection, not a clean cross —
+// a real, reachable result of freely dragging a vertex in the editor)
+// slipped through undetected as "simple."
+test("isSimplePolygon rejects a vertex that touches a non-adjacent edge exactly (not just a clean crossing)", () => {
+  const touching = [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }, { x: 50, y: 0 }, { x: 0, y: 100 }];
+  assert.equal(isSimplePolygon(touching), false);
+});
+
+test("isSimplePolygon rejects two non-adjacent edges that overlap collinearly", () => {
+  const overlapping = [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }, { x: 30, y: 0 }, { x: 70, y: 0 }, { x: 0, y: 100 }];
+  assert.equal(isSimplePolygon(overlapping), false);
+});

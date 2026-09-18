@@ -67,7 +67,7 @@ export class ZoologyMode {
       tabs.appendChild(btn);
     }
     const infoBtn = document.createElement("button");
-    infoBtn.textContent = "ℹ️ How This Model Works";
+    infoBtn.textContent = "How This Model Works";
     infoBtn.title = "What this simulation actually models";
     infoBtn.style.marginLeft = "8px";
     infoBtn.addEventListener("click", () => openModelInfo(this.sub === "pyramid" ? PYRAMID_MODEL_INFO : WEB_MODEL_INFO));
@@ -146,7 +146,7 @@ export class ZoologyMode {
     for (const org of ORGANISMS) {
       const chip = document.createElement("button");
       chip.className = "zoo-organism-chip" + (this.selected.has(org.id) ? " active" : "");
-      chip.textContent = `${org.icon || "🔹"} ${org.name}`;
+      chip.textContent = org.name;
       chip.title = org.note;
       chip.addEventListener("click", () => {
         if (this.selected.has(org.id)) this.selected.delete(org.id);
@@ -213,8 +213,7 @@ export class ZoologyMode {
         .on("end", (e, d) => { if (!e.active) sim.alphaTarget(0); d.fx = null; d.fy = null; })
     );
     node.append("circle").attr("r", 30).attr("fill", "var(--panel)").attr("stroke", "var(--accent)").attr("stroke-width", 2);
-    node.append("text").attr("text-anchor", "middle").attr("dy", "-2px").attr("font-size", "18px").text((d) => d.icon || "🔹");
-    node.append("text").attr("text-anchor", "middle").attr("dy", "16px").attr("font-size", "10px").attr("fill", "var(--text)").text((d) => d.name);
+    node.append("text").attr("text-anchor", "middle").attr("dy", "4px").attr("font-size", "11px").attr("font-weight", "600").attr("fill", "var(--text)").text((d) => d.name);
     node.append("title").text((d) => d.note);
 
     sim.on("tick", () => {

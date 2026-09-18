@@ -56,7 +56,7 @@ export function renderExperienceLevelPicker(container, onChange) {
   const labels = { explore: "Explore", learn: "Learn", advanced: "Advanced" };
   for (const level of LEVELS) {
     const btn = document.createElement("button");
-    btn.textContent = labels[level] + (level === "advanced" && !plus ? " 🔒" : "");
+    btn.textContent = labels[level] + (level === "advanced" && !plus ? " (Plus)" : "");
     btn.className = "experience-level-pill" + (level === current ? " active" : "");
     btn.title = level === "advanced" && !plus ? "Advanced is a Kinetic Plus feature" : "";
     btn.addEventListener("click", () => {

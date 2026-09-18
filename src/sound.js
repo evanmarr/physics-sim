@@ -265,7 +265,7 @@ export class SoundMode {
       tabs.appendChild(btn);
     }
     const infoBtn = document.createElement("button");
-    infoBtn.textContent = "ℹ️ How This Model Works";
+    infoBtn.textContent = "How This Model Works";
     infoBtn.title = "What this simulation actually models";
     infoBtn.style.marginLeft = "8px";
     const MODEL_INFO_BY_SUB = { record: RECORD_MODEL_INFO, make: MAKE_MODEL_INFO, midi: MIDI_MODEL_INFO };
@@ -434,7 +434,7 @@ export class SoundMode {
     const recordRow = div("sound-record-row");
     const recordBtn = document.createElement("button");
     recordBtn.className = "cyber-sim-btn";
-    recordBtn.textContent = "● Record clip (10s max)";
+    recordBtn.textContent = "Record clip (10s max)";
     recordBtn.disabled = true;
     recordRow.appendChild(recordBtn);
     const timerEl = document.createElement("span");
@@ -477,7 +477,7 @@ export class SoundMode {
         this._sampleIntervalId && clearInterval(this._sampleIntervalId);
         this._countdownId && clearInterval(this._countdownId);
         recordBtn.classList.remove("recording");
-        recordBtn.textContent = "● Record clip (10s max)";
+        recordBtn.textContent = "Record clip (10s max)";
         timerEl.textContent = "";
         this._showPlayback(playbackWrap, blob, samples);
       };
@@ -488,7 +488,7 @@ export class SoundMode {
         chunks = [];
         this._mediaRecorder.start();
         recordBtn.classList.add("recording");
-        recordBtn.textContent = "■ Stop recording";
+        recordBtn.textContent = "Stop recording";
 
         this._rafId && cancelAnimationFrame(this._rafId);
         this._sampleIntervalId = setInterval(() => {
@@ -663,7 +663,7 @@ export class SoundMode {
 
     const playBtn = document.createElement("button");
     playBtn.className = "cyber-sim-btn primary";
-    playBtn.textContent = "▶ Play tone";
+    playBtn.textContent = "Play tone";
     controls.appendChild(playBtn);
     wrap.appendChild(controls);
 
@@ -689,7 +689,7 @@ export class SoundMode {
         this._oscillator.stop();
         this._oscillator = null;
         this._rafId && cancelAnimationFrame(this._rafId);
-        playBtn.textContent = "▶ Play tone";
+        playBtn.textContent = "Play tone";
         return;
       }
       this._audioCtx ||= new (window.AudioContext || window.webkitAudioContext)();
@@ -705,7 +705,7 @@ export class SoundMode {
       osc.start();
       this._oscillator = osc;
       this._drawLiveWaveform(canvas, analyser);
-      playBtn.textContent = "■ Stop tone";
+      playBtn.textContent = "Stop tone";
     });
 
     wrap.appendChild(this._buildTilePad());
@@ -873,7 +873,7 @@ export class SoundMode {
 
     const playBtn = document.createElement("button");
     playBtn.className = "cyber-sim-btn primary";
-    playBtn.textContent = "▶ Play";
+    playBtn.textContent = "Play";
     playBtn.disabled = true;
     controls.appendChild(playBtn);
     wrap.appendChild(controls);
@@ -906,12 +906,12 @@ export class SoundMode {
     playBtn.addEventListener("click", () => {
       if (this._midiPlaying) {
         this._stopMidiPlayback();
-        playBtn.textContent = "▶ Play";
+        playBtn.textContent = "Play";
         return;
       }
       if (!parsed) return;
-      this._playMidi(parsed, canvas, () => { playBtn.textContent = "▶ Play"; });
-      playBtn.textContent = "■ Stop";
+      this._playMidi(parsed, canvas, () => { playBtn.textContent = "Play"; });
+      playBtn.textContent = "Stop";
     });
 
     this.body.appendChild(wrap);

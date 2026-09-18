@@ -130,7 +130,7 @@ export class HistoryMode {
     // needs no mouse wheel, trackpad gesture, or drag at all.
     const prevBtn = document.createElement("button");
     prevBtn.className = "history-timeline-nav";
-    prevBtn.textContent = "◀";
+    prevBtn.textContent = "Prev";
     prevBtn.setAttribute("aria-label", "Scroll earlier");
     // Instant, not smooth — smooth-scroll rides the browser's own rAF loop,
     // which (like any rAF-driven animation) can stall for a while if the
@@ -138,7 +138,7 @@ export class HistoryMode {
     prevBtn.addEventListener("click", () => { scroll.scrollBy({ left: -tickSpacing * 3 }); });
     const nextBtn = document.createElement("button");
     nextBtn.className = "history-timeline-nav";
-    nextBtn.textContent = "▶";
+    nextBtn.textContent = "Next";
     nextBtn.setAttribute("aria-label", "Scroll later");
     nextBtn.addEventListener("click", () => { scroll.scrollBy({ left: tickSpacing * 3 }); });
 
@@ -227,7 +227,7 @@ function buildChallengeModal(ctx, onGo) {
       const row = div("shop-item");
       row.innerHTML = `
         <div class="info">
-          <div class="name">${cat?.label ?? challenge.categoryKey}${done ? " ✓" : ""}</div>
+          <div class="name">${cat?.label ?? challenge.categoryKey}${done ? " (Completed)" : ""}</div>
           <div class="desc">${challenge.hint}</div>
         </div>
       `;

@@ -3,7 +3,7 @@
     "scientist": {
       "name": "Emmy Noether",
       "paragraph": "Emmy Noether (1882-1935) was a German mathematician whose 1915 theorem connects two ideas that seem unrelated at first: symmetry and conservation. She proved that every continuous symmetry of a physical system's action corresponds to a conserved quantity — a result so foundational that Einstein called her a 'creative mathematical genius' in a letter to the New York Times.",
-      "paragraph2": "Noether did this work while unpaid and officially unable to hold a professorship at Gottingen because she was a woman; David Hilbert reportedly pushed back on the faculty's objections by asking, 'I do not see that the sex of the candidate is against her admission. After all, the university senate is not a bathhouse.'"
+      "paragraph2": "Noether did this important work even though the University of Gottingen wouldn't officially hire her as a professor at first, simply because she was a woman. Several of her fellow mathematicians, including the famous David Hilbert, thought that was unfair and fought hard on her behalf until the rules were changed so she could finally get the title — and the pay — her work had already earned."
     },
     "equation": {
       "name": "Noether's Theorem (informal statement)",

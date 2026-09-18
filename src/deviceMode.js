@@ -33,8 +33,8 @@ export function showPrompt(isChange = false) {
       <h2>${isChange ? "Change device mode" : "Welcome to Kinetic"}</h2>
       <p>Are you on a mobile device or a computer? This just resizes buttons and controls for touch — everything still works the same either way.</p>
       <div class="device-prompt-actions">
-        <button class="primary" data-mode="mobile">📱 Mobile device</button>
-        <button class="primary" data-mode="computer">🖥 Computer</button>
+        <button class="primary" data-mode="mobile">Mobile device</button>
+        <button class="primary" data-mode="computer">Computer</button>
       </div>
       <label class="device-prompt-remember">
         <input type="checkbox" checked />
