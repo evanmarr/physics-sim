@@ -11,7 +11,7 @@
 // the global top bar rather than nested inside any one subject mode —
 // "AI Tutor, aware of your current simulation" only makes sense as
 // something available everywhere, not just from Physics.
-import { getUser } from "./auth.js";
+import { getUser, openSavesPanel } from "./auth.js";
 
 const FALLBACK_REPLY = "Sorry, I encountered a problem. Please try again later, or contact kinetic.sims@gmail.com";
 let modal, box, messages = [];
@@ -28,6 +28,7 @@ export function openAITutor() {
   if (!user.entitlements?.isPlus) {
     box.classList.add("ai-tutor-box-compact");
     box.innerHTML = `
+      <div class="ai-tutor-mark">AI</div>
       <h2>Kinetic AI Tutor <span class="plus-badge">PLUS</span></h2>
       <p class="panel-empty">Hint → Bigger Hint → Explain It, aware of whatever you're building — a Kinetic Plus feature.</p>
       <button id="ait-see-plans" class="primary">See Plans</button>
@@ -45,15 +46,26 @@ export function openAITutor() {
 function render() {
   box.classList.remove("ai-tutor-box-compact");
   box.innerHTML = `
-    <div class="plans-header"><h2>Kinetic AI Tutor</h2><button id="ait-close-x" class="ai-tutor-close-x" title="Close">×</button></div>
-    <p class="saves-hint">Hint → Bigger Hint → Explain It — aware of your current simulation and challenge, once it's live. <strong>Not connected yet</strong>: every message below gets a real, honest error, not a fabricated answer.</p>
+    <div class="ai-tutor-header">
+      <div class="ai-tutor-header-title">
+        <div class="ai-tutor-mark">AI</div>
+        <div>
+          <h2>Kinetic AI Tutor</h2>
+          <p class="ai-tutor-subtitle">Hint → Bigger Hint → Explain It — aware of your current simulation and challenge, once it's live.</p>
+        </div>
+      </div>
+      <button id="ait-close-x" class="ai-tutor-close-x" title="Close">×</button>
+    </div>
+    <p class="ai-tutor-disclaimer"><strong>Not connected yet</strong> — every message below gets a real, honest error, not a fabricated answer.</p>
     <div id="ait-history" class="ai-tutor-history"></div>
     <div class="ai-tutor-composer">
       <textarea id="ait-input" class="ai-tutor-input" rows="2" placeholder="Ask the AI Tutor something…"></textarea>
+      <button id="ait-saved" title="My Saved Chats">My Saved Chats</button>
       <button id="ait-send" class="primary">Send</button>
     </div>
   `;
   box.querySelector("#ait-close-x").addEventListener("click", () => modal.classList.add("hidden"));
+  box.querySelector("#ait-saved").addEventListener("click", () => openSavedChats());
   const input = box.querySelector("#ait-input");
   const sendBtn = box.querySelector("#ait-send");
   input.addEventListener("keydown", (e) => {
@@ -63,12 +75,36 @@ function render() {
   renderHistory();
 }
 
+// Saving a chat is what lets it be shared with a teacher/classmate (see
+// the Dashboard) — same generic "Save current" + list panel every other
+// mode's My Saved ___ uses, just with the current messages array as data.
+function openSavedChats() {
+  openSavesPanel({
+    kind: "ai-chats",
+    title: "My Saved Chats",
+    itemNoun: "chat",
+    serialize: () => messages,
+    apply: (data) => applySharedAiChat(data),
+  });
+}
+
+// Loading a chat a teacher/student shared, or one of your own saved ones —
+// replaces the current conversation with the shared/saved one.
+export function applySharedAiChat(data) {
+  messages = Array.isArray(data) ? data : [];
+  renderHistory();
+}
+
 function renderHistory() {
   const historyEl = box.querySelector("#ait-history");
   if (!historyEl) return;
   historyEl.innerHTML = messages.length
-    ? messages.map((m) => `<div class="ai-tutor-msg ai-tutor-msg-${m.role}">${escapeHtml(m.text)}</div>`).join("")
-    : `<p class="panel-empty">No messages yet — ask anything about what you're building.</p>`;
+    ? messages.map((m) => `
+        <div class="ai-tutor-msg-row ai-tutor-msg-row-${m.role}">
+          <div class="ai-tutor-msg ai-tutor-msg-${m.role}">${escapeHtml(m.text)}</div>
+        </div>
+      `).join("")
+    : `<div class="ai-tutor-empty"><div class="ai-tutor-empty-mark">AI</div><p>No messages yet — ask anything about what you're building.</p></div>`;
   historyEl.scrollTop = historyEl.scrollHeight;
 }
 

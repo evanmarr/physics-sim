@@ -44,11 +44,13 @@ export const LIMITS = {
     maxWorlds: 6, maxMathItems: 6, maxCities: 3, maxCustomItems: 0,
     notebookEntries: 8, compareRunsHistory: 2, graphHistorySeconds: 60,
     shareCodesEnabled: false, customItemsEnabled: false, physics3dEnabled: false,
+    maxAiChats: 6, maxWhiteboards: 6, maxNotes: 8, maxRocketFlights: 6,
   },
   plus: {
     maxWorlds: 40, maxMathItems: 40, maxCities: 20, maxCustomItems: 30,
     notebookEntries: null, compareRunsHistory: null, graphHistorySeconds: null,
     shareCodesEnabled: true, customItemsEnabled: true, physics3dEnabled: true,
+    maxAiChats: null, maxWhiteboards: null, maxNotes: null, maxRocketFlights: null,
   },
 };
 export function isUnlimited(limitValue) { return limitValue === null; }
@@ -87,10 +89,11 @@ export function resolveEntitlements(userRow) {
 // This composes an assignment-scoped view on top of an already-resolved
 // base entitlement; it does not read or write the database itself.
 //
-// NOT YET WIRED to a real route: the full classroom-assignment feature
-// (rosters/assignments/submissions) doesn't exist in this codebase yet —
-// this exists so that feature can slot into the entitlement model later
-// without another redesign. See README.md's "known limitations."
+// NOT YET WIRED to a real route: classroom assignments (see server.js's
+// createAssignment/assignmentsFor) exist and post a completion checkbox
+// per student, but nothing there grants a scoped entitlement bump yet —
+// this exists so that can slot into the entitlement model later without
+// another redesign.
 export function withClassroomAssignmentScope(base, { activeAssignment } = {}) {
   if (!activeAssignment) return base;
   if (base.isPlus) return base; // already has it everywhere — no scoping needed

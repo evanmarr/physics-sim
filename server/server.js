@@ -310,10 +310,11 @@ async function deleteItem(email, kind, id) {
 }
 
 // ---------- classrooms ----------
-// Any signed-in account can create a classroom (becomes its teacher) and/or
-// join one with a code (becomes a student in it) — there's no separate
-// "teacher" vs "student" account type, since plenty of real people are
-// both (a TA, a parent-teacher, someone auditing their own kid's class).
+// Gated by the account's own Title (see clampTitle/VALID_TITLES): only a
+// Teacher account can create a classroom, only a Student account can join
+// one — an Independent account can do neither until they switch their
+// Title in the account menu. This is enforced here, not just hidden in
+// the UI, since the UI check alone would only stop an honest client.
 
 // Unambiguous alphabet — no 0/O or 1/I, so a code read aloud or handwritten
 // on a whiteboard doesn't turn into a support request.
@@ -341,6 +342,8 @@ async function classroomsTaughtBy(email) { return db.classroomsTaughtByDb(email)
 async function classroomsJoinedBy(email) { return db.classroomsJoinedByDb(email); }
 
 async function createClassroom(email, name) {
+  const user = await db.getUser(email);
+  if (user?.title !== "teacher") return { error: "Only a Teacher account can create a classroom — switch your Title to Teacher in the account menu." };
   const teachingCount = await db.countClassroomsTaughtBy(email);
   if (teachingCount >= MAX_CLASSROOMS_PER_TEACHER) return { error: `You already have ${MAX_CLASSROOMS_PER_TEACHER} classrooms — delete one first.` };
   const code = await generateClassCode();
@@ -351,6 +354,8 @@ async function createClassroom(email, name) {
 }
 
 async function joinClassroom(email, rawCode) {
+  const user = await db.getUser(email);
+  if (user?.title !== "student") return { error: "Only a Student account can join a classroom — switch your Title to Student in the account menu." };
   const code = String(rawCode || "").trim().toUpperCase();
   const classroom = await db.getClassroom(code);
   if (!classroom) return { error: "That class code doesn't match any classroom." };
@@ -438,8 +443,10 @@ async function assignmentsFor(email) {
 // general inbox, it only ever flows along an existing teacher/student
 // relationship.
 
+const SHAREABLE_KINDS = new Set(["worlds", "mathItems", "cities", "notebookEntries", "aiChats", "whiteboards", "notes", "rocketFlights"]);
+
 async function shareItem(email, { kind, name, data, classroomCode, direction }) {
-  if (kind !== "worlds" && kind !== "mathItems") return { error: "Can only share Physics worlds or Mathematics items." };
+  if (!SHAREABLE_KINDS.has(kind)) return { error: "That isn't something you can share." };
   if (JSON.stringify(data ?? {}).length > MAX_SHARED_ITEM_BYTES) return { error: "That item is too large to share." };
   const classroom = await db.getClassroom(String(classroomCode || "").toUpperCase());
   if (!classroom) return { error: "That class code doesn't match any classroom." };
@@ -1003,7 +1010,9 @@ export async function handleApi(req, res, url) {
   // server/entitlements.js), so createItem's own over-limit check is
   // already the entitlement gate here — no separate 403 branch needed.
   const collectionKey = parts[1] === "worlds" ? "worlds" : parts[1] === "math-items" ? "mathItems" : parts[1] === "cities" ? "cities"
-    : parts[1] === "custom-items" ? "customItems" : parts[1] === "notebook" ? "notebookEntries" : null;
+    : parts[1] === "custom-items" ? "customItems" : parts[1] === "notebook" ? "notebookEntries"
+    : parts[1] === "ai-chats" ? "aiChats" : parts[1] === "whiteboards" ? "whiteboards" : parts[1] === "notes" ? "notes"
+    : parts[1] === "rocket-flights" ? "rocketFlights" : null;
   if (collectionKey) {
     if (req.method === "GET") return sendJson(res, 200, { items: await listItems(email, collectionKey) });
     if (req.method === "POST") {
@@ -1011,7 +1020,10 @@ export async function handleApi(req, res, url) {
       const limits = resolveEntitlements(await db.getUser(email)).limits;
       const max = collectionKey === "worlds" ? limits.maxWorlds : collectionKey === "cities" ? limits.maxCities
         : collectionKey === "customItems" ? limits.maxCustomItems
-        : collectionKey === "notebookEntries" ? limits.notebookEntries : limits.maxMathItems;
+        : collectionKey === "notebookEntries" ? limits.notebookEntries
+        : collectionKey === "aiChats" ? limits.maxAiChats : collectionKey === "whiteboards" ? limits.maxWhiteboards
+        : collectionKey === "notes" ? limits.maxNotes : collectionKey === "rocketFlights" ? limits.maxRocketFlights
+        : limits.maxMathItems;
       const result = await createItem(email, collectionKey, max, body.name, body.data, body.snapshot);
       return sendJson(res, result.error ? 400 : 200, result.error ? result : { item: result.item });
     }

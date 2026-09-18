@@ -226,7 +226,7 @@ export class Physics3DMode {
       downPos = { x: e.clientX, y: e.clientY };
       const hit = this._hitTestObject(e);
       if (!hit) return;
-      this.selectedId = hit.id;
+      this._setSelected(hit.id);
       this._renderPanel();
       this._dragObj = hit;
       this.controls.enabled = false;
@@ -328,8 +328,33 @@ export class Physics3DMode {
 
   _pick(e) {
     const hit = this._hitTestObject(e);
-    this.selectedId = hit?.id ?? null;
+    this._setSelected(hit?.id ?? null);
     this._renderPanel();
+  }
+
+  // A bright wireframe outline on the selected object, matching Physics
+  // 2D's own selection highlight (see .world-object.selected in
+  // style.css). Added as a CHILD of the mesh rather than a separately
+  // tracked overlay, so it automatically follows that mesh's position and
+  // rotation every frame for free, exactly the way a stroke on the shape
+  // itself does in 2D — no per-frame sync code needed here.
+  _setSelected(id) {
+    const prev = this.objects.find((o) => o.id === this.selectedId);
+    if (prev?.outline) { prev.mesh.remove(prev.outline); prev.outline = null; }
+    this.selectedId = id;
+    const obj = this.objects.find((o) => o.id === id);
+    if (obj) this._addOutline(obj);
+  }
+
+  _addOutline(obj) {
+    if (obj.outline) obj.mesh.remove(obj.outline);
+    const outline = new THREE.LineSegments(
+      new THREE.EdgesGeometry(obj.mesh.geometry),
+      new THREE.LineBasicMaterial({ color: 0x38bdf8, depthTest: false })
+    );
+    outline.renderOrder = 999;
+    obj.mesh.add(outline);
+    obj.outline = outline;
   }
 
   _addObject(type) {
@@ -343,7 +368,7 @@ export class Physics3DMode {
     const obj = { id, type, color, mass: 1, friction: 0.3, restitution: 0.5, radius: 0.5, sizeX: 0.8, sizeY: 0.8, sizeZ: 0.8, spawn };
     this._instantiate(obj);
     this.objects.push(obj);
-    this.selectedId = id;
+    this._setSelected(id);
     this._renderPanel();
   }
 
@@ -382,6 +407,8 @@ export class Physics3DMode {
 
     obj.mesh = mesh;
     obj.body = body;
+    obj.outline = null; // the old mesh (and its outline child) is already gone
+    if (obj.id === this.selectedId) this._addOutline(obj);
   }
 
   _togglePlay() {
@@ -401,7 +428,7 @@ export class Physics3DMode {
       this.world.removeBody(obj.body);
     }
     this.objects = [];
-    this.selectedId = null;
+    this._setSelected(null);
     this._renderPanel();
   }
 
@@ -411,7 +438,7 @@ export class Physics3DMode {
     this.scene.remove(obj.mesh);
     this.world.removeBody(obj.body);
     this.objects = this.objects.filter((o) => o.id !== obj.id);
-    this.selectedId = null;
+    this._setSelected(null);
     this._renderPanel();
   }
 

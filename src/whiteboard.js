@@ -1,4 +1,5 @@
 import { confirmPopup } from "./popup.js";
+import { openSavesPanel } from "./auth.js";
 
 // Two lightweight, independent tools sharing one shell: a sketch surface
 // for diagramming ideas/equations, and a simple text notebook. Each
@@ -165,6 +166,12 @@ export class WhiteboardMode {
     clearBtn.textContent = "Clear";
     clearBtn.className = "wb-clear-btn";
     sizeRow.appendChild(clearBtn);
+    if (storeKey === "sketchImage") {
+      const savedBtn = document.createElement("button");
+      savedBtn.textContent = "My Saved Whiteboards";
+      savedBtn.addEventListener("click", () => this._openSavedSketches());
+      sizeRow.appendChild(savedBtn);
+    }
     toolbar.appendChild(sizeRow);
 
     wrap.appendChild(toolbar);
@@ -379,8 +386,65 @@ export class WhiteboardMode {
       editor.appendChild(delBtn);
     }
 
+    const savedNotesBtn = document.createElement("button");
+    savedNotesBtn.textContent = "My Saved Notes";
+    savedNotesBtn.addEventListener("click", () => this._openSavedNotes());
+    editor.appendChild(savedNotesBtn);
+
     wrap.appendChild(editor);
     this.stage.appendChild(wrap);
+  }
+
+  // ---------- Saving to the server (for sharing with a classroom — see
+  // the Dashboard) — separate from the localStorage-only live scratch
+  // above, which every draw stroke/keystroke already persists to
+  // instantly. These are explicit, named snapshots you choose to keep.
+
+  _openSavedSketches() {
+    openSavesPanel({
+      kind: "whiteboards",
+      title: "My Saved Whiteboards",
+      itemNoun: "whiteboard",
+      serialize: () => ({ sketchImage: this.store.sketchImage }),
+      apply: (data) => this.applySharedSketch(data),
+    });
+  }
+
+  // Loading a whiteboard a teacher/student shared, or one of your own
+  // saved ones — replaces the CURRENT sketch (same "loading replaces what
+  // you're looking at" convention Physics World Share and My Worlds use).
+  applySharedSketch(data) {
+    this.sub = "sketch";
+    for (const [id, b] of Object.entries(this._tabButtons)) b.classList.toggle("active", id === this.sub);
+    this.store.sketchImage = data?.sketchImage ?? null;
+    saveStore(this.store);
+    this._renderSub();
+  }
+
+  _openSavedNotes() {
+    const note = this.store.notes.find((n) => n.id === this._selectedNoteId);
+    openSavesPanel({
+      kind: "notes",
+      title: "My Saved Notes",
+      itemNoun: "note",
+      serialize: () => ({ title: note?.title || "Untitled", body: note?.body || "" }),
+      apply: (data) => this.applySharedNote(data),
+    });
+  }
+
+  // Loading a note a teacher/student shared, or one of your own saved
+  // ones — adds it as a NEW note rather than overwriting whatever's
+  // currently open, same as loading a shared notebook entry never
+  // overwrites an existing one.
+  applySharedNote(data) {
+    this.sub = "note";
+    for (const [id, b] of Object.entries(this._tabButtons || {})) b.classList.toggle("active", id === this.sub);
+    if (!this._nextNoteId) this._nextNoteId = (this.store.notes.length ? Math.max(...this.store.notes.map((n) => n.id)) : 0) + 1;
+    const note = { id: this._nextNoteId++, title: data?.title || "Untitled", body: data?.body || "" };
+    this.store.notes.push(note);
+    this._selectedNoteId = note.id;
+    saveStore(this.store);
+    this._renderSub();
   }
 }
 

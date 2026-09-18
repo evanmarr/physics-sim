@@ -1,7 +1,8 @@
-// Classrooms: any signed-in account can create one (becomes its teacher,
-// gets a share-able code) and/or join one with a code (becomes a student
-// in it). No separate account "type" — see server.js's classrooms comment
-// for why.
+// Classrooms: gated by the account's own Title — only a Teacher account
+// can create one (becomes its teacher, gets a share-able code), only a
+// Student account can join one with a code (becomes a student in it). The
+// UI below hides the form the account's Title doesn't allow; server.js's
+// createClassroom/joinClassroom enforce the same rule server-side.
 //
 // Assignments live inside a classroom's own row here rather than as a
 // separate modal: a teacher posts one to a classroom they teach, every
@@ -88,10 +89,12 @@ async function render() {
         </div>
       </div>
     `; }).join("") : `<p class="panel-empty">You're not teaching any classrooms yet.</p>`}
-    <div class="classroom-form">
-      <input id="classroom-name-input" type="text" maxlength="60" placeholder="Classroom name (e.g. 3rd Period Physics)" />
-      <button id="classroom-create-btn" class="primary">Create classroom</button>
-    </div>
+    ${getUser()?.title === "teacher" ? `
+      <div class="classroom-form">
+        <input id="classroom-name-input" type="text" maxlength="60" placeholder="Classroom name (e.g. 3rd Period Physics)" />
+        <button id="classroom-create-btn" class="primary">Create classroom</button>
+      </div>
+    ` : `<p class="saves-hint">Only a Teacher account can create a classroom — switch your Title to Teacher in the account menu.</p>`}
 
     <h3>Joined</h3>
     ${data.joined.length ? data.joined.map((c) => {
@@ -119,17 +122,19 @@ async function render() {
         `).join("") : `<p class="panel-empty">No assignments yet for this classroom.</p>`}
       </div>
     `; }).join("") : `<p class="panel-empty">You haven't joined a classroom yet.</p>`}
-    <div class="classroom-form">
-      <input id="classroom-code-input" type="text" maxlength="6" placeholder="Class code" style="text-transform: uppercase;" />
-      <button id="classroom-join-btn" class="primary">Join classroom</button>
-    </div>
+    ${getUser()?.title === "student" ? `
+      <div class="classroom-form">
+        <input id="classroom-code-input" type="text" maxlength="6" placeholder="Class code" style="text-transform: uppercase;" />
+        <button id="classroom-join-btn" class="primary">Join classroom</button>
+      </div>
+    ` : `<p class="saves-hint">Only a Student account can join a classroom — switch your Title to Student in the account menu.</p>`}
 
     <button id="classroom-close">Close</button>
   `;
 
   box.querySelector("#classroom-close").addEventListener("click", () => modal.classList.add("hidden"));
 
-  box.querySelector("#classroom-create-btn").addEventListener("click", async () => {
+  box.querySelector("#classroom-create-btn")?.addEventListener("click", async () => {
     const input = box.querySelector("#classroom-name-input");
     const name = input.value.trim();
     if (!name) { input.focus(); return; }
@@ -138,7 +143,7 @@ async function render() {
     render();
   });
 
-  box.querySelector("#classroom-join-btn").addEventListener("click", async () => {
+  box.querySelector("#classroom-join-btn")?.addEventListener("click", async () => {
     const input = box.querySelector("#classroom-code-input");
     const code = input.value.trim();
     if (!code) { input.focus(); return; }

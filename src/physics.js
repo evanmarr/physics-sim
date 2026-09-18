@@ -1056,6 +1056,56 @@ export class PhysicsSim {
     this.engine.gravity.y = scale;
   }
 
+  // Pushes a property-panel edit straight onto the corresponding LIVE
+  // body while a run is in progress, instead of leaving it inert until
+  // Reset+Play rebuilds the whole scene from the blueprint. `this.specs`
+  // holds this sim's own clones (built once at Play time) — every
+  // *Meta map and every `this.specs.find(...)` lookup elsewhere in this
+  // class (portal links, fan force, magnet strength, button targets, …)
+  // reads off THIS SAME object per id, so mutating it here is enough to
+  // make those continuous, per-tick behaviors pick up the change on
+  // their very next tick with no extra plumbing.
+  applyLiveEdit(id, patch) {
+    const spec = this.specs.find((s) => s.id === id);
+    if (spec) Object.assign(spec, patch);
+    const body = this.byId.get(id);
+    if (!body) return;
+    const render = body.plugin?.render;
+
+    if (spec && ("x" in patch || "y" in patch)) Body.setPosition(body, { x: spec.x, y: spec.y });
+    if (spec && "rotation" in patch) Body.setAngle(body, (spec.rotation || 0) * RAD);
+    if (spec && "fixed" in patch) {
+      Body.setStatic(body, !!spec.fixed);
+      if (render) render.fixed = !!spec.fixed;
+    }
+    if (spec && ("material" in patch || "densityOverride" in patch || "frictionOverride" in patch || "restitutionOverride" in patch)) {
+      const mat = materialOf(spec.material);
+      body.friction = effectiveFriction(spec, mat);
+      body.restitution = effectiveRestitution(spec, mat);
+      Body.setDensity(body, Math.max(effectiveDensity(spec, mat) * DENSITY_SCALE, 0.0001));
+      if (render) render.material = spec.material;
+    }
+    // Resizing rescales the ACTUAL collision geometry (Body.scale), not
+    // just the number shown on screen — otherwise what you see while
+    // playing would stop matching what you actually collide with.
+    if (spec && render && render.width != null && render.height != null && ("width" in patch || "height" in patch)) {
+      const sx = spec.width / render.width, sy = spec.height / render.height;
+      if (Number.isFinite(sx) && Number.isFinite(sy) && sx > 0 && sy > 0 && (sx !== 1 || sy !== 1)) Body.scale(body, sx, sy);
+      render.width = spec.width;
+      render.height = spec.height;
+    }
+    if (spec && render && render.radius != null && "radius" in patch) {
+      const s = spec.radius / render.radius;
+      if (Number.isFinite(s) && s > 0 && s !== 1) Body.scale(body, s, s);
+      render.radius = spec.radius;
+    }
+    if (render && spec) {
+      for (const key of ["power", "range", "holeRatio"]) {
+        if (key in patch) render[key] = spec[key];
+      }
+    }
+  }
+
   // Turns the pointer into a real ball: a genuine dynamic body that
   // collides with everything movable in the scene, connected to the live
   // pointer position by a spring (the same technique Matter's own

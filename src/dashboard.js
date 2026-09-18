@@ -7,8 +7,16 @@
 import { getUser, onAuthChange, fetchItems, fetchClassrooms, escapeHtml } from "./auth.js";
 import { alertPopup } from "./popup.js";
 
-const KIND_LABELS = { worlds: "Physics world", mathItems: "Math item" };
-const KIND_TO_URL = { worlds: "worlds", mathItems: "math-items" };
+const KIND_LABELS = {
+  worlds: "Physics world", mathItems: "Math item", cities: "City",
+  notebookEntries: "Notebook entry", aiChats: "AI Tutor chat", whiteboards: "Whiteboard",
+  notes: "Note", rocketFlights: "Rocket flight",
+};
+const KIND_TO_URL = {
+  worlds: "worlds", mathItems: "math-items", cities: "cities",
+  notebookEntries: "notebook", aiChats: "ai-chats", whiteboards: "whiteboards",
+  notes: "notes", rocketFlights: "rocket-flights",
+};
 
 const appliers = {}; // kind -> (data) => void, filled in by main.js via registerShareApplier
 export function registerShareApplier(kind, fn) { appliers[kind] = fn; }

@@ -24,10 +24,10 @@ import { difficultyBadgeHtml } from "./challengeTiers.js";
 import { initClassroomUI } from "./classroom.js";
 import { initPlansUI } from "./plans.js";
 import { Physics3DMode } from "./physics3d.js";
-import { initAITutorUI } from "./aiTutor.js";
+import { initAITutorUI, openAITutor, applySharedAiChat } from "./aiTutor.js";
 import { initCustomItemsUI, openCustomItemsHome } from "./customItems.js";
 import { initPhysicsGraphPanel, renderPhysicsGraphPanel, pushGraphSample, resetGraphPanel } from "./physicsGraphPanel.js";
-import { initNotebookUI, openNotebookHome } from "./notebook.js";
+import { initNotebookUI, openNotebookHome, applySharedNotebookEntry } from "./notebook.js";
 import { initModelInfoUI, openModelInfo } from "./modelInfo.js";
 import { renderExperienceLevelPicker, getExperienceLevel } from "./experienceLevel.js";
 import { initWorldShareUI } from "./worldShare.js";
@@ -224,7 +224,13 @@ function patchObject(id, patch) {
   if (!spec) return;
   markUndo();
   Object.assign(spec, patch);
-  renderAll();
+  // While a run is in progress, push the edit onto the live body instead
+  // of re-rendering from this (stale-positioned) blueprint — the running
+  // sim's own next frame already re-renders from the live bodies moments
+  // later, so a renderAll() here would just flash every object back to
+  // its pre-Play position for one frame before that correction lands.
+  if (state.playing && sim) sim.applyLiveEdit(id, patch);
+  else renderAll();
   scheduleSave();
 }
 
@@ -675,6 +681,12 @@ function wireTopbar(renderer) {
   });
   registerShareApplier("worlds", (data) => { window._setMode("physics"); applyPhysicsWorldData(window._renderer, data); });
   registerShareApplier("mathItems", (data) => { window._setMode("mathematics"); mathematicsMode.applySavedData(data); });
+  registerShareApplier("cities", (data) => { window._setMode("sustainability"); sustainabilityMode.applySavedData(data); });
+  registerShareApplier("notebookEntries", (data) => applySharedNotebookEntry(data));
+  registerShareApplier("aiChats", (data) => { openAITutor(); applySharedAiChat(data); });
+  registerShareApplier("whiteboards", (data) => { window._setMode("whiteboard"); whiteboardMode.applySharedSketch(data); });
+  registerShareApplier("notes", (data) => { window._setMode("whiteboard"); whiteboardMode.applySharedNote(data); });
+  registerShareApplier("rocketFlights", (data) => { window._setMode("astronomy"); astronomyMode.applySharedRocketFlight?.(data); });
   _openSharedSimFromUrl();
 
   initAuthUI();

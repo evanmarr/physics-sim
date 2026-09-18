@@ -96,6 +96,8 @@ export class AstronomyMode {
     rocketTab.className = "econ-tab";
     rocketTab.textContent = "Rocket Simulator";
     rocketTab.addEventListener("click", () => this._showRocketSim(solarTab, rocketTab));
+    this._solarTab = solarTab;
+    this._rocketTab = rocketTab;
     tabs.appendChild(solarTab);
     tabs.appendChild(rocketTab);
     outer.appendChild(tabs);
@@ -145,6 +147,14 @@ export class AstronomyMode {
     if (this._raf) cancelAnimationFrame(this._raf);
     if (!this.rocketSim) this.rocketSim = new RocketSimMode(this.rocketWrap, this.ctx);
     this.rocketSim.mount();
+  }
+
+  // Loading a rocket flight a teacher/student shared via the Dashboard —
+  // switches to the Rocket Simulator sub-tab (building it if this is the
+  // first visit) and hands it the shared telemetry to display.
+  applySharedRocketFlight(data) {
+    if (this._solarTab && this._rocketTab) this._showRocketSim(this._solarTab, this._rocketTab);
+    this.rocketSim?.applySharedFlight(data);
   }
 
   _buildControls() {

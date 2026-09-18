@@ -44,11 +44,11 @@ const TICK_MS = 2000;
 const DAY_LENGTH_TICKS = 24; // one full day/night cycle, for solar's real intermittency
 
 const BUILDINGS = [
-  { id: "residential", name: "Residential", code: "Re", cost: 50, energyUse: 5, pollution: 1, population: 20, income: 2, unit: "MWh/yr, tons CO₂e/yr" },
-  { id: "commercial", name: "Commercial", code: "Cm", cost: 80, energyUse: 8, pollution: 2, population: 0, income: 6 },
-  { id: "industrial", name: "Industrial", code: "In", cost: 120, energyUse: 15, pollution: 9, population: 0, income: 11 },
+  { id: "residential", name: "Residential", icon: "🏠", cost: 50, energyUse: 5, pollution: 1, population: 20, income: 2, unit: "MWh/yr, tons CO₂e/yr" },
+  { id: "commercial", name: "Commercial", icon: "🏬", cost: 80, energyUse: 8, pollution: 2, population: 0, income: 6 },
+  { id: "industrial", name: "Industrial", icon: "🏭", cost: 120, energyUse: 15, pollution: 9, population: 0, income: 11 },
   {
-    id: "solar", name: "Solar Farm", code: "Sl", cost: 150, energyProduce: 20, pollution: 0, population: 0, income: 0,
+    id: "solar", name: "Solar Farm", icon: "☀️", cost: 150, energyProduce: 20, pollution: 0, population: 0, income: 0,
     // Real solar panels don't run at their nameplate rating around the
     // clock — capacityFactor is the honest fraction of nameplate they
     // deliver on average (~25% is a realistic U.S. utility-scale figure),
@@ -56,27 +56,27 @@ const BUILDINGS = [
     capacityFactor: 0.25, intermittent: "solar",
   },
   {
-    id: "wind", name: "Wind Turbine", code: "Wn", cost: 130, energyProduce: 18, pollution: 0, population: 0, income: 0,
+    id: "wind", name: "Wind Turbine", icon: "💨", cost: 130, energyProduce: 18, pollution: 0, population: 0, income: 0,
     // ~35% capacity factor is realistic for onshore wind; intermittent:
     // "wind" also makes actual output gust tick to tick instead of being
     // a flat line, which is the real reason wind needs backup/storage too.
     capacityFactor: 0.35, intermittent: "wind",
   },
   {
-    id: "coal", name: "Coal Plant", code: "Co", cost: 100, energyProduce: 40, pollution: 16, population: 0, income: 0,
+    id: "coal", name: "Coal Plant", icon: "🏗️", cost: 100, energyProduce: 40, pollution: 16, population: 0, income: 0,
     // Baseload: reliably close to nameplate day or night — but that
     // reliability has a real ongoing price real renewables don't: fuel.
     capacityFactor: 0.85, fuelCostPerTick: 4,
   },
   {
-    id: "battery", name: "Battery Storage", code: "Ba", cost: 80, energyUse: 0, pollution: 0, population: 0, income: 0,
+    id: "battery", name: "Battery Storage", icon: "🔋", cost: 80, energyUse: 0, pollution: 0, population: 0, income: 0,
     // The actual answer to "solar does nothing at night": store daytime
     // surplus and discharge it during a shortfall, up to this much energy
     // — a real, limited-capacity tradeoff, not an infinite free fix.
     storageCapacity: 25,
   },
-  { id: "park", name: "Park", code: "Pk", cost: 30, energyUse: 0, pollution: -3, population: 0, income: 0 },
-  { id: "water", name: "Water Treatment", code: "Wt", cost: 90, energyUse: 6, pollution: -4, population: 0, income: 1 },
+  { id: "park", name: "Park", icon: "🌳", cost: 30, energyUse: 0, pollution: -3, population: 0, income: 0 },
+  { id: "water", name: "Water Treatment", icon: "💧", cost: 90, energyUse: 6, pollution: -4, population: 0, income: 1 },
 ];
 const BUILDING_BY_ID = Object.fromEntries(BUILDINGS.map((b) => [b.id, b]));
 
@@ -267,7 +267,7 @@ export class SustainabilityMode {
     for (const b of BUILDINGS) {
       const chip = document.createElement("button");
       chip.className = "sustain-chip" + (this.armed === b.id ? " active" : "");
-      chip.innerHTML = `<span>${b.name}</span><span class="sustain-chip-cost">$${b.cost}k</span>`;
+      chip.innerHTML = `<span>${b.icon}</span><span>${b.name}</span><span class="sustain-chip-cost">$${b.cost}k</span>`;
       chip.title = [
         b.energyProduce ? `Nameplate ${b.energyProduce} MWh/yr${b.capacityFactor ? ` (~${Math.round(b.capacityFactor * 100)}% capacity factor)` : ""}` : (b.energyUse ? `Uses ${b.energyUse} MWh/yr` : null),
         b.intermittent === "solar" ? "Zero output at night — real solar intermittency" : null,
@@ -292,7 +292,7 @@ export class SustainabilityMode {
       const occupied = this.grid[i];
       if (occupied) {
         const def = BUILDING_BY_ID[occupied];
-        cell.textContent = def.code;
+        cell.textContent = def.icon;
         cell.title = def.name;
       }
       cell.addEventListener("click", () => this._clickCell(i));
@@ -349,7 +349,7 @@ export class SustainabilityMode {
     }
     this.budget -= def.cost;
     this.grid[i] = this.armed;
-    cellEls[i].textContent = def.code;
+    cellEls[i].textContent = def.icon;
     cellEls[i].title = def.name;
     this._updateDashboard();
   }
@@ -384,15 +384,20 @@ export class SustainabilityMode {
       itemNoun: "city",
       max: 3,
       serialize: () => ({ grid: this.grid, budget: this.budget, population: this.population, pollutionLevel: this.pollutionLevel, tick: this.tick, batteryStored: this.batteryStored }),
-      apply: (data) => {
-        this.grid = data.grid || new Array(GRID_W * GRID_H).fill(null);
-        this.budget = data.budget ?? 500;
-        this.population = data.population ?? 0;
-        this.pollutionLevel = data.pollutionLevel ?? 0;
-        this.tick = data.tick ?? 0;
-        this.batteryStored = data.batteryStored ?? 0;
-        this._renderView();
-      },
+      apply: (data) => this.applySavedData(data),
     });
+  }
+
+  // Also the entry point for loading a city a teacher/student shared via
+  // the Dashboard (see main.js's registerShareApplier("cities", ...)) —
+  // exactly the same data shape _openSaves' own apply() uses.
+  applySavedData(data) {
+    this.grid = data.grid || new Array(GRID_W * GRID_H).fill(null);
+    this.budget = data.budget ?? 500;
+    this.population = data.population ?? 0;
+    this.pollutionLevel = data.pollutionLevel ?? 0;
+    this.tick = data.tick ?? 0;
+    this.batteryStored = data.batteryStored ?? 0;
+    this._renderView();
   }
 }

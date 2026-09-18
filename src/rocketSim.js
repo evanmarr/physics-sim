@@ -21,6 +21,8 @@
 import { assertFullLadder, difficultyBadgeHtml } from "./challengeTiers.js";
 import { PLANETS, planetPosition, moonOffsetFromEarth, dateToJulianDate } from "./astronomyData.js";
 import { openModelInfo } from "./modelInfo.js";
+import { openSavesPanel } from "./auth.js";
+import { alertPopup } from "./popup.js";
 
 const G = 6.674e-11; // universal gravitational constant
 const G0 = 9.80665; // standard gravity, used by the rocket equation itself (Isp is defined against this, not local surface gravity)
@@ -597,6 +599,20 @@ export class RocketSimMode {
     btnRow.appendChild(clearGhostBtn);
     p.appendChild(btnRow);
 
+    // Sharing a flight with a teacher/classmate (see the Dashboard) needs
+    // something to actually point at — this is that: a saved snapshot of
+    // one try's real telemetry, not a re-playable simulation state (there's
+    // nothing meaningful to "resume" from a past flight). Same "open a
+    // panel with Save current + a list" shape as My Cities/My Saved Math
+    // Items elsewhere in the app.
+    const flightBtnRow = div("chem-hint");
+    flightBtnRow.style.marginTop = "6px";
+    const myFlightsBtn = document.createElement("button");
+    myFlightsBtn.textContent = "My Saved Flights";
+    myFlightsBtn.addEventListener("click", () => this._openSavedFlights());
+    flightBtnRow.appendChild(myFlightsBtn);
+    p.appendChild(flightBtnRow);
+
     const challengeTitle = div("chem-panel-title");
     challengeTitle.style.marginTop = "16px";
     challengeTitle.textContent = "Challenges";
@@ -1041,5 +1057,45 @@ export class RocketSimMode {
     this.logEl.innerHTML = this.log.slice(-6).map((l) => `<div>${l}</div>`).join("") || "No events yet.";
 
     if (this.launchBtn) this.launchBtn.disabled = this.launched && status !== "On the pad";
+  }
+
+  // A real snapshot of the CURRENT flight's actual telemetry — the same
+  // data _renderGraph() already draws from — not a re-playable sim state.
+  _flightSnapshot() {
+    return {
+      history: this.history,
+      maxAltitude: this.maxAltitude,
+      crashed: this.crashed,
+      status: this._status(),
+      time: this.time,
+    };
+  }
+
+  _openSavedFlights() {
+    openSavesPanel({
+      kind: "rocket-flights",
+      title: "My Saved Flights",
+      itemNoun: "flight",
+      serialize: () => this._flightSnapshot(),
+      apply: (data) => this._showFlightSummary(data),
+    });
+  }
+
+  _showFlightSummary(data) {
+    const samples = data.history?.time?.length || 0;
+    alertPopup(
+      `Status: ${data.status || (data.crashed ? "Crashed" : "Unknown")}\n` +
+      `Max altitude: ${fmt(data.maxAltitude || 0)} m\n` +
+      `Flight time: ${(data.time || 0).toFixed(0)} s\n` +
+      `${samples} telemetry samples recorded.`,
+      { title: "Rocket Flight" }
+    );
+  }
+
+  // Loading a flight a teacher/student shared via the Dashboard — just
+  // shows its real recorded telemetry; there's no live sim state to
+  // resume from a past flight, only what actually happened during it.
+  applySharedFlight(data) {
+    this._showFlightSummary(data);
   }
 }

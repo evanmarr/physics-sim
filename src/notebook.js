@@ -26,6 +26,16 @@ export function openNotebookHome() {
   renderHome();
 }
 
+// Opens a notebook entry shared by a teacher/student (see Dashboard) as a
+// new, unsaved editor prefilled with the shared data — "Save" creates your
+// own copy rather than overwriting anything, same as loading any other
+// shared item never edits the sender's original.
+export function applySharedNotebookEntry(data) {
+  if (!getUser()) { document.getElementById("account-btn").click(); return; }
+  modal.classList.remove("hidden");
+  openEditor([], null, data);
+}
+
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
@@ -98,8 +108,8 @@ async function renderHome() {
   });
 }
 
-function openEditor(items, existing) {
-  const entry = existing?.data || { module: "Physics", prediction: "", variablesChanged: "", observation: "", conclusion: "", initialState: null, finalState: null, schemaVersion: 1 };
+function openEditor(items, existing, prefillData) {
+  const entry = existing?.data || prefillData || { module: "Physics", prediction: "", variablesChanged: "", observation: "", conclusion: "", initialState: null, finalState: null, schemaVersion: 1 };
   const name = existing?.name || "";
 
   box.innerHTML = `

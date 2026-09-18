@@ -51,7 +51,7 @@ export function renderPhysicsGraphPanel(state) {
   if (hint) {
     hint.innerHTML = Number.isFinite(historySeconds)
       ? `Free: last ${historySeconds}s shown. <span class="plus-badge">PLUS</span> keeps the full run and lets you export it.`
-      : 'Full run history <span class="plus-badge">PLUS</span>';
+      : "Showing the full run — nothing is trimmed.";
   }
   const exportBtn = panelEl.querySelector("#physics-graph-export");
   if (exportBtn) exportBtn.disabled = !entitlements?.isPlus;

@@ -399,23 +399,72 @@ input[type="range"] { accent-color: var(--accent); cursor: pointer; }
 
 #physics3d-root.physics3d-locked { display: flex; align-items: center; justify-content: center; height: 100%; background: var(--bg); }
 
-#ai-tutor-modal { align-items: stretch; justify-content: stretch; padding: 0; }
-#ai-tutor-modal:has(.ai-tutor-box-compact) { align-items: center; justify-content: center; padding: 16px; }
-#ai-tutor-modal-box.ai-tutor-box { width: 100%; height: 100%; max-width: none; max-height: none; border-radius: 0; box-sizing: border-box; display: flex; flex-direction: column; padding: 24px clamp(16px, 6vw, 120px); }
-#ai-tutor-modal-box.ai-tutor-box-compact { width: 360px; height: auto; max-width: calc(100vw - 32px); max-height: 70vh; border-radius: 10px; padding: 20px; }
-.ai-tutor-close-x { background: none; border: none; font-size: 20px; line-height: 1; color: var(--text-dim); padding: 0 4px; }
-.ai-tutor-close-x:hover { color: var(--text); }
-.ai-tutor-history {
-  flex: 1; min-height: 0; overflow-y: auto; margin: 12px 0; padding: 12px;
-  background: var(--panel-alt); border: 1px solid var(--border); border-radius: 10px;
-  display: flex; flex-direction: column; gap: 8px;
+#ai-tutor-modal {
+  align-items: stretch; justify-content: stretch; padding: 0;
+  background: radial-gradient(circle at 50% 0%, color-mix(in srgb, var(--cool-2) 20%, transparent), rgba(0,0,0,.55) 60%);
 }
-.ai-tutor-msg { max-width: 80%; padding: 8px 12px; border-radius: 10px; font-size: 13.5px; line-height: 1.5; white-space: pre-wrap; }
-.ai-tutor-msg-user { align-self: flex-end; background: linear-gradient(120deg, var(--cool-1), var(--cool-2)); color: #0b1220; }
-.ai-tutor-msg-assistant { align-self: flex-start; background: var(--panel); border: 1px solid var(--border); color: var(--text); }
-.ai-tutor-composer { display: flex; gap: 8px; align-items: flex-end; }
-.ai-tutor-input { flex: 1; resize: vertical; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel-alt); color: var(--text); font: inherit; }
-.ai-tutor-composer button { flex-shrink: 0; }
+#ai-tutor-modal:has(.ai-tutor-box-compact) { align-items: center; justify-content: center; padding: 16px; }
+#ai-tutor-modal-box.ai-tutor-box {
+  width: 100%; height: 100%; max-width: none; max-height: none; border-radius: 0; box-sizing: border-box;
+  display: flex; flex-direction: column; padding: 22px clamp(16px, 6vw, 120px) 24px;
+  background:
+    radial-gradient(1200px 500px at 50% -10%, color-mix(in srgb, var(--cool-2) 12%, transparent), transparent 60%),
+    var(--panel);
+}
+#ai-tutor-modal-box.ai-tutor-box-compact { width: 360px; height: auto; max-width: calc(100vw - 32px); max-height: 70vh; border-radius: 14px; padding: 20px; text-align: center; }
+.ai-tutor-box-compact .ai-tutor-mark { margin: 0 auto 12px; }
+
+.ai-tutor-mark {
+  flex-shrink: 0; width: 40px; height: 40px; border-radius: 12px; display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(135deg, var(--cool-1), var(--cool-2)); color: #0b1220; font-weight: 800; font-size: 13px;
+  letter-spacing: .02em; box-shadow: 0 4px 18px color-mix(in srgb, var(--cool-2) 45%, transparent);
+}
+.ai-tutor-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding-bottom: 14px; border-bottom: 1px solid var(--border); }
+.ai-tutor-header-title { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.ai-tutor-header-title h2 { margin: 0; font-size: 17px; }
+.ai-tutor-subtitle { margin: 3px 0 0; font-size: 12px; color: var(--text-dim); line-height: 1.4; }
+.ai-tutor-disclaimer { margin: 10px 0 0; font-size: 11.5px; color: var(--text-dim); }
+.ai-tutor-close-x {
+  flex-shrink: 0; width: 30px; height: 30px; display: flex; align-items: center; justify-content: center;
+  background: var(--panel-alt); border: 1px solid var(--border); border-radius: 999px; font-size: 17px; line-height: 1; color: var(--text-dim);
+}
+.ai-tutor-close-x:hover { color: var(--text); border-color: var(--cool-2); }
+.ai-tutor-history {
+  flex: 1; min-height: 0; overflow-y: auto; margin: 12px 0; padding: 16px;
+  background: color-mix(in srgb, var(--panel-alt) 70%, transparent); border: 1px solid var(--border); border-radius: 14px;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.ai-tutor-empty { margin: auto; text-align: center; color: var(--text-dim); }
+.ai-tutor-empty-mark {
+  width: 44px; height: 44px; border-radius: 14px; margin: 0 auto 10px; display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--cool-1) 35%, transparent), color-mix(in srgb, var(--cool-2) 35%, transparent));
+  border: 1px solid var(--border); color: var(--cool-2); font-weight: 800; font-size: 12px;
+}
+.ai-tutor-empty p { margin: 0; font-size: 13px; }
+.ai-tutor-msg-row { display: flex; padding: 4px 0; }
+.ai-tutor-msg-row-user { justify-content: flex-end; }
+.ai-tutor-msg-row-assistant { justify-content: flex-start; }
+.ai-tutor-msg {
+  max-width: 80%; padding: 10px 14px; border-radius: 14px; font-size: 13.5px; line-height: 1.5; white-space: pre-wrap;
+}
+.ai-tutor-msg-user {
+  background: linear-gradient(120deg, var(--cool-1), var(--cool-2)); color: #0b1220; border-bottom-right-radius: 4px;
+  box-shadow: 0 3px 12px color-mix(in srgb, var(--cool-2) 30%, transparent);
+}
+.ai-tutor-msg-assistant { background: var(--panel); border: 1px solid var(--border); color: var(--text); border-bottom-left-radius: 4px; }
+.ai-tutor-composer {
+  display: flex; gap: 10px; align-items: flex-end; padding: 8px; border-radius: 16px;
+  background: var(--panel-alt); border: 1px solid var(--border);
+}
+.ai-tutor-input {
+  flex: 1; resize: none; padding: 8px 10px; border-radius: 10px; border: 1px solid transparent; background: transparent; color: var(--text); font: inherit;
+}
+.ai-tutor-input:focus { outline: none; border-color: color-mix(in srgb, var(--cool-2) 50%, var(--border)); }
+.ai-tutor-composer button {
+  flex-shrink: 0; border: none; border-radius: 10px; padding: 9px 18px; font-weight: 700;
+  background: linear-gradient(120deg, var(--cool-1), var(--cool-2)); color: #0b1220;
+}
+.ai-tutor-composer button:disabled { opacity: .55; }
 .physics3d-locked-box {
   max-width: 420px; text-align: center; padding: 32px 28px; border-radius: 14px;
   background: var(--panel); border: 1px solid var(--border);
@@ -1753,7 +1802,7 @@ input[type="range"] { accent-color: var(--accent); cursor: pointer; }
   border-radius: 8px; overflow: hidden; flex: 1 1 420px; max-width: 560px; aspect-ratio: 12 / 8;
 }
 .sustain-cell {
-  background: var(--panel-alt); border: none; font-size: 12px; font-weight: 700; color: var(--text-dim); display: flex;
+  background: var(--panel-alt); border: none; font-size: 18px; display: flex;
   align-items: center; justify-content: center; cursor: pointer; padding: 0; aspect-ratio: 1;
 }
 .sustain-cell:hover { background: var(--panel); }
