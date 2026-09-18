@@ -26,6 +26,7 @@ export function openAITutor() {
   const user = getUser();
   if (!user) { document.getElementById("account-btn").click(); return; }
   if (!user.entitlements?.isPlus) {
+    box.classList.add("ai-tutor-box-compact");
     box.innerHTML = `
       <h2>Kinetic AI Tutor <span class="plus-badge">PLUS</span></h2>
       <p class="panel-empty">Hint → Bigger Hint → Explain It, aware of whatever you're building — a Kinetic Plus feature.</p>
@@ -42,6 +43,7 @@ export function openAITutor() {
 }
 
 function render() {
+  box.classList.remove("ai-tutor-box-compact");
   box.innerHTML = `
     <div class="plans-header"><h2>Kinetic AI Tutor</h2><button id="ait-close-x" class="ai-tutor-close-x" title="Close">×</button></div>
     <p class="saves-hint">Hint → Bigger Hint → Explain It — aware of your current simulation and challenge, once it's live. <strong>Not connected yet</strong>: every message below gets a real, honest error, not a fabricated answer.</p>

@@ -399,11 +399,14 @@ input[type="range"] { accent-color: var(--accent); cursor: pointer; }
 
 #physics3d-root.physics3d-locked { display: flex; align-items: center; justify-content: center; height: 100%; background: var(--bg); }
 
-.ai-tutor-box { width: 560px; max-width: calc(100vw - 32px); box-sizing: border-box; display: flex; flex-direction: column; max-height: 80vh; }
+#ai-tutor-modal { align-items: stretch; justify-content: stretch; padding: 0; }
+#ai-tutor-modal:has(.ai-tutor-box-compact) { align-items: center; justify-content: center; padding: 16px; }
+#ai-tutor-modal-box.ai-tutor-box { width: 100%; height: 100%; max-width: none; max-height: none; border-radius: 0; box-sizing: border-box; display: flex; flex-direction: column; padding: 24px clamp(16px, 6vw, 120px); }
+#ai-tutor-modal-box.ai-tutor-box-compact { width: 360px; height: auto; max-width: calc(100vw - 32px); max-height: 70vh; border-radius: 10px; padding: 20px; }
 .ai-tutor-close-x { background: none; border: none; font-size: 20px; line-height: 1; color: var(--text-dim); padding: 0 4px; }
 .ai-tutor-close-x:hover { color: var(--text); }
 .ai-tutor-history {
-  min-height: 220px; max-height: 45vh; overflow-y: auto; margin: 12px 0; padding: 12px;
+  flex: 1; min-height: 0; overflow-y: auto; margin: 12px 0; padding: 12px;
   background: var(--panel-alt); border: 1px solid var(--border); border-radius: 10px;
   display: flex; flex-direction: column; gap: 8px;
 }
