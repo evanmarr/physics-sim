@@ -457,7 +457,10 @@ input[type="range"] { accent-color: var(--accent); cursor: pointer; }
   background: var(--panel-alt); border: 1px solid var(--border);
 }
 .ai-tutor-input {
-  flex: 1; resize: none; padding: 8px 10px; border-radius: 10px; border: 1px solid transparent; background: transparent; color: var(--text); font: inherit;
+  /* overflow-y is required for resize:none to actually suppress the drag
+     handle — per spec, `resize` has no effect on an axis whose `overflow`
+     computes to `visible`, which is what a bare textarea can fall back to. */
+  flex: 1; resize: none; overflow-y: auto; padding: 8px 10px; border-radius: 10px; border: 1px solid transparent; background: transparent; color: var(--text); font: inherit;
 }
 .ai-tutor-input:focus { outline: none; border-color: color-mix(in srgb, var(--cool-2) 50%, var(--border)); }
 .ai-tutor-composer button {
