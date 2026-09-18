@@ -496,12 +496,16 @@ function hashLockCode(code) {
   return crypto.createHash("sha256").update(String(code)).digest("hex");
 }
 
+async function creatorDisplayName(email) {
+  const user = await db.getUser(email);
+  return [user?.first_name, user?.last_name].filter(Boolean).join(" ") || email.split("@")[0];
+}
+
 async function publishCommunitySim(email, { kind, name, description, subject, data, snapshot, lockCode }) {
   if (kind !== "worlds" && kind !== "math-items") return { error: "Can only publish Physics worlds or Mathematics items." };
   if (JSON.stringify(data ?? {}).length > MAX_COMMUNITY_SIM_BYTES) return { error: "That item is too large to publish." };
   if (lockCode && !/^\d{6}$/.test(String(lockCode))) return { error: "The unlock code must be exactly 6 digits." };
-  const user = await db.getUser(email);
-  const creatorName = [user?.first_name, user?.last_name].filter(Boolean).join(" ") || email.split("@")[0];
+  const creatorName = await creatorDisplayName(email);
   const sim = {
     id: crypto.randomUUID(), ownerEmail: email, creatorName, kind, name: clampName(name),
     description: String(description ?? "").slice(0, MAX_DESCRIPTION_LEN).trim(),
@@ -511,6 +515,14 @@ async function publishCommunitySim(email, { kind, name, description, subject, da
   };
   const lockCodeHash = lockCode ? hashLockCode(lockCode) : null;
   await db.insertCommunitySim(sim.id, sim.ownerEmail, sim.creatorName, sim.kind, sim.name, sim.description, sim.subject, sim.data, sim.snapshot, sim.createdAt, lockCodeHash);
+  // Every publish here is a brand-new community_sims row (never an edit —
+  // editing your own private saved world never touches this table), so
+  // this is exactly "a creator you subscribed to publishes a NEW public
+  // world," never a republish/edit notification.
+  const subscribers = await db.listSubscriberEmails(email);
+  for (const subscriberEmail of subscribers) {
+    await db.insertNewWorldNotification({ recipientEmail: subscriberEmail, creatorName, simId: sim.id, simName: sim.name });
+  }
   return { sim: { ...sim, data: undefined, hasLock: !!lockCodeHash } };
 }
 
@@ -539,6 +551,11 @@ async function remixCommunitySim(email, simId) {
   const lockCodeHash = await db.getCommunitySimLockHash(simId);
   await db.insertSavedItem(item.id, email, savedKind, item.name, item.data, item.updatedAt, sim.snapshot, lockCodeHash);
   await db.incrementRemixCount(simId);
+  // Never notify yourself for remixing your own published world.
+  if (sim.ownerEmail !== email) {
+    const actorName = await creatorDisplayName(email);
+    await db.upsertInteractionNotification({ recipientEmail: sim.ownerEmail, actorName, simId: sim.id, simName: sim.name, verb: "remixed" });
+  }
   return { item: { ...item, hasLock: !!lockCodeHash } };
 }
 
@@ -950,7 +967,17 @@ export async function handleApi(req, res, url) {
     }
   }
   if (parts[1] === "community-sim-favorite" && req.method === "POST") {
-    const favorited = await db.toggleFavorite(email, url.searchParams.get("id"));
+    const simId = url.searchParams.get("id");
+    const favorited = await db.toggleFavorite(email, simId);
+    // Only the transition TO favorited notifies — unfavoriting is silent,
+    // and never notify yourself for favoriting your own published world.
+    if (favorited) {
+      const sim = await db.getCommunitySim(simId);
+      if (sim && sim.ownerEmail !== email) {
+        const actorName = await creatorDisplayName(email);
+        await db.upsertInteractionNotification({ recipientEmail: sim.ownerEmail, actorName, simId: sim.id, simName: sim.name, verb: "favorited" });
+      }
+    }
     return sendJson(res, 200, { favorited });
   }
   if (parts[1] === "community-sim-report" && req.method === "POST") {
@@ -960,6 +987,42 @@ export async function handleApi(req, res, url) {
   if (parts[1] === "community-sim-remix" && req.method === "POST") {
     const result = await remixCommunitySim(email, url.searchParams.get("id"));
     return sendJson(res, result.error ? 404 : 200, result.error ? result : { item: result.item });
+  }
+
+  // ---------- notification center ----------
+  // Every query below is scoped to `email` (the caller's own session) in
+  // the WHERE clause — see db.js's listNotifications/markNotificationsRead/
+  // markAllNotificationsRead — so one account can never read or mark
+  // another account's notifications, including by guessing an id.
+  if (parts[1] === "notifications" && req.method === "GET") {
+    const [notifications, unreadCount] = await Promise.all([
+      db.listNotifications(email),
+      db.countUnreadNotifications(email),
+    ]);
+    return sendJson(res, 200, { notifications, unreadCount });
+  }
+  if (parts[1] === "notifications-read" && req.method === "POST") {
+    const body = await readJsonBody(req);
+    if (body.all) await db.markAllNotificationsRead(email);
+    else if (Array.isArray(body.ids) && body.ids.length) await db.markNotificationsRead(email, body.ids.map(String));
+    const unreadCount = await db.countUnreadNotifications(email);
+    return sendJson(res, 200, { ok: true, unreadCount });
+  }
+
+  // "Subscribe to a creator" (never "follow" — see db.js's comment on
+  // creator_subscriptions) — GET returns which creators the caller is
+  // subscribed to (so a Community Sims card can show the right button
+  // state), POST toggles one.
+  if (parts[1] === "creator-subscribe" && req.method === "GET") {
+    return sendJson(res, 200, { creatorEmails: await db.listSubscribedCreatorEmails(email) });
+  }
+  if (parts[1] === "creator-subscribe" && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const creatorEmail = String(body.creatorEmail || "").trim().toLowerCase();
+    if (!creatorEmail) return sendJson(res, 400, { error: "Missing creator." });
+    if (creatorEmail === email) return sendJson(res, 400, { error: "You can't subscribe to yourself." });
+    const subscribed = await db.toggleCreatorSubscription(email, creatorEmail);
+    return sendJson(res, 200, { subscribed });
   }
   // Verifies a Locked object's 6-digit unlock code (see src/panel.js) —
   // `kind` is "community-sim" for a Community Sims Open/shared link, or a

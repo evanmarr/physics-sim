@@ -94,6 +94,17 @@ export const toggleFavoriteSim = (id) => api(`/community-sim-favorite?id=${encod
 export const reportSim = (id) => api(`/community-sim-report?id=${encodeURIComponent(id)}`, { method: "POST" }).catch((e) => ({ error: e.message }));
 export const unpublishSim = (id) => api(`/community-sims?id=${encodeURIComponent(id)}`, { method: "DELETE" }).catch((e) => ({ error: e.message }));
 
+// ---------- Notification Center ----------
+// An inbox, not a feed — see src/notifications.js. `subscribeToCreator`
+// says "Subscribe", deliberately never "Follow": it drives exactly one
+// thing (a notification when that creator publishes a new public world),
+// nothing social-graph-shaped like a visible follower count.
+export const fetchNotifications = () => api("/notifications").then((d) => ({ notifications: d.notifications, unreadCount: d.unreadCount }));
+export const markNotificationsRead = (ids) => api("/notifications-read", { method: "POST", body: { ids } }).catch((e) => ({ error: e.message }));
+export const markAllNotificationsRead = () => api("/notifications-read", { method: "POST", body: { all: true } }).catch((e) => ({ error: e.message }));
+export const fetchSubscribedCreatorEmails = () => api("/creator-subscribe").then((d) => d.creatorEmails).catch(() => []);
+export const toggleCreatorSubscription = (creatorEmail) => api("/creator-subscribe", { method: "POST", body: { creatorEmail } }).catch((e) => ({ error: e.message }));
+
 // Onboarding quiz answers (src/onboarding.js) — writing them back through
 // api("/me")'s own shape keeps `user` in sync immediately, same as
 // title/subscribed changes elsewhere in this file.
@@ -383,6 +394,7 @@ export async function openSavesPanel({ kind, title, itemNoun, serialize, apply, 
   const communityEnabled = COMMUNITY_ENABLED_KINDS.has(kind);
   let tab = "mine";
   let favoriteIds = new Set();
+  let subscribedCreatorEmails = new Set();
 
   function tabsHtml() {
     if (!communityEnabled) return "";
@@ -396,6 +408,7 @@ export async function openSavesPanel({ kind, title, itemNoun, serialize, apply, 
 
   function simCardHtml(sim, { mine }) {
     const isFavorited = favoriteIds.has(sim.id);
+    const isSubscribed = subscribedCreatorEmails.has(sim.ownerEmail);
     return `
       <div class="saves-item community-card">
         ${sim.snapshot ? `<img class="community-snapshot" src="${sim.snapshot}" alt="" />` : `<div class="community-snapshot community-snapshot-empty"></div>`}
@@ -409,6 +422,7 @@ export async function openSavesPanel({ kind, title, itemNoun, serialize, apply, 
           <button class="community-open" data-id="${sim.id}">Open</button>
           <button class="community-remix" data-id="${sim.id}">Remix</button>
           <button class="community-favorite" data-id="${sim.id}">${isFavorited ? "★ Favorited" : "☆ Favorite"}</button>
+          ${mine ? "" : `<button class="community-subscribe" data-owner="${escapeHtml(sim.ownerEmail)}">${isSubscribed ? "Subscribed" : "Subscribe to creator"}</button>`}
           <button class="community-share" data-id="${sim.id}">Share</button>
           ${mine ? `<button class="community-unpublish danger" data-id="${sim.id}">Unpublish</button>` : `<button class="community-report" data-id="${sim.id}">Report</button>`}
         </div>
@@ -508,7 +522,11 @@ export async function openSavesPanel({ kind, title, itemNoun, serialize, apply, 
 
   async function renderCommunity() {
     let sims;
-    try { sims = await fetchCommunitySims(kind); favoriteIds = new Set(await fetchMyFavoriteIds()); } catch { sims = []; }
+    try {
+      sims = await fetchCommunitySims(kind);
+      favoriteIds = new Set(await fetchMyFavoriteIds());
+      subscribedCreatorEmails = new Set(await fetchSubscribedCreatorEmails());
+    } catch { sims = []; }
     box.innerHTML = `
       <h2>Community Sims</h2>
       ${tabsHtml()}
@@ -524,7 +542,11 @@ export async function openSavesPanel({ kind, title, itemNoun, serialize, apply, 
 
   async function renderFeatured() {
     let sims;
-    try { sims = await fetchFeaturedSims(); favoriteIds = new Set(await fetchMyFavoriteIds()); } catch { sims = []; }
+    try {
+      sims = await fetchFeaturedSims();
+      favoriteIds = new Set(await fetchMyFavoriteIds());
+      subscribedCreatorEmails = new Set(await fetchSubscribedCreatorEmails());
+    } catch { sims = []; }
     box.innerHTML = `
       <h2>Featured Creator Worlds</h2>
       ${tabsHtml()}
@@ -557,6 +579,11 @@ export async function openSavesPanel({ kind, title, itemNoun, serialize, apply, 
     }));
     box.querySelectorAll(".community-favorite").forEach((btn) => btn.addEventListener("click", async () => {
       await toggleFavoriteSim(btn.dataset.id);
+      render();
+    }));
+    box.querySelectorAll(".community-subscribe").forEach((btn) => btn.addEventListener("click", async () => {
+      const result = await toggleCreatorSubscription(btn.dataset.owner);
+      if (result?.error) { await alertPopup(result.error, { title: "Couldn't subscribe" }); return; }
       render();
     }));
     box.querySelectorAll(".community-share").forEach((btn) => btn.addEventListener("click", () => showShareLink(btn.dataset.id)));

@@ -271,6 +271,60 @@ export function ensureSchema() {
       updated_at BIGINT NOT NULL,
       PRIMARY KEY (user_email, plan)
     );
+    -- "Subscribe to a creator" (deliberately not "follow" — this is an
+    -- inbox opt-in, not a social graph) — one row means the subscriber
+    -- wants a notification the next time creator_email publishes a NEW
+    -- public world. No counts are ever read off this table for display
+    -- (no follower counts anywhere in this app, by design).
+    CREATE TABLE IF NOT EXISTS creator_subscriptions (
+      subscriber_email TEXT NOT NULL REFERENCES users(email) ON DELETE CASCADE,
+      creator_email TEXT NOT NULL REFERENCES users(email) ON DELETE CASCADE,
+      created_at BIGINT NOT NULL,
+      PRIMARY KEY (subscriber_email, creator_email)
+    );
+    -- The Notification Center's one table. This is an inbox, not a feed:
+    -- every row is something that actually happened, precomputed into a
+    -- plain title/body at write time so it still reads correctly even
+    -- after the thing it points at (a world, a creator's account) is
+    -- gone — link_kind/link_id are best-effort "open this" hints, never
+    -- required to render the row itself.
+    --
+    -- group_key + the partial unique index below are what "group low-
+    -- priority activity" and "avoid duplicate notifications from
+    -- retries" both come from: at most one UNREAD row can exist per
+    -- (recipient, group_key), so a second favorite/remix on the same
+    -- world while the first notification is still unread increments
+    -- count and rewrites title in place (see
+    -- upsertInteractionNotification) instead of spawning a new row —
+    -- and a retried request that lands twice just increments or
+    -- no-ops instead of duplicating. Once read, the next event starts a
+    -- fresh row, so read notifications never silently reopen.
+    CREATE TABLE IF NOT EXISTS notifications (
+      id TEXT PRIMARY KEY,
+      recipient_email TEXT NOT NULL REFERENCES users(email) ON DELETE CASCADE,
+      kind TEXT NOT NULL, -- 'interaction' | 'new_world' | 'product_update' | 'newsletter' | 'donor_thanks'
+      group_key TEXT,
+      title TEXT NOT NULL,
+      body TEXT NOT NULL DEFAULT '',
+      link_kind TEXT,
+      link_id TEXT,
+      count INT NOT NULL DEFAULT 1,
+      created_at BIGINT NOT NULL,
+      updated_at BIGINT NOT NULL,
+      read_at BIGINT
+    );
+    CREATE INDEX IF NOT EXISTS notifications_recipient_idx ON notifications(recipient_email, read_at, created_at DESC);
+    -- Grouping/dedup window: only while a grouped notification is still
+    -- unread. Read notifications are excluded from the index entirely,
+    -- so they're never a conflict target for a later event.
+    CREATE UNIQUE INDEX IF NOT EXISTS notifications_group_unread_idx ON notifications(recipient_email, group_key) WHERE group_key IS NOT NULL AND read_at IS NULL;
+    -- Separate dedup for one-shot kinds (new_world, and every admin
+    -- broadcast kind) that are never merged/incremented — link_id here is
+    -- either the freshly-published world's id (naturally unique per
+    -- publish) or an admin-supplied broadcastId (see
+    -- server/notifyBroadcast.js), so a retried publish/broadcast can only
+    -- ever insert the same row once, retry or not.
+    CREATE UNIQUE INDEX IF NOT EXISTS notifications_oneshot_idx ON notifications(recipient_email, kind, link_id) WHERE group_key IS NULL AND link_id IS NOT NULL;
   `);
   return readySchema;
 }
@@ -280,6 +334,15 @@ export function ensureSchema() {
 export async function getUser(email) {
   const rows = await query("SELECT * FROM users WHERE email = $1", [email]);
   return rows[0] || null;
+}
+
+// Every account's email — used only for the "product update" broadcast
+// (see server/notifyBroadcast.js), which is genuinely for everyone,
+// unlike the newsletter's mailing_list (opt-in) or a donor thank-you
+// (one specific person).
+export async function listAllUserEmails() {
+  const rows = await query("SELECT email FROM users", []);
+  return rows.map((r) => r.email);
 }
 
 export async function createUser(email, { passwordHash, subscribed, firstName, lastName, title, createdAt }) {
@@ -467,6 +530,132 @@ export async function listCommunitySimsForAdmin() {
     description: r.description, subject: r.subject, createdAt: Number(r.created_at),
     isFeatured: r.is_featured, remixCount: r.remix_count, favoriteCount: r.favorite_count, reportCount: r.report_count,
   }));
+}
+
+// ---------- creator subscriptions ----------
+// "Subscribe to a creator" — deliberately a plain opt-in toggle, not a
+// social graph: no counts are ever read back off this table for display
+// (see notifications below for the one thing it drives).
+
+export async function toggleCreatorSubscription(subscriberEmail, creatorEmail) {
+  const existing = await query("SELECT 1 FROM creator_subscriptions WHERE subscriber_email = $1 AND creator_email = $2", [subscriberEmail, creatorEmail]);
+  if (existing.length) {
+    await query("DELETE FROM creator_subscriptions WHERE subscriber_email = $1 AND creator_email = $2", [subscriberEmail, creatorEmail]);
+    return false;
+  }
+  await query("INSERT INTO creator_subscriptions (subscriber_email, creator_email, created_at) VALUES ($1, $2, $3)", [subscriberEmail, creatorEmail, Date.now()]);
+  return true;
+}
+
+export async function listSubscribedCreatorEmails(subscriberEmail) {
+  const rows = await query("SELECT creator_email FROM creator_subscriptions WHERE subscriber_email = $1", [subscriberEmail]);
+  return rows.map((r) => r.creator_email);
+}
+
+export async function listSubscriberEmails(creatorEmail) {
+  const rows = await query("SELECT subscriber_email FROM creator_subscriptions WHERE creator_email = $1", [creatorEmail]);
+  return rows.map((r) => r.subscriber_email);
+}
+
+// ---------- notifications ----------
+// An inbox, not a feed — see the CREATE TABLE comment above for the
+// grouping/dedup design. Every function here is written so a caller never
+// has to know whether a given event turned into a new row or an update to
+// an existing one.
+
+export async function listNotifications(email, limit = 50) {
+  const rows = await query(
+    `SELECT id, kind, title, body, link_kind, link_id, count, created_at, updated_at, read_at
+     FROM notifications WHERE recipient_email = $1
+     ORDER BY updated_at DESC LIMIT $2`,
+    [email, limit]
+  );
+  return rows.map((r) => ({
+    id: r.id, kind: r.kind, title: r.title, body: r.body,
+    linkKind: r.link_kind, linkId: r.link_id, count: r.count,
+    createdAt: Number(r.created_at), updatedAt: Number(r.updated_at),
+    readAt: r.read_at == null ? null : Number(r.read_at),
+  }));
+}
+
+export async function countUnreadNotifications(email) {
+  const rows = await query("SELECT count(*)::int AS n FROM notifications WHERE recipient_email = $1 AND read_at IS NULL", [email]);
+  return rows[0].n;
+}
+
+// Scoped by recipient_email in the WHERE clause (not just the id) so one
+// account can never mark — or even discover the existence of — another
+// account's notification by guessing an id.
+export async function markNotificationsRead(email, ids) {
+  if (!ids?.length) return;
+  await query("UPDATE notifications SET read_at = $1 WHERE recipient_email = $2 AND id = ANY($3) AND read_at IS NULL", [Date.now(), email, ids]);
+}
+
+export async function markAllNotificationsRead(email) {
+  await query("UPDATE notifications SET read_at = $1 WHERE recipient_email = $2 AND read_at IS NULL", [Date.now(), email]);
+}
+
+// Someone favorited/remixed the recipient's world. Merges into the same
+// group_key while unread — see notifications_group_unread_idx — so a
+// burst of activity on one world reads as "3 people interacted with X"
+// (count > 1) rather than three separate rows; the very first event still
+// gets the specific, real verb ("favorited"/"remixed") since a count of
+// one IS just that one specific thing.
+export async function upsertInteractionNotification({ recipientEmail, actorName, simId, simName, verb }) {
+  const now = Date.now();
+  const groupKey = `interaction:${simId}`;
+  const singularTitle = `${actorName} ${verb} your world "${simName}"`;
+  await query(
+    `INSERT INTO notifications (id, recipient_email, kind, group_key, title, body, link_kind, link_id, count, created_at, updated_at, read_at)
+     VALUES ($1, $2, 'interaction', $3, $4, '', 'community-sim', $5, 1, $6, $6, NULL)
+     ON CONFLICT (recipient_email, group_key) WHERE group_key IS NOT NULL AND read_at IS NULL
+     DO UPDATE SET
+       count = notifications.count + 1,
+       title = format('%s people interacted with "%s"', notifications.count + 1, $7::text),
+       updated_at = $6`,
+    [crypto.randomUUID(), recipientEmail, groupKey, singularTitle, simId, now, simName]
+  );
+}
+
+// A creator the recipient subscribed to published a brand-new public
+// world — never fired for an edit or a private save (see server.js's
+// publishCommunitySim, the only call site). One-shot per (recipient,
+// simId) via notifications_oneshot_idx, so a retried publish request
+// can't fan out the same notification twice.
+export async function insertNewWorldNotification({ recipientEmail, creatorName, simId, simName }) {
+  const now = Date.now();
+  await query(
+    `INSERT INTO notifications (id, recipient_email, kind, group_key, title, body, link_kind, link_id, count, created_at, updated_at, read_at)
+     VALUES ($1, $2, 'new_world', NULL, $3, '', 'community-sim', $4, 1, $5, $5, NULL)
+     ON CONFLICT (recipient_email, kind, link_id) WHERE group_key IS NULL AND link_id IS NOT NULL DO NOTHING`,
+    [crypto.randomUUID(), recipientEmail, `${creatorName} published a new world: "${simName}"`, simId, now]
+  );
+}
+
+// The shared primitive behind every admin-triggered broadcast (product
+// updates, newsletters, donor thank-yous — see server/notifyBroadcast.js).
+// `broadcastId` is the caller's own stable idempotency key: re-running the
+// same broadcast (a retried cron run, an admin re-submitting a form) with
+// the same id is a guaranteed no-op per recipient via notifications_oneshot_idx,
+// not just "unlikely to duplicate."
+// Returns the number of rows ACTUALLY inserted (via RETURNING id, which
+// ON CONFLICT DO NOTHING leaves empty for a skipped/deduped recipient) —
+// re-running with the same broadcastId reports 0, not the recipient count,
+// so a caller can tell a no-op retry from a real send.
+export async function insertBroadcastNotifications(recipientEmails, { kind, title, body, broadcastId }) {
+  const now = Date.now();
+  let inserted = 0;
+  for (const recipientEmail of recipientEmails) {
+    const rows = await query(
+      `INSERT INTO notifications (id, recipient_email, kind, group_key, title, body, link_kind, link_id, count, created_at, updated_at, read_at)
+       VALUES ($1, $2, $3, NULL, $4, $5, NULL, $6, 1, $7, $7, NULL)
+       ON CONFLICT (recipient_email, kind, link_id) WHERE group_key IS NULL AND link_id IS NOT NULL DO NOTHING
+       RETURNING id`,
+      [crypto.randomUUID(), recipientEmail, kind, title, body, broadcastId, now]
+    );
+    if (rows.length) inserted++;
+  }
+  return inserted;
 }
 
 // ---------- classrooms ----------

@@ -32,6 +32,7 @@ import { initModelInfoUI, openModelInfo } from "./modelInfo.js";
 import { renderExperienceLevelPicker, getExperienceLevel } from "./experienceLevel.js";
 import { initWorldShareUI } from "./worldShare.js";
 import { initDashboardUI, registerShareApplier } from "./dashboard.js";
+import { initNotificationsUI } from "./notifications.js";
 import { initOnboarding } from "./onboarding.js";
 import { initTutorial } from "./tutorial.js";
 import { initDeviceMode, showPrompt as showDeviceModePrompt } from "./deviceMode.js";
@@ -728,6 +729,7 @@ function wireTopbar(renderer) {
     renderPhysicsGraphPanel(state);
   });
   initDashboardUI();
+  initNotificationsUI();
   initOnboarding();
   initTutorial();
   document.getElementById("about-btn").addEventListener("click", () => document.getElementById("about-modal").classList.remove("hidden"));
@@ -1222,6 +1224,11 @@ async function openCommunitySimById(id) {
     showToast("Couldn't load that sim.");
   }
 }
+// Exposed so the Notification Center (src/notifications.js) can open a
+// "someone favorited/remixed your world" or "new world from a creator you
+// subscribed to" link with the exact same graceful-if-deleted handling
+// the home page's own sim cards get — not a second implementation of it.
+window._openCommunitySimById = openCommunitySimById;
 
 function buildHomePage(root, onNavigate) {
   root.innerHTML = `

@@ -310,6 +310,20 @@ input[type="range"] { accent-color: var(--accent); cursor: pointer; }
   background: color-mix(in srgb, var(--cool-2) 12%, transparent); color: var(--text);
 }
 #ai-tutor-btn:hover { background: color-mix(in srgb, var(--cool-2) 22%, transparent); }
+
+#notifications-wrap { position: relative; display: flex; }
+#notifications-btn {
+  position: relative; display: flex; align-items: center; justify-content: center;
+  width: 32px; height: 32px; padding: 0; border-radius: 8px; border: 1px solid transparent;
+  background: none; color: var(--text-dim);
+}
+#notifications-btn:hover { background: var(--panel-alt); color: var(--text); border-color: var(--border); }
+.notif-badge {
+  position: absolute; top: -3px; right: -3px; min-width: 16px; height: 16px; padding: 0 3px;
+  border-radius: 999px; font-size: 9.5px; font-weight: 700; line-height: 16px; text-align: center;
+  background: linear-gradient(120deg, var(--cool-1), var(--cool-2)); color: #0b1220;
+  box-shadow: 0 0 0 2px var(--panel);
+}
 #account-email-wrap { position: relative; }
 #account-email {
   max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -839,6 +853,23 @@ input[type="range"] { accent-color: var(--accent); cursor: pointer; }
   margin-top: 12px; padding: 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-alt);
 }
 .dashboard-share-form select, .dashboard-share-form textarea { width: 100%; margin-bottom: 10px; padding: 7px 9px; font: inherit; resize: vertical; }
+
+.notif-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
+.notif-header h2 { margin: 0; }
+.notif-list { display: flex; flex-direction: column; gap: 6px; }
+.notif-row {
+  display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px;
+  border: 1px solid var(--border); border-radius: 8px; background: var(--panel-alt); cursor: pointer;
+}
+.notif-row:hover { border-color: color-mix(in srgb, var(--cool-2) 40%, var(--border)); }
+.notif-row.notif-unread { background: color-mix(in srgb, var(--cool-2) 8%, var(--panel-alt)); border-color: color-mix(in srgb, var(--cool-2) 30%, var(--border)); }
+.notif-row-main { flex: 1; min-width: 0; }
+.notif-row-title { font-size: 13px; font-weight: 600; }
+.notif-row.notif-unread .notif-row-title { font-weight: 700; }
+.notif-row-body { font-size: 12px; color: var(--text-dim); margin-top: 2px; }
+.notif-row-meta { font-size: 11px; color: var(--text-dim); margin-top: 4px; }
+.notif-row-meta a.notif-open { color: var(--cool-2); font-weight: 600; }
+.notif-dot { flex-shrink: 0; width: 8px; height: 8px; border-radius: 999px; margin-top: 4px; background: linear-gradient(120deg, var(--cool-1), var(--cool-2)); }
 
 /* Plans — the one place in the app that intentionally leans into the
    Kinetic brand colors (--cool-1/2/3) as a rich glass/gradient treatment,
