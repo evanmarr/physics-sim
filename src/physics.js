@@ -23,6 +23,13 @@ const FAN_FORCE_SCALE = 0.00025;
 // oscillating side to side forever.
 const FAN_RESTORE_SCALE = 0.00028;
 const FAN_LATERAL_DAMPING = 0.0006;
+// Newton's third law: a fan that isn't bolted down (spec.fixed === false)
+// gets pushed the opposite way it's blowing. Tuned (independent of the
+// fan's own mass — both thrust and gravity scale with mass, so only the
+// ratio to gravity matters) so a fan at its default Wind Force roughly
+// balances its own weight — pointed straight down, it hovers — and
+// higher Wind Force actually lifts it off, the way a real fan/drone can.
+const FAN_SELF_THRUST_SCALE = 0.00006;
 const SHARD_LIFESPAN_MS = 3200;
 const SHARD_FADE_MS = 900; // fade out over the last stretch of life, not a hard pop
 const CANNON_LAUNCH_SCALE = 1.0;
@@ -623,6 +630,16 @@ export class PhysicsSim {
       const reach = halfWidth + spec.range;
       const coreHalf = spec.height / 2; // full-strength lift, like before
       const catchHalf = spec.height; // wider "still caught by the stream" region the restoring force reaches into
+
+      if (!fan.isStatic) {
+        // Blowing air out one side pushes the fan itself the other way —
+        // this is the only thing that lets an unfixed fan lift or propel
+        // itself; a fixed fan (spec.fixed === true) is bolted to the world
+        // and never receives this.
+        const thrustMag = spec.power * FAN_SELF_THRUST_SCALE * fan.mass;
+        Body.applyForce(fan, fan.position, { x: -dir.x * thrustMag, y: -dir.y * thrustMag });
+      }
+
       // Wind particles are real dynamic bodies (isSensor so they don't shove
       // solid objects on contact, but sensors still receive applied forces —
       // only isStatic is excluded below), so this same loop naturally pushes
