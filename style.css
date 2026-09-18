@@ -103,6 +103,68 @@ button.primary { background: var(--accent); border-color: var(--accent); color: 
 button.danger { background: var(--danger); border-color: var(--danger); color: #2a0b0b; }
 button:disabled { opacity: .4; cursor: default; }
 
+/* ---------- Global form controls ----------
+   Every specific input/select/file-upload in the app so far only got
+   styled ad hoc, per screen, wherever someone happened to add a class —
+   most (a bare <select>, a bare <input type="file">) got no styling at
+   all, rendering as whatever the browser's own raw native control looks
+   like, visibly inconsistent with every button/panel around it. This is
+   the shared baseline every one of those now falls back to; a more
+   specific existing rule (higher CSS specificity, e.g. `.promo-input`)
+   still wins wherever one exists — this only fills the gaps. */
+input[type="text"], input[type="email"], input[type="password"], input[type="number"],
+input[type="search"], input[type="url"], input[type="tel"], input[type="date"],
+input[type="datetime-local"], textarea {
+  font-family: inherit; font-size: 13px; color: var(--text);
+  background: var(--panel-alt); border: 1px solid var(--border); border-radius: 6px;
+  padding: 6px 10px;
+}
+input[type="text"]:focus, input[type="email"]:focus, input[type="password"]:focus,
+input[type="number"]:focus, input[type="search"]:focus, input[type="url"]:focus,
+input[type="tel"]:focus, input[type="date"]:focus, input[type="datetime-local"]:focus,
+textarea:focus, select:focus { outline: none; border-color: var(--accent); }
+
+/* A native <select> keeps its real dropdown/keyboard behavior (nothing
+   about how it actually works changes) — only its closed-state chrome is
+   replaced: appearance:none strips the browser's own arrow/bezel, and a
+   hand-drawn chevron (an inline SVG data URI with a fixed neutral stroke,
+   since a background-image can't read currentColor to follow the theme)
+   replaces it, positioned the same in both light and dark mode. */
+select {
+  font-family: inherit; font-size: 13px; color: var(--text);
+  background-color: var(--panel-alt); border: 1px solid var(--border); border-radius: 6px;
+  padding: 6px 28px 6px 10px; cursor: pointer;
+  appearance: none; -webkit-appearance: none; -moz-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23888' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 10px center;
+}
+select:hover { border-color: var(--accent); }
+select option { background: var(--panel); color: var(--text); }
+
+/* input[type="file"] has no meaningful way to restyle the native file-
+   picker dialog itself (nor should it — that's the OS's own trusted UI),
+   but the button+filename chrome sitting in the page IS this app's to
+   style, via the standard ::file-selector-button pseudo-element. */
+input[type="file"] {
+  font-family: inherit; font-size: 12.5px; color: var(--text-dim);
+}
+input[type="file"]::file-selector-button {
+  font-family: inherit; font-size: 13px; font-weight: 500;
+  background: var(--panel-alt); color: var(--text); border: 1px solid var(--border); border-radius: 6px;
+  padding: 6px 12px; margin-right: 10px; cursor: pointer;
+}
+input[type="file"]::file-selector-button:hover { border-color: var(--accent); }
+
+input[type="color"] {
+  width: 32px; height: 32px; padding: 2px; border: 1px solid var(--border); border-radius: 6px;
+  background: var(--panel-alt); cursor: pointer;
+}
+input[type="color"]::-webkit-color-swatch { border: none; border-radius: 4px; }
+input[type="color"]::-webkit-color-swatch-wrapper { padding: 2px; }
+
+input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); width: 15px; height: 15px; cursor: pointer; }
+input[type="range"] { accent-color: var(--accent); cursor: pointer; }
+
 /* ---------- Device-mode prompt (first visit) ---------- */
 .device-prompt-overlay {
   position: fixed; inset: 0; z-index: 10000;
