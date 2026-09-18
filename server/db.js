@@ -66,6 +66,32 @@ export function ensureSchema() {
       student_email TEXT NOT NULL REFERENCES users(email) ON DELETE CASCADE,
       PRIMARY KEY (classroom_code, student_email)
     );
+    -- An assignment is scoped to exactly one classroom, set by its teacher
+    -- (who must be that classroom's teacher — enforced in server.js, not
+    -- here). Deleting the classroom cascades to its assignments, which
+    -- cascades to their completion rows below — a deleted classroom leaves
+    -- nothing behind.
+    CREATE TABLE IF NOT EXISTS assignments (
+      id TEXT PRIMARY KEY,
+      classroom_code TEXT NOT NULL REFERENCES classrooms(code) ON DELETE CASCADE,
+      teacher_email TEXT NOT NULL REFERENCES users(email) ON DELETE CASCADE,
+      title TEXT NOT NULL,
+      instructions TEXT NOT NULL DEFAULT '',
+      due_at BIGINT,
+      created_at BIGINT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS assignments_classroom_idx ON assignments(classroom_code);
+    -- A student marking an assignment done — deliberately just a
+    -- completion flag, not a submitted file: assignments here point at
+    -- something to go do in the app (a Physics Challenge, a mode to
+    -- explore), and the actual work product is whatever they already save
+    -- or share via shared_items, not re-collected here.
+    CREATE TABLE IF NOT EXISTS assignment_completions (
+      assignment_id TEXT NOT NULL REFERENCES assignments(id) ON DELETE CASCADE,
+      student_email TEXT NOT NULL REFERENCES users(email) ON DELETE CASCADE,
+      completed_at BIGINT NOT NULL,
+      PRIMARY KEY (assignment_id, student_email)
+    );
     CREATE TABLE IF NOT EXISTS shared_items (
       id TEXT PRIMARY KEY,
       kind TEXT NOT NULL,
@@ -500,6 +526,59 @@ export async function getClassroomStudents(code) {
 
 export async function deleteClassroomRow(code) {
   await query("DELETE FROM classrooms WHERE code = $1", [code]);
+}
+
+// ---------- assignments ----------
+
+export async function insertAssignment(id, classroomCode, teacherEmail, title, instructions, dueAt, createdAt) {
+  await query(
+    `INSERT INTO assignments (id, classroom_code, teacher_email, title, instructions, due_at, created_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+    [id, classroomCode, teacherEmail, title, instructions, dueAt, createdAt]
+  );
+}
+
+export async function getAssignment(id) {
+  const rows = await query("SELECT * FROM assignments WHERE id = $1", [id]);
+  return rows[0] || null;
+}
+
+// One row per assignment, with every completion for it attached — a
+// teacher's classroom view needs both in one shot to show "6 of 12 done"
+// plus who, and there's no separate per-assignment roster endpoint.
+export async function assignmentsForClassroom(code) {
+  const rows = await query(
+    `SELECT a.id, a.title, a.instructions, a.due_at, a.created_at,
+            coalesce(array_agg(ac.student_email) FILTER (WHERE ac.student_email IS NOT NULL), '{}') AS completed_by
+     FROM assignments a
+     LEFT JOIN assignment_completions ac ON ac.assignment_id = a.id
+     WHERE a.classroom_code = $1
+     GROUP BY a.id
+     ORDER BY a.created_at DESC`,
+    [code]
+  );
+  return rows.map((r) => ({
+    id: r.id, title: r.title, instructions: r.instructions,
+    dueAt: r.due_at == null ? null : Number(r.due_at), createdAt: Number(r.created_at),
+    completedBy: r.completed_by,
+  }));
+}
+
+export async function deleteAssignmentRow(id) {
+  const rows = await query("DELETE FROM assignments WHERE id = $1 RETURNING 1", [id]);
+  return rows.length > 0;
+}
+
+export async function setAssignmentComplete(assignmentId, studentEmail, completed, completedAt) {
+  if (completed) {
+    await query(
+      `INSERT INTO assignment_completions (assignment_id, student_email, completed_at) VALUES ($1, $2, $3)
+       ON CONFLICT (assignment_id, student_email) DO NOTHING`,
+      [assignmentId, studentEmail, completedAt]
+    );
+  } else {
+    await query("DELETE FROM assignment_completions WHERE assignment_id = $1 AND student_email = $2", [assignmentId, studentEmail]);
+  }
 }
 
 // ---------- shared items ----------

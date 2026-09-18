@@ -372,6 +372,65 @@ async function deleteClassroom(email, code) {
   return { ok: true };
 }
 
+// ---------- assignments ----------
+// A teacher posts an assignment to one classroom they teach; every student
+// in it sees it and can mark it done. Deliberately not a file-submission
+// system — the "work" a student hands in is whatever they already save or
+// share via shared_items above; an assignment is just a pointer to what to
+// go do, plus a checkbox the teacher can see filling in across the roster.
+
+const MAX_INSTRUCTIONS_LEN = 2000;
+
+async function createAssignment(email, { classroomCode, title, instructions, dueAt }) {
+  const classroom = await db.getClassroom(String(classroomCode || "").toUpperCase());
+  if (!classroom) return { error: "That class code doesn't match any classroom." };
+  if (classroom.teacher_email !== email) return { error: "You're not the teacher of that classroom." };
+  const clampedTitle = clampName(title);
+  const clampedInstructions = String(instructions ?? "").slice(0, MAX_INSTRUCTIONS_LEN).trim();
+  const dueAtNum = dueAt ? Number(dueAt) : null;
+  const id = crypto.randomUUID();
+  const createdAt = Date.now();
+  await db.insertAssignment(id, classroom.code, email, clampedTitle, clampedInstructions, dueAtNum, createdAt);
+  return { assignment: { id, classroomCode: classroom.code, title: clampedTitle, instructions: clampedInstructions, dueAt: dueAtNum, createdAt, completedBy: [] } };
+}
+
+async function deleteAssignment(email, id) {
+  const assignment = await db.getAssignment(id);
+  if (!assignment || assignment.teacher_email !== email) return { error: "Not found" };
+  await db.deleteAssignmentRow(id);
+  return { ok: true };
+}
+
+async function setAssignmentComplete(email, id, completed) {
+  const assignment = await db.getAssignment(id);
+  if (!assignment) return { error: "Not found" };
+  if (!(await db.isStudentInClassroom(assignment.classroom_code, email))) return { error: "You're not a student in that classroom." };
+  await db.setAssignmentComplete(id, email, !!completed, Date.now());
+  return { ok: true };
+}
+
+// Same shape for both sides so the client renders one list either way:
+// a teacher sees every student's completion for each of their classrooms'
+// assignments, a student sees just their own yes/no per assignment.
+async function assignmentsFor(email) {
+  const teaching = await classroomsTaughtBy(email);
+  const joined = await classroomsJoinedBy(email);
+  const teachingOut = [];
+  for (const c of teaching) {
+    const assignments = await db.assignmentsForClassroom(c.code);
+    teachingOut.push({ classroomCode: c.code, classroomName: c.name, assignments });
+  }
+  const joinedOut = [];
+  for (const c of joined) {
+    const assignments = await db.assignmentsForClassroom(c.code);
+    joinedOut.push({
+      classroomCode: c.code, classroomName: c.name,
+      assignments: assignments.map((a) => ({ id: a.id, title: a.title, instructions: a.instructions, dueAt: a.dueAt, createdAt: a.createdAt, completed: a.completedBy.includes(email) })),
+    });
+  }
+  return { teaching: teachingOut, joined: joinedOut };
+}
+
 // ---------- sharing worlds/math items with a classroom ----------
 // A student shares one saved item up to their teacher; a teacher shares
 // one down to every student in a class they teach. Either direction
@@ -832,6 +891,27 @@ export async function handleApi(req, res, url) {
     const code = String(url.searchParams.get("code") || "").toUpperCase();
     const result = await leaveClassroom(email, code);
     return sendJson(res, result.error ? 404 : 200, result);
+  }
+
+  if (parts[1] === "assignments") {
+    if (req.method === "GET") {
+      return sendJson(res, 200, await assignmentsFor(email));
+    }
+    if (req.method === "POST") {
+      const body = await readJsonBody(req);
+      const result = await createAssignment(email, body);
+      return sendJson(res, result.error ? 400 : 200, result.error ? result : { assignment: result.assignment });
+    }
+    if (req.method === "DELETE") {
+      const id = url.searchParams.get("id");
+      const result = await deleteAssignment(email, id);
+      return sendJson(res, result.error ? 404 : 200, result);
+    }
+  }
+  if (parts[1] === "assignment-complete" && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const result = await setAssignmentComplete(email, body.id, body.completed);
+    return sendJson(res, result.error ? 400 : 200, result);
   }
 
   if (parts[1] === "community-sims") {

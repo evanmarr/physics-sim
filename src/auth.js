@@ -132,6 +132,14 @@ export const joinClassroom = (code) => api("/classroom-join", { method: "POST", 
 export const leaveClassroom = (code) => api(`/classroom-leave?code=${encodeURIComponent(code)}`, { method: "POST" }).catch((e) => ({ error: e.message }));
 export const deleteClassroom = (code) => api(`/classrooms?code=${encodeURIComponent(code)}`, { method: "DELETE" }).catch((e) => ({ error: e.message }));
 
+// ---------- assignments ----------
+export const fetchAssignments = () => api("/assignments"); // { teaching: [...], joined: [...] }
+export const createAssignment = (classroomCode, title, instructions, dueAt) =>
+  api("/assignments", { method: "POST", body: { classroomCode, title, instructions, dueAt } }).catch((e) => ({ error: e.message }));
+export const deleteAssignment = (id) => api(`/assignments?id=${encodeURIComponent(id)}`, { method: "DELETE" }).catch((e) => ({ error: e.message }));
+export const setAssignmentComplete = (id, completed) =>
+  api("/assignment-complete", { method: "POST", body: { id, completed } }).catch((e) => ({ error: e.message }));
+
 export function escapeHtml(str) {
   return String(str).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
