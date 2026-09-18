@@ -573,7 +573,7 @@ button:disabled { opacity: .4; cursor: default; }
 #physics-math-panel.hidden { display: none; }
 
 #physics-graph-panel {
-  width: 280px;
+  width: 340px;
   background: var(--panel);
   border-left: 1px solid var(--border);
   overflow-y: auto;

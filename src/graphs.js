@@ -57,7 +57,10 @@ export class LiveGraph {
     const tMin = this.points[0].t, tMax = this.points[this.points.length - 1].t;
     const tSpan = Math.max(tMax - tMin, 0.001);
 
-    const padL = 6, padR = 6, padT = 16, padB = 6;
+    // padT leaves room for up to two lines of legend (each series' name +
+    // real min/max can wrap at this canvas width with 3+ series) and padB
+    // for the elapsed-time label added below.
+    const padL = 6, padR = 6, padT = 32, padB = 16;
     const plotW = w - padL - padR, plotH = h - padT - padB;
 
     this.seriesDefs.forEach((s, i) => {
@@ -79,14 +82,32 @@ export class LiveGraph {
       ctx.stroke();
     });
 
-    // Legend — text labels, not just color, since color alone isn't a
-    // reliable way to distinguish series (colorblind users, print/export).
-    ctx.font = "10px sans-serif";
-    let lx = padL;
+    // Legend with each series' own real min/max — each line is scaled
+    // independently to fill the full plot height (a shared numeric Y-axis
+    // would misrepresent whichever series doesn't happen to span the
+    // widest range), so the actual numbers have to live here instead of
+    // on an axis. Wraps onto more than one line at this larger canvas
+    // size rather than running off the edge.
+    ctx.font = "11px sans-serif";
+    let lx = padL, ly = 12;
     this.seriesDefs.forEach((s, i) => {
+      const values = this.points.map((p) => p[s.key]).filter((v) => Number.isFinite(v));
+      const range = values.length ? ` [${Math.min(...values).toFixed(1)} to ${Math.max(...values).toFixed(1)}]` : "";
+      const text = `${s.label}${s.unit ? ` (${s.unit})` : ""}${range}`;
+      const width = ctx.measureText(text).width;
+      if (lx + width > w - padR && lx > padL) { lx = padL; ly += 14; }
       ctx.fillStyle = COLORS[i % COLORS.length];
-      ctx.fillText(`${s.label}${s.unit ? ` (${s.unit})` : ""}`, lx, 11);
-      lx += ctx.measureText(`${s.label}${s.unit ? ` (${s.unit})` : ""}`).width + 14;
+      ctx.fillText(text, lx, ly);
+      lx += width + 14;
     });
+
+    // Real elapsed time shown, bottom-right — the whole point of "can I
+    // see the full history" is knowing how much of it is actually on
+    // screen right now, especially once Plus's unlimited window means
+    // that span keeps growing as a run continues.
+    ctx.font = "10px sans-serif";
+    ctx.fillStyle = "rgba(255,255,255,0.5)";
+    const spanLabel = `${tMin.toFixed(1)}s – ${tMax.toFixed(1)}s (${tSpan.toFixed(1)}s shown)`;
+    ctx.fillText(spanLabel, padL, h - 4);
   }
 }

@@ -37,7 +37,7 @@ export function renderPhysicsGraphPanel(state) {
   if (!graph || graph._canvas !== panelEl.querySelector("canvas")) {
     panelEl.innerHTML = `
       <div class="chem-panel-title">Live Graphs</div>
-      <canvas id="physics-graph-canvas" width="260" height="150"></canvas>
+      <canvas id="physics-graph-canvas" width="520" height="260"></canvas>
       <p class="saves-hint" id="physics-graph-hint"></p>
       <button id="physics-graph-export">Export data (.csv) <span class="plus-badge">PLUS</span></button>
     `;
