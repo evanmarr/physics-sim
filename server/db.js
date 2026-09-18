@@ -148,6 +148,15 @@ export function ensureSchema() {
     -- workspace never gets one. Never sent to a client; only compared
     -- server-side by the /unlock-code route.
     ALTER TABLE saved_items ADD COLUMN IF NOT EXISTS lock_code_hash TEXT;
+    -- A short message alongside the shared item itself (e.g. a student
+    -- explaining what they tried), and an optional pointer to the specific
+    -- assignment this is in response to — only meaningful for a
+    -- direction='to-teacher' share, since assignments are teacher-created.
+    -- ON DELETE SET NULL (not CASCADE) because deleting an assignment
+    -- later shouldn't take a student's already-submitted share down with
+    -- it; it just becomes an un-attached share.
+    ALTER TABLE shared_items ADD COLUMN IF NOT EXISTS note TEXT NOT NULL DEFAULT '';
+    ALTER TABLE shared_items ADD COLUMN IF NOT EXISTS assignment_id TEXT REFERENCES assignments(id) ON DELETE SET NULL;
     CREATE TABLE IF NOT EXISTS community_sims (
       id TEXT PRIMARY KEY,
       owner_email TEXT NOT NULL REFERENCES users(email) ON DELETE CASCADE,
@@ -585,30 +594,46 @@ export async function setAssignmentComplete(assignmentId, studentEmail, complete
 
 export async function insertSharedItem(item) {
   await query(
-    `INSERT INTO shared_items (id, kind, name, data, from_email, classroom_code, classroom_name, direction, created_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-    [item.id, item.kind, item.name, JSON.stringify(item.data), item.fromEmail, item.classroomCode, item.classroomName, item.direction, item.createdAt]
+    `INSERT INTO shared_items (id, kind, name, data, from_email, classroom_code, classroom_name, direction, created_at, note, assignment_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+    [item.id, item.kind, item.name, JSON.stringify(item.data), item.fromEmail, item.classroomCode, item.classroomName, item.direction, item.createdAt, item.note ?? "", item.assignmentId ?? null]
   );
 }
 
 function rowToSharedMeta(r) {
-  return { id: r.id, kind: r.kind, name: r.name, fromEmail: r.from_email, classroomCode: r.classroom_code, classroomName: r.classroom_name, direction: r.direction, createdAt: Number(r.created_at) };
+  return {
+    id: r.id, kind: r.kind, name: r.name, fromEmail: r.from_email, classroomCode: r.classroom_code, classroomName: r.classroom_name,
+    direction: r.direction, createdAt: Number(r.created_at), note: r.note || "",
+    assignmentId: r.assignment_id, assignmentTitle: r.assignment_title ?? null,
+  };
 }
+
+// LEFT JOINed against assignments so the client gets the assignment's
+// current title for free — a plain assignment_id would otherwise need a
+// second round trip (or the client cross-referencing its own separately
+// fetched assignment list) just to show what it's called.
+const SHARED_ITEM_COLUMNS = "s.*, a.title AS assignment_title";
 
 export async function sharedItemsReceivedFor(teachingCodes, joinedCodes) {
   if (!teachingCodes.length && !joinedCodes.length) return [];
   const rows = await query(
-    `SELECT * FROM shared_items
-     WHERE (direction = 'to-teacher' AND classroom_code = ANY($1))
-        OR (direction = 'to-students' AND classroom_code = ANY($2))
-     ORDER BY created_at DESC`,
+    `SELECT ${SHARED_ITEM_COLUMNS} FROM shared_items s
+     LEFT JOIN assignments a ON a.id = s.assignment_id
+     WHERE (s.direction = 'to-teacher' AND s.classroom_code = ANY($1))
+        OR (s.direction = 'to-students' AND s.classroom_code = ANY($2))
+     ORDER BY s.created_at DESC`,
     [teachingCodes, joinedCodes]
   );
   return rows.map(rowToSharedMeta);
 }
 
 export async function sharedItemsSentBy(email) {
-  const rows = await query("SELECT * FROM shared_items WHERE from_email = $1 ORDER BY created_at DESC", [email]);
+  const rows = await query(
+    `SELECT ${SHARED_ITEM_COLUMNS} FROM shared_items s
+     LEFT JOIN assignments a ON a.id = s.assignment_id
+     WHERE s.from_email = $1 ORDER BY s.created_at DESC`,
+    [email]
+  );
   return rows.map(rowToSharedMeta);
 }
 

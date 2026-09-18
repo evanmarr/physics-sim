@@ -4,7 +4,7 @@
 // teach. Only signed-in Teachers/Students get it; an Independent user has
 // no classroom relationship for a share to travel along, so there's
 // nothing here for them.
-import { getUser, onAuthChange, fetchItems, fetchClassrooms, escapeHtml } from "./auth.js";
+import { getUser, onAuthChange, fetchItems, fetchClassrooms, fetchAssignments, escapeHtml } from "./auth.js";
 import { alertPopup } from "./popup.js";
 
 const KIND_LABELS = {
@@ -75,6 +75,8 @@ async function render() {
         <div class="dashboard-row-info">
           <div class="dashboard-row-name">${escapeHtml(it.name)} <span class="dashboard-row-kind">${KIND_LABELS[it.kind] || it.kind}</span></div>
           <div class="dashboard-row-meta">From ${escapeHtml(it.fromEmail)} · ${escapeHtml(it.classroomName)} · ${new Date(it.createdAt).toLocaleString()}</div>
+          ${it.assignmentTitle ? `<div class="dashboard-row-assignment">For: ${escapeHtml(it.assignmentTitle)}</div>` : ""}
+          ${it.note ? `<div class="dashboard-row-note">${escapeHtml(it.note)}</div>` : ""}
         </div>
         <button class="dashboard-load" data-id="${it.id}" data-kind="${it.kind}">Load</button>
       </div>
@@ -86,6 +88,8 @@ async function render() {
         <div class="dashboard-row-info">
           <div class="dashboard-row-name">${escapeHtml(it.name)} <span class="dashboard-row-kind">${KIND_LABELS[it.kind] || it.kind}</span></div>
           <div class="dashboard-row-meta">To ${escapeHtml(it.classroomName)} (${it.direction === "to-teacher" ? "teacher" : "students"}) · ${new Date(it.createdAt).toLocaleString()}</div>
+          ${it.assignmentTitle ? `<div class="dashboard-row-assignment">For: ${escapeHtml(it.assignmentTitle)}</div>` : ""}
+          ${it.note ? `<div class="dashboard-row-note">${escapeHtml(it.note)}</div>` : ""}
         </div>
       </div>
     `).join("") : `<p class="panel-empty">You haven't shared anything yet.</p>`}
@@ -119,6 +123,13 @@ async function renderShareForm(direction, availableClassrooms) {
     return;
   }
   const kindOptions = Object.keys(KIND_LABELS);
+  // Attaching to an assignment only makes sense on the way up to a
+  // teacher — a teacher sharing something down isn't responding to an
+  // assignment they themselves posted (see the matching check in
+  // server.js's shareItem).
+  const isToTeacher = direction === "to-teacher";
+  const assignmentData = isToTeacher ? await fetchAssignments().catch(() => ({ joined: [] })) : null;
+
   const formBox = document.createElement("div");
   formBox.className = "dashboard-share-form";
   formBox.innerHTML = `
@@ -129,6 +140,12 @@ async function renderShareForm(direction, availableClassrooms) {
     <select id="dash-item"><option>Loading…</option></select>
     <label class="auth-label">Classroom</label>
     <select id="dash-classroom">${availableClassrooms.map((c) => `<option value="${c.code}">${escapeHtml(c.name)} (${c.code})</option>`).join("")}</select>
+    ${isToTeacher ? `
+      <label class="auth-label">Attach to an assignment (optional)</label>
+      <select id="dash-assignment"><option value="">Not attached to an assignment</option></select>
+    ` : ""}
+    <label class="auth-label">Note (optional)</label>
+    <textarea id="dash-note" rows="3" maxlength="1000" placeholder="Anything you want your ${direction === "to-teacher" ? "teacher" : "students"} to know about this…"></textarea>
     <div id="dash-share-error" class="auth-error"></div>
     <div class="about-actions">
       <button id="dash-share-submit" class="primary">Share</button>
@@ -140,6 +157,8 @@ async function renderShareForm(direction, availableClassrooms) {
 
   const kindSel = formBox.querySelector("#dash-kind");
   const itemSel = formBox.querySelector("#dash-item");
+  const classroomSel = formBox.querySelector("#dash-classroom");
+  const assignmentSel = formBox.querySelector("#dash-assignment");
   let items = [];
   async function loadItems() {
     itemSel.innerHTML = `<option>Loading…</option>`;
@@ -151,13 +170,28 @@ async function renderShareForm(direction, availableClassrooms) {
   kindSel.addEventListener("change", loadItems);
   await loadItems();
 
+  function loadAssignmentsForClassroom() {
+    if (!assignmentSel) return;
+    const classroomAssignments = (assignmentData.joined || []).find((c) => c.classroomCode === classroomSel.value)?.assignments || [];
+    assignmentSel.innerHTML = `<option value="">Not attached to an assignment</option>` +
+      classroomAssignments.map((a) => `<option value="${a.id}">${escapeHtml(a.title)}</option>`).join("");
+  }
+  classroomSel.addEventListener("change", loadAssignmentsForClassroom);
+  loadAssignmentsForClassroom();
+
   formBox.querySelector("#dash-share-cancel").addEventListener("click", () => formBox.remove());
   formBox.querySelector("#dash-share-submit").addEventListener("click", async () => {
     const errorEl = formBox.querySelector("#dash-share-error");
     const item = items.find((it) => it.id === itemSel.value);
     if (!item) { errorEl.textContent = "Nothing to share."; return; }
     try {
-      await shareApi("", { method: "POST", body: { kind: kindSel.value, name: item.name, data: item.data, classroomCode: formBox.querySelector("#dash-classroom").value, direction } });
+      await shareApi("", {
+        method: "POST",
+        body: {
+          kind: kindSel.value, name: item.name, data: item.data, classroomCode: classroomSel.value, direction,
+          note: formBox.querySelector("#dash-note").value, assignmentId: assignmentSel?.value || null,
+        },
+      });
       formBox.remove();
       render();
     } catch (e) {

@@ -444,8 +444,9 @@ async function assignmentsFor(email) {
 // relationship.
 
 const SHAREABLE_KINDS = new Set(["worlds", "mathItems", "cities", "notebookEntries", "aiChats", "whiteboards", "notes", "rocketFlights"]);
+const MAX_SHARE_NOTE_LEN = 1000;
 
-async function shareItem(email, { kind, name, data, classroomCode, direction }) {
+async function shareItem(email, { kind, name, data, classroomCode, direction, note, assignmentId }) {
   if (!SHAREABLE_KINDS.has(kind)) return { error: "That isn't something you can share." };
   if (JSON.stringify(data ?? {}).length > MAX_SHARED_ITEM_BYTES) return { error: "That item is too large to share." };
   const classroom = await db.getClassroom(String(classroomCode || "").toUpperCase());
@@ -457,10 +458,21 @@ async function shareItem(email, { kind, name, data, classroomCode, direction }) 
   } else {
     return { error: "Invalid share direction." };
   }
+  // Attaching to an assignment only makes sense for a student submitting up
+  // to their teacher — a teacher sharing something down isn't "responding"
+  // to an assignment they themselves posted.
+  let clampedAssignmentId = null;
+  if (assignmentId) {
+    if (direction !== "to-teacher") return { error: "Only a submission to a teacher can be attached to an assignment." };
+    const assignment = await db.getAssignment(assignmentId);
+    if (!assignment || assignment.classroom_code !== classroom.code) return { error: "That assignment isn't in this classroom." };
+    clampedAssignmentId = assignmentId;
+  }
   const item = {
     id: crypto.randomUUID(), kind, name: clampName(name), data,
     fromEmail: email, classroomCode: classroom.code, classroomName: classroom.name,
     direction, createdAt: Date.now(),
+    note: String(note ?? "").slice(0, MAX_SHARE_NOTE_LEN).trim(), assignmentId: clampedAssignmentId,
   };
   await db.insertSharedItem(item);
   return { item: { ...item, data: undefined } }; // the confirmation doesn't need to echo the payload back
