@@ -100,7 +100,7 @@ export const CHALLENGES = [
     build() {
       return [
         { id: "chal_gb_ground", type: "board", x: 0, y: 1400, rotation: 0, width: 3200, height: 60, material: "wood", fixed: true },
-        { id: "chal_gb_cannon", type: "cannon", x: -250, y: 1300, rotation: 0, width: 90, height: 34, material: "metal", fixed: true, startRotation: -90, launchRotation: 5, power: 6 },
+        { id: "chal_gb_cannon", type: "cannon", x: -250, y: 1300, rotation: 0, width: 90, height: 34, material: "metal", fixed: true, startRotation: -90, launchRotation: 5, power: 3 },
         { id: "chal_gb_feedball", type: "ball", x: -250, y: 1150, rotation: 0, radius: 20, material: "metal", fixed: false },
         // A wide, thick platform (not a thin strip) so a shot that's a
         // little high or low off the exact expected drop still lands on it
