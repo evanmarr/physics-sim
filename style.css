@@ -1649,6 +1649,40 @@ input[type="range"] { accent-color: var(--accent); cursor: pointer; }
 .math-axis { stroke: var(--text-dim); stroke-width: 1.5; }
 .math-axis-label { font-size: 10px; fill: var(--text-dim); }
 
+.math-dewey-search input {
+  width: 100%; box-sizing: border-box; font-size: 14px; padding: 8px 10px;
+  background: var(--panel-alt); color: var(--text); border: 1px solid var(--border); border-radius: 6px;
+}
+.math-dewey-panel { position: absolute; inset: 0; overflow-y: auto; padding: 24px; box-sizing: border-box; }
+.math-dewey-intro { margin-bottom: 16px; }
+.math-dewey-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; }
+.math-dewey-main-card {
+  display: flex; flex-direction: column; gap: 4px; text-align: left; padding: 12px 14px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 10px; color: var(--text);
+}
+.math-dewey-main-card:hover { border-color: var(--cool-2); background: color-mix(in srgb, var(--cool-2) 8%, var(--panel)); }
+.math-dewey-main-card strong { font-size: 15px; color: var(--cool-2); }
+.math-dewey-main-card span { font-size: 12.5px; color: var(--text-dim); }
+.math-dewey-result {
+  max-width: 420px; padding: 24px; background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+}
+.math-dewey-result-code {
+  font-size: 42px; font-weight: 800; line-height: 1;
+  background: linear-gradient(120deg, var(--cool-1), var(--cool-2)); -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+.math-dewey-result-name { font-size: 18px; font-weight: 600; margin-top: 8px; }
+.math-dewey-result-note, .math-dewey-result-parent { font-size: 12.5px; color: var(--text-dim); margin-top: 10px; }
+.math-dewey-matches { display: flex; flex-direction: column; gap: 6px; max-width: 480px; }
+.math-dewey-match-row {
+  display: flex; align-items: center; gap: 12px; text-align: left; padding: 10px 14px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 8px; color: var(--text);
+}
+.math-dewey-match-row:hover { border-color: var(--cool-2); }
+.math-dewey-match-code {
+  flex-shrink: 0; width: 42px; font-weight: 700; font-family: ui-monospace, Menlo, monospace;
+  color: var(--cool-2);
+}
+
 /* ---------- Whiteboard ---------- */
 .wb-root {
   position: absolute;

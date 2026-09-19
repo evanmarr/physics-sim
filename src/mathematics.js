@@ -1,6 +1,7 @@
 import { compileExpression } from "./mathExpr.js";
 import { openSavesPanel } from "./auth.js";
 import { openModelInfo } from "./modelInfo.js";
+import { DEWEY_MAIN_CLASSES, DEWEY_DIVISIONS } from "./deweyData.js";
 
 const GRAPH_MODEL_INFO = {
   title: "Graph",
@@ -15,6 +16,12 @@ const CHART_MODEL_INFO = {
   title: "Bar / Pie / Venn",
   concept: "These three are direct visualizations of the numbers you enter — bar and pie chart heights/slices are exactly proportional to your values, and Venn region counts are exactly whatever you've dragged into them. There's no underlying equation or simulation here to describe; the chart is simply a faithful picture of the data.",
   limitations: ["The Venn diagram's circles are a fixed schematic layout, not proportional-area — an exact proportional-area Venn diagram doesn't exist in general for 3+ overlapping sets, so this shows honest region counts instead of pretending circle size means something for 3 sets."],
+};
+const DEWEY_MODEL_INFO = {
+  title: "Dewey Decimal Lookup",
+  concept: "The real Dewey Decimal Classification's second-summary table (see src/deweyData.js) — the 10 main classes and 100 divisions exactly as published, not a simplified stand-in. A typed number is matched to the real division it falls under (e.g. 512.7 falls under 510 Mathematics); a typed word is matched against each division's official caption plus a curated list of everyday subject/genre synonyms (e.g. \"cooking\" finds 640).",
+  limitations: ["Only goes two levels deep (main class + division, i.e. numbers ending in a multiple of 10) — the full DDC has roughly 1,000 three-digit sections and further decimal subdivisions beyond that, which aren't included here."],
+  sources: ["OCLC's Dewey Decimal Classification, Edition 23 summary tables"],
 };
 
 // A small math-visualization suite: a real graphing calculator (type y =
@@ -31,6 +38,7 @@ const CHART_TYPES = [
   { id: "bar", label: "Bar Chart" },
   { id: "pie", label: "Pie Chart" },
   { id: "venn", label: "Venn Diagram" },
+  { id: "dewey", label: "Dewey Decimal" },
 ];
 
 export class MathematicsMode {
@@ -74,6 +82,8 @@ export class MathematicsMode {
     };
     this._vennRegionRects = null; // populated by _drawVenn, read by the drag/drop hit-test
 
+    this.dewey = { query: "" };
+
     this._build();
   }
 
@@ -90,7 +100,7 @@ export class MathematicsMode {
     sidebar.appendChild(title);
     const sub = document.createElement("p");
     sub.className = "chem-hint";
-    sub.textContent = "Graph a function, or switch to a bar chart, pie chart, or Venn diagram.";
+    sub.textContent = "Graph a function, switch to a bar chart, pie chart, or Venn diagram, or look up a Dewey Decimal number.";
     sidebar.appendChild(sub);
 
     const typeRow = div("math-type-row");
@@ -109,7 +119,7 @@ export class MathematicsMode {
     infoBtn.textContent = "How This Model Works";
     infoBtn.title = "What this visualization actually does";
     infoBtn.style.marginBottom = "10px";
-    infoBtn.addEventListener("click", () => openModelInfo(this.chartType === "function" ? GRAPH_MODEL_INFO : CHART_MODEL_INFO));
+    infoBtn.addEventListener("click", () => openModelInfo(this.chartType === "function" ? GRAPH_MODEL_INFO : this.chartType === "dewey" ? DEWEY_MODEL_INFO : CHART_MODEL_INFO));
     sidebar.appendChild(infoBtn);
 
     const savesBtn = document.createElement("button");
@@ -135,6 +145,12 @@ export class MathematicsMode {
     this.root.appendChild(stage);
     this.stageEl = stage;
 
+    // Dewey Decimal isn't a chart — it renders as a plain HTML panel over
+    // the same stage area rather than onto the SVG, hidden/shown alongside
+    // it in _setChartType.
+    this.deweyEl = div("math-dewey-panel hidden");
+    stage.appendChild(this.deweyEl);
+
     this._wireInteraction();
     window.addEventListener("resize", () => { this._resize(); this._draw(); });
     this._setChartType("function");
@@ -145,6 +161,8 @@ export class MathematicsMode {
     for (const [id, btn] of Object.entries(this._typeButtons)) btn.classList.toggle("active", id === type);
     this.gTrace.style("display", "none");
     this.coordReadout.textContent = "";
+    this.svg.node().classList.toggle("hidden", type === "dewey");
+    this.deweyEl.classList.toggle("hidden", type !== "dewey");
     this._buildControls();
     this._draw();
   }
@@ -153,6 +171,7 @@ export class MathematicsMode {
     this.controlsEl.innerHTML = "";
     if (this.chartType === "function") this._buildFunctionControls();
     else if (this.chartType === "bar" || this.chartType === "pie") this._buildDataControls();
+    else if (this.chartType === "dewey") this._buildDeweyControls();
     else this._buildVennControls();
   }
 
@@ -231,6 +250,139 @@ export class MathematicsMode {
       this._draw();
     });
     this.controlsEl.appendChild(addBtn);
+  }
+
+  // ---------- Dewey Decimal lookup ----------
+  // One search box, two directions: a typed number resolves to the real
+  // division it falls under; typed text is matched against each
+  // division's official caption and its everyday keyword synonyms (see
+  // src/deweyData.js). Which direction runs is decided purely by whether
+  // the trimmed input starts with a digit — never by a separate mode
+  // toggle, so it stays exactly the "either/or, one box" tool asked for.
+
+  _buildDeweyControls() {
+    const wrap = div("math-dewey-search");
+    const label = document.createElement("label");
+    label.className = "auth-label";
+    label.textContent = "Number or subject/genre";
+    wrap.appendChild(label);
+    const input = document.createElement("input");
+    input.type = "text";
+    input.value = this.dewey.query;
+    input.placeholder = "e.g. 510, or \"astronomy\"";
+    input.addEventListener("input", () => { this.dewey.query = input.value; this._renderDeweyResults(); });
+    wrap.appendChild(input);
+    this.controlsEl.appendChild(wrap);
+
+    const hint = document.createElement("p");
+    hint.className = "chem-hint";
+    hint.textContent = "Type a Dewey number to see what it means, or a subject/genre to find its number.";
+    this.controlsEl.appendChild(hint);
+
+    this._renderDeweyResults();
+  }
+
+  // Numeric direction: which division (a multiple of ten) does this
+  // number actually fall under? Works for a bare division (510 -> itself)
+  // and for a real book-style call number (512.7 -> still 510), by
+  // flooring to the nearest 10.
+  _deweyLookupNumber(raw) {
+    const n = parseFloat(raw);
+    if (!Number.isFinite(n) || n < 0 || n > 999) return null;
+    const divisionCode = String(Math.floor(n / 10) * 10).padStart(3, "0");
+    const mainCode = String(Math.floor(n / 100) * 100).padStart(3, "0");
+    const division = DEWEY_DIVISIONS.find((d) => d.code === divisionCode);
+    const mainClass = DEWEY_MAIN_CLASSES.find((c) => c.code === mainCode);
+    return { division, mainClass, exact: division && Number(division.code) === n };
+  }
+
+  // Text direction: rank every division by how well it matches, using the
+  // real caption first (an exact or leading match beats a keyword hit,
+  // which beats a keyword merely containing the query as a substring).
+  _deweySearchText(raw) {
+    const q = raw.trim().toLowerCase();
+    if (!q) return [];
+    const scored = [];
+    for (const d of DEWEY_DIVISIONS) {
+      const name = d.name.toLowerCase();
+      let score = 0;
+      if (name === q) score = 100;
+      else if (name.startsWith(q)) score = 80;
+      else if (name.includes(q)) score = 60;
+      else if (d.keywords.some((k) => k === q)) score = 90;
+      else if (d.keywords.some((k) => k.startsWith(q))) score = 70;
+      else if (d.keywords.some((k) => k.includes(q))) score = 50;
+      if (score > 0) scored.push({ division: d, score });
+    }
+    scored.sort((a, b) => b.score - a.score);
+    return scored.slice(0, 8).map((s) => s.division);
+  }
+
+  _renderDeweyResults() {
+    if (this.chartType !== "dewey") return;
+    const query = this.dewey.query.trim();
+    const el = this.deweyEl;
+    el.innerHTML = "";
+
+    if (!query) {
+      const intro = div("math-dewey-intro");
+      intro.innerHTML = `<p class="chem-hint">Browse the 10 main classes, or use the search box.</p>`;
+      el.appendChild(intro);
+      const grid = div("math-dewey-grid");
+      for (const c of DEWEY_MAIN_CLASSES) {
+        const card = document.createElement("button");
+        card.className = "math-dewey-main-card";
+        card.innerHTML = `<strong>${c.code}</strong><span>${escapeHtmlLocal(c.name)}</span>`;
+        card.addEventListener("click", () => {
+          const input = this.controlsEl.querySelector(".math-dewey-search input");
+          this.dewey.query = c.code;
+          if (input) input.value = c.code;
+          this._renderDeweyResults();
+        });
+        grid.appendChild(card);
+      }
+      el.appendChild(grid);
+      return;
+    }
+
+    const looksNumeric = /^\d/.test(query);
+    if (looksNumeric) {
+      const result = this._deweyLookupNumber(query);
+      if (!result || !result.division) {
+        el.innerHTML = `<p class="panel-empty">"${escapeHtmlLocal(query)}" isn't a Dewey number between 000 and 999.</p>`;
+        return;
+      }
+      const { division, mainClass, exact } = result;
+      el.innerHTML = `
+        <div class="math-dewey-result">
+          <div class="math-dewey-result-code">${division.code}</div>
+          <div class="math-dewey-result-name">${escapeHtmlLocal(division.name)}</div>
+          ${!exact ? `<div class="math-dewey-result-note">${escapeHtmlLocal(query)} falls within this division (the ${division.code}s).</div>` : ""}
+          ${mainClass ? `<div class="math-dewey-result-parent">Part of ${mainClass.code} — ${escapeHtmlLocal(mainClass.name)}</div>` : ""}
+        </div>
+      `;
+      return;
+    }
+
+    const matches = this._deweySearchText(query);
+    if (!matches.length) {
+      el.innerHTML = `<p class="panel-empty">No Dewey division matches "${escapeHtmlLocal(query)}" — try a broader subject (e.g. "science" instead of a specific topic).</p>`;
+      return;
+    }
+    const list = div("math-dewey-matches");
+    for (const d of matches) {
+      const row = document.createElement("button");
+      row.className = "math-dewey-match-row";
+      row.innerHTML = `<span class="math-dewey-match-code">${d.code}</span><span>${escapeHtmlLocal(d.name)}</span>`;
+      row.addEventListener("click", () => {
+        const input = this.controlsEl.querySelector(".math-dewey-search input");
+        this.dewey.query = d.code;
+        if (input) input.value = d.code;
+        this._renderDeweyResults();
+      });
+      list.appendChild(row);
+    }
+    el.appendChild(list);
   }
 
   // ---------- Venn diagram ----------
@@ -417,6 +569,8 @@ export class MathematicsMode {
     if (data.nextRowId) this.nextRowId = data.nextRowId;
     if (data.venn) this.venn = migrateVennData(data.venn);
     for (const [id, btn] of Object.entries(this._typeButtons)) btn.classList.toggle("active", id === this.chartType);
+    this.svg.node().classList.toggle("hidden", this.chartType === "dewey");
+    this.deweyEl.classList.toggle("hidden", this.chartType !== "dewey");
     this._buildControls();
     this._draw();
   }
@@ -517,6 +671,7 @@ export class MathematicsMode {
     if (this.chartType === "function") this._drawFunction();
     else if (this.chartType === "bar") this._drawBar();
     else if (this.chartType === "pie") this._drawPie();
+    else if (this.chartType === "dewey") { /* renders into deweyEl directly, not the SVG — see _buildDeweyControls/_renderDeweyResults */ }
     else this._drawVenn();
   }
 
@@ -732,6 +887,13 @@ function div(className) {
   const d = document.createElement("div");
   d.className = className;
   return d;
+}
+
+// Named "Local" only to avoid any confusion with auth.js's own
+// escapeHtml — this file has never imported that module, and the Dewey
+// panel is the first place here to echo typed input back into innerHTML.
+function escapeHtmlLocal(str) {
+  return String(str).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
 // Charts saved before Venn diagrams became drag-and-drop stored one typed
