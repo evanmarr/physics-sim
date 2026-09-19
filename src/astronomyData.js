@@ -127,6 +127,45 @@ export function orbitalPeriodDays(planet) {
   return Math.sqrt(a * a * a) * 365.25;
 }
 
+// Real, published bolometric luminosities in solar units (L☉ = 1) — used by
+// the Habitability Calculator's inverse-square-law flux and habitable-zone
+// math. Deliberately a short, well-documented list (values every source
+// agrees on within a few percent) rather than an exhaustive star catalog
+// with numbers pulled from memory that might not hold up.
+export const STARS = [
+  { name: "Sun (Sol)", luminosity: 1.0 },
+  { name: "Alpha Centauri A", luminosity: 1.519 },
+  { name: "Sirius A", luminosity: 25.4 },
+  { name: "Vega", luminosity: 40.12 },
+  { name: "Proxima Centauri", luminosity: 0.0017 },
+  { name: "TRAPPIST-1", luminosity: 0.000552 },
+];
+
+// Equilibrium blackbody temperature (K) of a planet at distance `distAu`
+// AU from a star of `luminosity` solar units, with the given Bond albedo
+// (0 = absorbs everything, 1 = reflects everything). 278.5 K is Earth's own
+// real zero-albedo equilibrium temperature at 1 AU from the Sun, derived
+// from the actual solar constant (S₀ = 1361 W/m²) via the Stefan-Boltzmann
+// law: T = (S₀/4σ)^0.25 — everything else is the same inverse-square-law
+// flux scaling (flux ∝ L/d²) applied relative to that anchor, so this
+// isn't a separate formula per star, just the one real physical relationship.
+export function equilibriumTemperatureK(luminosity, distAu, albedo = 0.3) {
+  return 278.5 * Math.pow(luminosity, 0.25) / Math.sqrt(distAu) * Math.pow(1 - albedo, 0.25);
+}
+
+// Conservative habitable-zone bounds (AU) for a star of the given
+// luminosity — the classic simplified scaling from the Kasting et al. (1993)
+// limits for an Earth-like planet: the inner edge is where a runaway moist
+// greenhouse becomes likely (~1.1x Earth's solar flux), the outer edge is
+// the maximum greenhouse limit before a CO2 atmosphere can no longer keep a
+// planet's surface above freezing (~0.53x Earth's solar flux). This ignores
+// the target star's spectral type/temperature (a real refinement to the
+// original model) so it's most accurate for Sun-like stars and only a rough
+// guide for much hotter or cooler ones.
+export function habitableZoneAu(luminosity) {
+  return { inner: Math.sqrt(luminosity / 1.1), outer: Math.sqrt(luminosity / 0.53) };
+}
+
 // ---- Sun (geocentric apparent longitude) and Moon (geocentric), Meeus low-precision ----
 
 function sunEclipticLongitudeDeg(T) {

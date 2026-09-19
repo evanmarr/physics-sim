@@ -21,6 +21,7 @@
 import { assertFullLadder, difficultyBadgeHtml } from "./challengeTiers.js";
 import { PLANETS, planetPosition, moonOffsetFromEarth, dateToJulianDate } from "./astronomyData.js";
 import { openModelInfo } from "./modelInfo.js";
+import { refreshAchievements } from "./achievements.js";
 import { openSavesPanel } from "./auth.js";
 import { alertPopup } from "./popup.js";
 
@@ -163,7 +164,7 @@ function fmt(n, digits = 1) {
 // Full 7-tier ladder, sharing the same difficulty scale and metadata shape
 // as Physics (src/challenges.js): objective, startingState, successCondition,
 // hint, explanation, source, plus this module's own body/stagePreset/check.
-const CHALLENGES = [
+export const CHALLENGES = [
   {
     id: "reach_10km", name: "Clear the Tower", difficulty: "Simple",
     concept: "Basic powered ascent",
@@ -479,6 +480,7 @@ export class RocketSimMode {
   _completeChallenge() {
     const ch = this.activeChallenge;
     this.activeChallenge = null;
+    if (this.ctx.state) { this.ctx.state.completedChallenges.add("rocket_" + ch.id); refreshAchievements(); }
     this.ctx.showToast?.(`Challenge complete: ${ch.name}!`);
     this._renderChallengePanel();
   }

@@ -45,7 +45,18 @@
     <button id="mode-sustainability-btn" class="mode-tab">Sustainability</button>
   </div>
   <div id="account-controls">
+    <div id="search-wrap">
+      <button id="search-btn" title="Search all sandboxes">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+      </button>
+    </div>
     <button id="ai-tutor-btn" title="Kinetic AI Tutor">AI Tutor <span class="plus-badge">PLUS</span></button>
+    <div id="achievements-wrap">
+      <button id="achievements-btn" title="Achievements">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 21h8"/><path d="M12 17v4"/><path d="M7 4h10v5a5 5 0 0 1-10 0V4Z"/><path d="M7 5H4a1 1 0 0 0-1 1v1a4 4 0 0 0 4 4"/><path d="M17 5h3a1 1 0 0 1 1 1v1a4 4 0 0 1-4 4"/></svg>
+        <span id="achievements-badge" class="notif-badge hidden">0</span>
+      </button>
+    </div>
     <div id="notifications-wrap" class="hidden">
       <button id="notifications-btn" title="Notifications">
         <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
@@ -245,6 +256,14 @@
 
 <div id="notifications-modal" class="modal hidden">
   <div class="modal-box classroom-box" id="notifications-modal-box"></div>
+</div>
+
+<div id="achievements-modal" class="modal hidden">
+  <div class="modal-box classroom-box" id="achievements-modal-box"></div>
+</div>
+
+<div id="search-modal" class="modal hidden">
+  <div class="modal-box classroom-box" id="search-modal-box"></div>
 </div>
 
 <div id="ai-tutor-modal" class="modal hidden">

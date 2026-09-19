@@ -134,16 +134,17 @@ export class EconomicsMode {
 
     sidebar.appendChild(sectionTitle("Demand: P = a − b·Q"));
     sidebar.appendChild(slider("a (choke price)", "a", 20, 200, 1));
+    sidebar.appendChild(helpText("The \"choke price\" — the price so high that quantity demanded drops to zero. Raise it and people are willing to pay more even for the very first unit, which shifts the whole demand line up."));
     sidebar.appendChild(slider("b (slope)", "b", 0.1, 4, 0.1));
+    sidebar.appendChild(helpText("How fast willingness-to-pay falls as quantity rises. A steep slope (high b) means buyers care a lot about having more of it — think insulin. A flat slope means they're fairly indifferent — think generic pencils."));
     sidebar.appendChild(sectionTitle("Supply: P = c + d·Q"));
     sidebar.appendChild(slider("c (base cost)", "c", 0, 100, 1));
+    sidebar.appendChild(helpText("The lowest price any seller will accept at all — their cost for the very first unit. Raise it and sellers need more money just to bother showing up."));
     sidebar.appendChild(slider("d (slope)", "d", 0.1, 4, 0.1));
+    sidebar.appendChild(helpText("How fast a seller's cost rises for each additional unit (marginal cost). A steep slope means producing more gets expensive fast — think custom furniture. A flat slope means it barely gets harder to make more — think identical factory widgets."));
     sidebar.appendChild(sectionTitle("Per-unit tax on sellers"));
     sidebar.appendChild(slider("tax", "tax", 0, 60, 1));
-    const taxNote = document.createElement("div");
-    taxNote.className = "econ-help";
-    taxNote.textContent = "A tax shifts the supply curve up by the tax amount — sellers need that much more price to supply the same quantity. The shaded triangle is the deadweight loss: trades that would have happened, and made both sides better off, that the tax wipes out.";
-    sidebar.appendChild(taxNote);
+    sidebar.appendChild(helpText("A tax shifts the supply curve up by the tax amount — sellers need that much more price to supply the same quantity. The shaded triangle is the deadweight loss: trades that would have happened, and made both sides better off, that the tax wipes out."));
 
     sidebar.appendChild(sectionTitle("Price control"));
     const controlRow = div("econ-field");
@@ -157,6 +158,7 @@ export class EconomicsMode {
     select.addEventListener("change", () => { m.control = select.value; draw(); });
     controlRow.appendChild(select);
     sidebar.appendChild(controlRow);
+    sidebar.appendChild(helpText("A price ceiling is a legal MAXIMUM price (like rent control) — set below equilibrium, it causes a shortage, since sellers won't supply as much as buyers want at that low price. A price floor is a legal MINIMUM price (like minimum wage) — set above equilibrium, it causes a surplus, since sellers offer more than buyers will take at that high price."));
     const controlPriceRow = div("econ-field");
     const cpLabel = document.createElement("label");
     const cpVal = document.createElement("span");
@@ -327,6 +329,7 @@ export class EconomicsMode {
       table.appendChild(tr);
     }
     sidebar.appendChild(table);
+    sidebar.appendChild(helpText("Each cell reads as (your score, opponent's score) for that combination of moves. Notice mutual cooperation (3,3) beats mutual defection (1,1) for BOTH players, yet defecting is each player's best individual move no matter what the other does — that tension is the whole Prisoner's Dilemma. A \"dominant strategy\" (defect, here) is one that's your best move regardless of what the other side does."));
 
     sidebar.appendChild(sectionTitle("Opponent's strategy"));
     const stratSelect = document.createElement("select");
@@ -338,6 +341,7 @@ export class EconomicsMode {
     }
     stratSelect.addEventListener("change", () => { this.game.strategy = stratSelect.value; });
     sidebar.appendChild(stratSelect);
+    sidebar.appendChild(helpText("This is a repeated game — the same two players face this choice round after round, not just once. That's what lets a strategy like Tit-for-Tat work: it can punish your last defection or reward your last cooperation, something impossible in a single one-shot round."));
 
     const resetBtn = document.createElement("button");
     resetBtn.textContent = "Reset game";
@@ -413,6 +417,16 @@ export class EconomicsMode {
 function sectionTitle(text) {
   const d = document.createElement("div");
   d.className = "econ-section-title";
+  d.textContent = text;
+  return d;
+}
+
+// Short, plain-English definition sitting right under a control — same
+// idea as the property panel's own inline help, just scaled to Economics'
+// flat slider/select layout instead of a per-object formula breakdown.
+function helpText(text) {
+  const d = document.createElement("div");
+  d.className = "econ-help";
   d.textContent = text;
   return d;
 }

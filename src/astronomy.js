@@ -1,6 +1,7 @@
-import { PLANETS, DWARF_PLANETS, MOONS, planetPosition, moonOffsetFromEarth, moonPhaseAngleRad, dateToJulianDate, julianDateToDate, orbitalPeriodDays, findNextSolarEclipse } from "./astronomyData.js";
+import { PLANETS, DWARF_PLANETS, MOONS, STARS, planetPosition, moonOffsetFromEarth, moonPhaseAngleRad, dateToJulianDate, julianDateToDate, orbitalPeriodDays, findNextSolarEclipse, equilibriumTemperatureK, habitableZoneAu } from "./astronomyData.js";
 import { RocketSimMode } from "./rocketSim.js";
 import { openModelInfo } from "./modelInfo.js";
+import { refreshAchievements } from "./achievements.js";
 import { LiveGraph } from "./graphs.js";
 import { getUser } from "./auth.js";
 
@@ -28,6 +29,21 @@ const ASTRONOMY_MODEL_INFO = {
     "No orbital resonances, gravitational perturbation between planets, or relativistic corrections (e.g. Mercury's perihelion precession) are modeled.",
   ],
   sources: ["Kepler's laws of planetary motion", "J2000 orbital elements (NASA JPL / standard astronomical almanac values)"],
+};
+
+const HABITABILITY_MODEL_INFO = {
+  title: "Habitability Calculator",
+  concept: "Real Stefan-Boltzmann radiative balance, not a lookup table: a planet's equilibrium temperature is computed from actual inverse-square-law flux (how a star's brightness spreads out over distance) and how much of that light the planet reflects away (albedo) versus absorbs. The habitable-zone bounds are the same simplified Kasting et al. limits used throughout planetary science for a quick estimate.",
+  equation: "T_eq = 278.5 · L^0.25 / √d · (1−A)^0.25     HZ: d_inner = √(L/1.1), d_outer = √(L/0.53)",
+  variables: [
+    { symbol: "L", meaning: "the star's luminosity relative to the Sun (L☉ = 1)" },
+    { symbol: "d", meaning: "distance from the star, in AU" },
+    { symbol: "A", meaning: "Bond albedo — the fraction of incoming light the planet reflects straight back to space (0 = pitch black, absorbs all of it; 1 = perfect mirror, absorbs none)" },
+  ],
+  constants: [{ name: "278.5 K", value: "Earth's own real zero-albedo equilibrium temperature at 1 AU, derived from the actual solar constant (1361 W/m²)" }],
+  assumptions: ["The planet is treated as a simple blackbody-ish sphere in radiative equilibrium — no atmosphere, no greenhouse effect beyond what albedo alone captures.", "The habitable-zone formula ignores the star's spectral type/temperature, so it's most accurate for Sun-like stars."],
+  limitations: ["A real greenhouse effect (like Venus's runaway one, or Earth's own mild one) can push actual surface temperature well above this equilibrium estimate — this is 'temperature with no atmosphere trapping extra heat,' not a forecast of actual surface conditions.", "\"Habitable\" here means liquid-water-permitting at the surface under Earth-like albedo — it says nothing about atmosphere composition, tidal locking, magnetic field, or any of the other real factors that decide actual habitability."],
+  sources: ["Stefan-Boltzmann law", "Kasting, Whitmire & Reynolds (1993), \"Habitable Zones around Main Sequence Stars\""],
 };
 
 // One linear world-units-per-km factor applied to EVERY body — Sun
@@ -68,7 +84,10 @@ export class AstronomyMode {
     this._build();
   }
 
-  mount() { if (this.sub === "rocket") this.rocketSim?.mount(); else { this._running = true; this._animate(); } }
+  mount() {
+    if (this.sub === "rocket") this.rocketSim?.mount();
+    else if (this.sub === "solar") { this._running = true; this._animate(); }
+  }
   unmount() {
     this._running = false;
     if (this._raf) cancelAnimationFrame(this._raf);
@@ -91,15 +110,21 @@ export class AstronomyMode {
     const solarTab = document.createElement("button");
     solarTab.className = "econ-tab active";
     solarTab.textContent = "Solar System";
-    solarTab.addEventListener("click", () => this._showSolarSystem(solarTab, rocketTab));
+    solarTab.addEventListener("click", () => this._showSolarSystem());
     const rocketTab = document.createElement("button");
     rocketTab.className = "econ-tab";
     rocketTab.textContent = "Rocket Simulator";
-    rocketTab.addEventListener("click", () => this._showRocketSim(solarTab, rocketTab));
+    rocketTab.addEventListener("click", () => this._showRocketSim());
+    const habitabilityTab = document.createElement("button");
+    habitabilityTab.className = "econ-tab";
+    habitabilityTab.textContent = "Habitability Calculator";
+    habitabilityTab.addEventListener("click", () => this._showHabitability());
     this._solarTab = solarTab;
     this._rocketTab = rocketTab;
+    this._habitabilityTab = habitabilityTab;
     tabs.appendChild(solarTab);
     tabs.appendChild(rocketTab);
+    tabs.appendChild(habitabilityTab);
     outer.appendChild(tabs);
 
     // The existing solar-system view (three panels) and the Rocket
@@ -122,38 +147,45 @@ export class AstronomyMode {
 
     this.rocketWrap = div("astro-rocket-wrap hidden");
     outer.appendChild(this.rocketWrap);
+
+    this.habitabilityWrap = div("astro-habitability-wrap hidden");
+    outer.appendChild(this.habitabilityWrap);
   }
 
-  _showSolarSystem(solarTab, rocketTab) {
-    if (this.sub === "solar") return;
-    this.sub = "solar";
-    solarTab.classList.add("active");
-    rocketTab.classList.remove("active");
-    this.rocketWrap.classList.add("hidden");
-    this.solarWrap.classList.remove("hidden");
-    this.rocketSim?.unmount();
-    this._running = true;
-    this._animate();
+  // All three tabs funnel through here so exactly one is ever active/
+  // visible/running at a time, regardless of which one you're leaving from.
+  _setSub(sub) {
+    if (this.sub === sub) return;
+    const prev = this.sub;
+    this.sub = sub;
+    this._solarTab.classList.toggle("active", sub === "solar");
+    this._rocketTab.classList.toggle("active", sub === "rocket");
+    this._habitabilityTab.classList.toggle("active", sub === "habitability");
+    this.solarWrap.classList.toggle("hidden", sub !== "solar");
+    this.rocketWrap.classList.toggle("hidden", sub !== "rocket");
+    this.habitabilityWrap.classList.toggle("hidden", sub !== "habitability");
+
+    if (prev === "solar") { this._running = false; if (this._raf) cancelAnimationFrame(this._raf); }
+    if (prev === "rocket") this.rocketSim?.unmount();
+
+    if (sub === "solar") { this._running = true; this._animate(); }
+    else if (sub === "rocket") {
+      if (!this.rocketSim) this.rocketSim = new RocketSimMode(this.rocketWrap, this.ctx);
+      this.rocketSim.mount();
+    } else if (sub === "habitability") {
+      if (!this._habitabilityBuilt) { this._buildHabitability(); this._habitabilityBuilt = true; }
+    }
   }
 
-  _showRocketSim(solarTab, rocketTab) {
-    if (this.sub === "rocket") return;
-    this.sub = "rocket";
-    rocketTab.classList.add("active");
-    solarTab.classList.remove("active");
-    this.solarWrap.classList.add("hidden");
-    this.rocketWrap.classList.remove("hidden");
-    this._running = false;
-    if (this._raf) cancelAnimationFrame(this._raf);
-    if (!this.rocketSim) this.rocketSim = new RocketSimMode(this.rocketWrap, this.ctx);
-    this.rocketSim.mount();
-  }
+  _showSolarSystem() { this._setSub("solar"); }
+  _showRocketSim() { this._setSub("rocket"); }
+  _showHabitability() { this._setSub("habitability"); }
 
   // Loading a rocket flight a teacher/student shared via the Dashboard —
   // switches to the Rocket Simulator sub-tab (building it if this is the
   // first visit) and hands it the shared telemetry to display.
   applySharedRocketFlight(data) {
-    if (this._solarTab && this._rocketTab) this._showRocketSim(this._solarTab, this._rocketTab);
+    this._showRocketSim();
     this.rocketSim?.applySharedFlight(data);
   }
 
@@ -775,6 +807,170 @@ export class AstronomyMode {
   _openChallenges() {
     this.challengeModal.open();
   }
+
+  // Public entry point for the home page's Weekly Challenge card (see
+  // main.js's weeklyChallenge()) — makes sure the Solar System sub-tab
+  // (where the eclipse challenge modal lives) is showing, then opens it.
+  openChallenges() { this._showSolarSystem(); this._openChallenges(); }
+
+  // Same idea, for a Rocket Simulator pick — just surfaces the sub-tab;
+  // its challenge list is always visible inline, not behind a modal.
+  openRocketChallenges() { this._showRocketSim(); }
+
+  // ---------- Habitability Calculator ----------
+  // A standalone tool, not tied to the 3D viewer's selected planet — real
+  // Stefan-Boltzmann equilibrium-temperature and habitable-zone math (see
+  // astronomyData.js) reusing the exact same orbital-elements distances
+  // (planet.elements[0] = semi-major axis in AU) the Rocket Simulator and
+  // Solar System viewer already work in.
+  _buildHabitability() {
+    const wrap = this.habitabilityWrap;
+    wrap.innerHTML = "";
+    wrap.appendChild(this._habPanel());
+  }
+
+  _habPanel() {
+    const panel = div("chem-panel astro-hab-panel");
+    const title = div("chem-panel-title");
+    title.textContent = "Habitability Calculator";
+    panel.appendChild(title);
+
+    const infoBtn = document.createElement("button");
+    infoBtn.textContent = "How This Model Works";
+    infoBtn.title = "What this calculator actually models";
+    infoBtn.style.width = "100%";
+    infoBtn.style.marginBottom = "10px";
+    infoBtn.addEventListener("click", () => openModelInfo(HABITABILITY_MODEL_INFO));
+    panel.appendChild(infoBtn);
+
+    const hab = (this.habitability ||= { luminosity: 1, distanceAu: 1, albedo: 0.3 });
+
+    const sectionTitle = (text) => { const d = div("chem-hint"); d.style.marginTop = "12px"; d.textContent = text; return d; };
+    const helpText = (text) => { const d = div("econ-help"); d.textContent = text; return d; };
+    const field = (labelText, input) => {
+      const row = div("econ-field");
+      const lab = document.createElement("label");
+      lab.textContent = labelText;
+      row.appendChild(lab);
+      row.appendChild(input);
+      return row;
+    };
+
+    panel.appendChild(sectionTitle("Star"));
+    const starSelect = document.createElement("select");
+    for (const s of STARS) {
+      const opt = document.createElement("option");
+      opt.value = s.name; opt.textContent = `${s.name} (${s.luminosity}× the Sun)`;
+      starSelect.appendChild(opt);
+    }
+    const customOpt = document.createElement("option");
+    customOpt.value = "__custom__"; customOpt.textContent = "Custom luminosity";
+    starSelect.appendChild(customOpt);
+    panel.appendChild(field("", starSelect));
+
+    const lumRow = div("econ-field");
+    const lumLabel = document.createElement("label");
+    const lumVal = document.createElement("span");
+    lumRow.appendChild(lumLabel);
+    const lumInput = document.createElement("input");
+    lumInput.type = "range"; lumInput.min = "0.0001"; lumInput.max = "50"; lumInput.step = "0.0001";
+    lumRow.appendChild(lumInput);
+    panel.appendChild(lumRow);
+    panel.appendChild(helpText("Luminosity (L) is a star's total light output relative to the Sun. It's the single biggest lever on both a planet's temperature and how far out its habitable zone sits — a brighter star pushes the whole zone farther away."));
+
+    panel.appendChild(sectionTitle("Planet's distance from the star"));
+    const planetSelect = document.createElement("select");
+    const customDistOpt = document.createElement("option");
+    customDistOpt.value = "__custom__"; customDistOpt.textContent = "Custom distance";
+    planetSelect.appendChild(customDistOpt);
+    for (const p of PLANETS) {
+      const opt = document.createElement("option");
+      opt.value = p.name; opt.textContent = `${p.name}'s real distance (${p.elements[0].toFixed(2)} AU)`;
+      planetSelect.appendChild(opt);
+    }
+    panel.appendChild(field("", planetSelect));
+
+    const distRow = div("econ-field");
+    const distLabel = document.createElement("label");
+    const distVal = document.createElement("span");
+    distRow.appendChild(distLabel);
+    const distInput = document.createElement("input");
+    distInput.type = "range"; distInput.min = "0.02"; distInput.max = "50"; distInput.step = "0.01";
+    distRow.appendChild(distInput);
+    panel.appendChild(distRow);
+    panel.appendChild(helpText("Distance in AU (1 AU = Earth's own distance from the Sun, ~150 million km). Flux from the star falls off with the square of distance, so doubling the distance cuts incoming energy to a quarter."));
+
+    panel.appendChild(sectionTitle("Albedo (reflectivity)"));
+    const albedoRow = div("econ-field");
+    const albedoLabel = document.createElement("label");
+    const albedoVal = document.createElement("span");
+    albedoRow.appendChild(albedoLabel);
+    const albedoInput = document.createElement("input");
+    albedoInput.type = "range"; albedoInput.min = "0"; albedoInput.max = "0.95"; albedoInput.step = "0.01";
+    albedoRow.appendChild(albedoInput);
+    panel.appendChild(albedoRow);
+    panel.appendChild(helpText("The fraction of incoming light the surface/clouds reflect straight back to space instead of absorbing. Earth's real Bond albedo is about 0.3 (mostly clouds and ice); fresh snow reflects ~0.8-0.9; coal-dark rock reflects under 0.05."));
+
+    const resultCard = div("chem-info-card");
+    resultCard.style.marginTop = "14px";
+    panel.appendChild(resultCard);
+
+    const sync = () => {
+      lumLabel.textContent = `Luminosity: ${hab.luminosity.toFixed(4)} L☉`;
+      lumInput.value = String(hab.luminosity);
+      distLabel.textContent = `Distance: ${hab.distanceAu.toFixed(3)} AU`;
+      distInput.value = String(hab.distanceAu);
+      albedoLabel.textContent = `Albedo: ${hab.albedo.toFixed(2)}`;
+      albedoInput.value = String(hab.albedo);
+      render();
+    };
+
+    const render = () => {
+      const tK = equilibriumTemperatureK(hab.luminosity, hab.distanceAu, hab.albedo);
+      const tC = tK - 273.15;
+      const { inner, outer } = habitableZoneAu(hab.luminosity);
+      const inZone = hab.distanceAu >= inner && hab.distanceAu <= outer;
+      resultCard.innerHTML = `
+        <div class="chem-info-title">Estimated equilibrium temperature</div>
+        <div class="chem-info-row"><span>Temperature</span><b>${tK.toFixed(1)} K (${tC.toFixed(1)} °C)</b></div>
+        <div class="chem-info-row"><span>Habitable zone (this star)</span><b>${inner.toFixed(3)} – ${outer.toFixed(3)} AU</b></div>
+        <div class="chem-info-row"><span>This distance</span><b class="${inZone ? "hab-in-zone" : "hab-out-zone"}">${hab.distanceAu.toFixed(3)} AU — ${inZone ? "inside the habitable zone" : hab.distanceAu < inner ? "too close (likely a runaway greenhouse)" : "too far (likely permanently frozen)"}</b></div>
+      `;
+    };
+
+    starSelect.addEventListener("change", () => {
+      if (starSelect.value === "__custom__") return;
+      hab.luminosity = STARS.find((s) => s.name === starSelect.value).luminosity;
+      sync();
+    });
+    lumInput.addEventListener("input", () => {
+      hab.luminosity = parseFloat(lumInput.value) || 0.0001;
+      starSelect.value = STARS.find((s) => s.luminosity === hab.luminosity)?.name ?? "__custom__";
+      sync();
+    });
+    planetSelect.addEventListener("change", () => {
+      if (planetSelect.value === "__custom__") return;
+      hab.distanceAu = PLANETS.find((p) => p.name === planetSelect.value).elements[0];
+      sync();
+    });
+    distInput.addEventListener("input", () => {
+      hab.distanceAu = parseFloat(distInput.value) || 0.02;
+      planetSelect.value = "__custom__";
+      sync();
+    });
+    albedoInput.addEventListener("input", () => {
+      hab.albedo = parseFloat(albedoInput.value) || 0;
+      sync();
+    });
+
+    // Default the dropdowns to whatever the state already holds (Sun /
+    // Earth's real distance / Earth-like albedo, the first time through).
+    starSelect.value = STARS.find((s) => s.luminosity === hab.luminosity)?.name ?? "__custom__";
+    planetSelect.value = PLANETS.find((p) => p.elements[0] === hab.distanceAu)?.name ?? "__custom__";
+    sync();
+
+    return panel;
+  }
 }
 
 function toLocalInputValue(date) {
@@ -830,6 +1026,7 @@ function buildChallengeModal(ctx, getDate, setDate) {
         setDate(result.date);
         if (result.likely) {
           ctx.state.completedChallenges.add("astro_find_eclipse");
+          refreshAchievements();
           ctx.showToast("Challenge complete: Found the next solar eclipse!");
         }
       });

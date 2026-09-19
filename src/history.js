@@ -1,5 +1,6 @@
 import { HISTORY_CATEGORIES } from "./historyData.js";
 import { HISTORY_CHALLENGES } from "./historyChallenges.js";
+import { refreshAchievements } from "./achievements.js";
 
 // Two views: a category picker (reusing the existing unused .home-card grid
 // style) and a per-category timeline (list + detail panel, matching the
@@ -194,9 +195,13 @@ export class HistoryMode {
     const challenge = HISTORY_CHALLENGES.find((c) => c.id === this.activeChallengeId);
     if (!challenge || challenge.categoryKey !== this.categoryKey || challenge.title !== entry.title) return;
     this.activeChallengeId = null;
-    if (this.ctx.state) this.ctx.state.completedChallenges.add(challenge.id);
+    if (this.ctx.state) { this.ctx.state.completedChallenges.add(challenge.id); refreshAchievements(); }
     this.ctx.showToast?.(`Challenge complete: found "${entry.title}"!`);
   }
+
+  // Public entry point for the home page's Weekly Challenge card (see
+  // main.js's weeklyChallenge()) — same modal the in-mode button opens.
+  openChallenges() { this.challengeModal.open(); }
 }
 
 function div(className) {

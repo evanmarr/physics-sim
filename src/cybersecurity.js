@@ -1,5 +1,6 @@
 import { CYBER_CATEGORIES, CYBER_ENTRIES } from "./cybersecurityData.js";
 import { CYBER_CHALLENGES } from "./cyberChallenges.js";
+import { refreshAchievements } from "./achievements.js";
 import { renderCyberSimulators } from "./cyberSimulators.js";
 
 // A search-and-filter reference, not a timeline like History mode — for
@@ -193,9 +194,13 @@ export class CybersecurityMode {
     const challenge = CYBER_CHALLENGES.find((c) => c.id === this.activeChallengeId);
     if (!challenge || challenge.entryId !== entry.id) return;
     this.activeChallengeId = null;
-    if (this.ctx.state) this.ctx.state.completedChallenges.add(challenge.id);
+    if (this.ctx.state) { this.ctx.state.completedChallenges.add(challenge.id); refreshAchievements(); }
     this.ctx.showToast?.(`Challenge complete: found "${entry.name}"!`);
   }
+
+  // Public entry point for the home page's Weekly Challenge card (see
+  // main.js's weeklyChallenge()) — same modal the in-mode button opens.
+  openChallenges() { this.challengeModal.open(); }
 }
 
 function div(className) {

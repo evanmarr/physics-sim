@@ -2,6 +2,10 @@ import { Renderer, openSpeedUnitMenu, currentSpeedUnitLabel } from "./render.js"
 import { renderPalette } from "./palette.js";
 import { renderPanel, renderPhysicsMathPanel } from "./panel.js";
 import { CHALLENGES, findChallenge, ChallengeTracker } from "./challenges.js";
+import { CHEMISTRY_CHALLENGES } from "./chemistryChallenges.js";
+import { HISTORY_CHALLENGES } from "./historyChallenges.js";
+import { CYBER_CHALLENGES } from "./cyberChallenges.js";
+import { CHALLENGES as ROCKET_CHALLENGES } from "./rocketSim.js";
 import { OBJECT_DEFS, createSpec, cloneSpec, makeId } from "./objectTypes.js";
 import { materialOf } from "./materials.js";
 import { PhysicsSim } from "./physics.js";
@@ -33,6 +37,8 @@ import { renderExperienceLevelPicker, getExperienceLevel } from "./experienceLev
 import { initWorldShareUI } from "./worldShare.js";
 import { initDashboardUI, registerShareApplier } from "./dashboard.js";
 import { initNotificationsUI } from "./notifications.js";
+import { initAchievementsUI, refreshAchievements } from "./achievements.js";
+import { initSearchUI } from "./search.js";
 import { initOnboarding } from "./onboarding.js";
 import { initTutorial } from "./tutorial.js";
 import { initDeviceMode, showPrompt as showDeviceModePrompt } from "./deviceMode.js";
@@ -730,6 +736,8 @@ function wireTopbar(renderer) {
   });
   initDashboardUI();
   initNotificationsUI();
+  initAchievementsUI(state);
+  initSearchUI(searchIndex);
   initOnboarding();
   initTutorial();
   document.getElementById("about-btn").addEventListener("click", () => document.getElementById("about-modal").classList.remove("hidden"));
@@ -1015,6 +1023,7 @@ function checkChallengeFrame(items) {
 function awardChallenge(challenge) {
   if (!state.completedChallenges.has(challenge.id)) {
     state.completedChallenges.add(challenge.id);
+    refreshAchievements();
     scheduleSave();
   }
   showToast(`Challenge complete: ${challenge.name}`);
@@ -1191,6 +1200,59 @@ function dailyChallenge() {
   let h = 0;
   for (let i = 0; i < today.length; i++) h = (h * 31 + today.charCodeAt(i)) | 0;
   return CHALLENGES[Math.abs(h) % CHALLENGES.length];
+}
+
+// Same deterministic-hash idea as the Physics-only Daily Challenge above,
+// but drawn from a pool spanning every sandbox with its own challenge
+// system, and rotating once a week (an ISO-ish year+week key) instead of
+// once a day — a reason to check back on a sandbox you don't visit often,
+// without needing a server-side scheduler here either.
+function weeklyPool() {
+  return [
+    ...CHALLENGES.map((c) => ({ sandbox: "Physics", name: c.name, detail: c.objective, go: () => openPhysicsChallengeById(c.id) })),
+    ...CHEMISTRY_CHALLENGES.map((c) => ({ sandbox: "Chemistry", name: c.name, detail: c.description, go: () => { window._setMode("chemistry"); chemistryMode.openChallenges(); } })),
+    ...HISTORY_CHALLENGES.map((c) => ({ sandbox: "History", name: c.title, detail: c.hint, go: () => { window._setMode("history"); historyMode.openChallenges(); } })),
+    ...CYBER_CHALLENGES.map((c) => ({ sandbox: "Cybersecurity", name: c.hint, detail: "", go: () => { window._setMode("cybersecurity"); cybersecurityMode.openChallenges(); } })),
+    ...ROCKET_CHALLENGES.map((c) => ({ sandbox: "Rocket Simulator", name: c.name, detail: c.objective, go: () => { window._setMode("astronomy"); astronomyMode.openRocketChallenges(); } })),
+    { sandbox: "Astronomy", name: "Find the Next Solar Eclipse", detail: "Search forward from today for the next real solar eclipse alignment.", go: () => { window._setMode("astronomy"); astronomyMode.openChallenges(); } },
+  ];
+}
+
+function weeklyChallenge() {
+  const pool = weeklyPool();
+  if (!pool.length) return null;
+  const now = new Date();
+  const jan1 = Date.UTC(now.getUTCFullYear(), 0, 1);
+  const week = Math.ceil(((Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()) - jan1) / 86400000 + 1) / 7);
+  const key = `${now.getUTCFullYear()}-W${week}`;
+  let h = 0;
+  for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) | 0;
+  return pool[Math.abs(h) % pool.length];
+}
+
+// Global search's index: all 12 sandboxes (so typing a subject name jumps
+// straight there) plus every challenge each one defines (reusing
+// weeklyPool()'s same {sandbox, name, detail, go} shape — one list of
+// "everything you can search for," not two separately maintained ones).
+const SEARCH_SANDBOXES = [
+  { mode: "physics", label: "Physics" },
+  { mode: "chemistry", label: "Chemistry" },
+  { mode: "astronomy", label: "Astronomy" },
+  { mode: "history", label: "History" },
+  { mode: "cybersecurity", label: "Cybersecurity" },
+  { mode: "particles", label: "Particle Physics" },
+  { mode: "mathematics", label: "Mathematics" },
+  { mode: "whiteboard", label: "Whiteboard" },
+  { mode: "economics", label: "Economics" },
+  { mode: "zoology", label: "Zoology" },
+  { mode: "sound", label: "Sound" },
+  { mode: "sustainability", label: "Sustainability" },
+];
+
+function searchIndex() {
+  const sandboxItems = SEARCH_SANDBOXES.map((s) => ({ title: s.label, subtitle: "Sandbox", go: () => window._setMode(s.mode) }));
+  const challengeItems = weeklyPool().map((w) => ({ title: w.name || w.sandbox, subtitle: `${w.sandbox} challenge`, go: w.go }));
+  return [...sandboxItems, ...challengeItems];
 }
 
 // Shared by the home page's Daily Challenge/Templates cards and (via a
@@ -1403,6 +1465,22 @@ async function buildHomeRails(container, onNavigate) {
     card.addEventListener("click", () => openPhysicsChallengeById(daily.id));
     addRail(container, "Daily Challenge", [card]);
     _surprisePool.push({ kind: "challenge", id: daily.id });
+  }
+
+  // Weekly Challenge — same idea, but drawn from every sandbox's own
+  // challenge pool (not just Physics) and rotating once every 7 days
+  // instead of every 24 hours (see weeklyChallenge()).
+  const weekly = weeklyChallenge();
+  if (weekly) {
+    const card = document.createElement("button");
+    card.className = "home-rail-card home-rail-card-challenge";
+    card.innerHTML = `
+      <div class="home-rail-card-badge"><span class="sandbox-badge">${escapeHtml(weekly.sandbox)}</span></div>
+      <div class="home-rail-card-title">${escapeHtml(weekly.name || "")}</div>
+      ${weekly.detail ? `<div class="home-rail-card-sub">${escapeHtml(weekly.detail)}</div>` : ""}
+    `;
+    card.addEventListener("click", () => weekly.go());
+    addRail(container, "Weekly Challenge", [card]);
   }
 
   // Featured Templates — a few of Physics's own easier scenes, reused as

@@ -1,6 +1,7 @@
 import { ELEMENTS, CATEGORY_COLORS, CATEGORY_LABELS, elementBySymbol, evaluateMix, meltingBoiling, phaseAt, ROOM_TEMP_K } from "./chemistryData.js";
 import { AtomViewer } from "./atomViewer.js";
 import { CHEMISTRY_CHALLENGES } from "./chemistryChallenges.js";
+import { refreshAchievements } from "./achievements.js";
 import { openModelInfo } from "./modelInfo.js";
 
 const CHEMISTRY_MODEL_INFO = {
@@ -339,6 +340,10 @@ export class ChemistryMode {
   _openChallenges() {
     this.challengeModal.open(this.lastResult);
   }
+
+  // Public entry point for the home page's Weekly Challenge card (see
+  // main.js's weeklyChallenge()) — same modal the in-mode button opens.
+  openChallenges() { this._openChallenges(); }
 }
 
 function div(className) {
@@ -528,6 +533,7 @@ function buildChallengeModal(economy) {
           const ok = lastResult && c.check(lastResult);
           if (ok) {
             economy.state.completedChallenges.add("chem_" + c.id);
+            refreshAchievements();
             render(lastResult);
           } else {
             btn.textContent = "Not yet — try again";
