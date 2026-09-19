@@ -246,19 +246,37 @@ export function renderPhysicsMathPanel(container, spec, onClose, onEdit) {
       // fine-grained control, but still only over this one variable, never
       // free-text on the formula itself.
       const advanced = getExperienceLevel() === "advanced";
+      // Learn's slider needs a hard, real min/max to be draggable at all.
+      // Advanced trades that away for free-form numbers instead — no
+      // ceiling, and no floor either except on the few variables that go
+      // physically nonsensical below their material-preset minimum
+      // (negative mass, negative grip, a bounce that adds energy on
+      // rebound). Everything else (power, range, radius) has no floor
+      // that isn't just a Learn-mode UI convenience, so Advanced drops it.
+      const physicalFloor = new Set(["densityOverride", "frictionOverride", "restitutionOverride"]);
       const input = document.createElement("input");
       input.type = advanced ? "number" : "range";
-      input.min = edit.min; input.max = edit.max; input.step = edit.step;
+      if (advanced) {
+        if (physicalFloor.has(edit.key)) input.min = edit.min;
+      } else {
+        input.min = edit.min; input.max = edit.max;
+      }
+      input.step = edit.step;
       input.value = edit.value;
       if (advanced) input.className = "math-edit-input";
       const valSpan = document.createElement("span");
       valSpan.className = "math-edit-value";
       if (!advanced) valSpan.textContent = Math.round(edit.value * 100) / 100;
       const commit = () => {
-        const clamped = Math.min(edit.max, Math.max(edit.min, parseFloat(input.value) || 0));
-        input.value = clamped;
-        if (!advanced) valSpan.textContent = Math.round(clamped * 100) / 100;
-        onEdit(edit.key, clamped);
+        let v = parseFloat(input.value) || 0;
+        if (advanced) {
+          if (physicalFloor.has(edit.key)) v = Math.max(edit.min, v);
+        } else {
+          v = Math.min(edit.max, Math.max(edit.min, v));
+        }
+        input.value = v;
+        if (!advanced) valSpan.textContent = Math.round(v * 100) / 100;
+        onEdit(edit.key, v);
       };
       // A range slider can't produce an out-of-bounds value, so it commits
       // live on every "input" event same as before. A typed number CAN, so
@@ -268,7 +286,7 @@ export function renderPhysicsMathPanel(container, spec, onClose, onEdit) {
       input.addEventListener(advanced ? "change" : "input", commit);
       const resetBtn = document.createElement("button");
       resetBtn.className = "math-edit-reset";
-      resetBtn.textContent = "Reset";
+      resetBtn.textContent = "↺";
       // Density/friction/restitution are material *overrides* — undefined
       // correctly falls back to the material preset (see effectiveDensity
       // etc.). Type-specific values like a bomb's power aren't overrides of

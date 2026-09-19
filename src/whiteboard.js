@@ -155,11 +155,11 @@ export class WhiteboardMode {
     sizeSlider.addEventListener("input", () => { sizes[tool] = parseFloat(sizeSlider.value); });
     sizeRow.appendChild(sizeSlider);
     const undoBtn = document.createElement("button");
-    undoBtn.textContent = "Undo";
+    undoBtn.textContent = "↶ Undo";
     undoBtn.title = "Ctrl/Cmd+Z";
     sizeRow.appendChild(undoBtn);
     const redoBtn = document.createElement("button");
-    redoBtn.textContent = "Redo";
+    redoBtn.textContent = "↷ Redo";
     redoBtn.title = "Ctrl/Cmd+Shift+Z";
     sizeRow.appendChild(redoBtn);
     const clearBtn = document.createElement("button");

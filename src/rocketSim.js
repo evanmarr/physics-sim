@@ -63,12 +63,20 @@ const STAGE_PRESETS = {
     length: 22, diameter: 2.2,
     stages: [{ name: "Stage 1", dryMass: 4000, fuelMass: 18000, thrust: 320000, isp: 280 }],
   },
+  // Fuel and thrust on both stages are scaled up together (dry mass held
+  // fixed) from an earlier, leaner version of this vehicle that turned out
+  // to leave zero real margin for a burn-coast-circularize insertion — see
+  // Two-Stage Orbit and Escape Velocity below. Verified live: the original
+  // sizing could not reach a stable Earth orbit under any tested
+  // pitch/throttle profile (it ran out of fuel ~1.9 million meters short of
+  // a valid periapsis every time), so this is a real capability fix, not
+  // just a difficulty tweak.
   twoStage: {
     displayName: "Two-Stage Launcher (challenge-tuned)",
     length: 32, diameter: 2.6,
     stages: [
-      { name: "Stage 1", dryMass: 7000, fuelMass: 42000, thrust: 950000, isp: 265 },
-      { name: "Stage 2", dryMass: 2200, fuelMass: 9500, thrust: 140000, isp: 330 },
+      { name: "Stage 1", dryMass: 7000, fuelMass: 126000, thrust: 2850000, isp: 265 },
+      { name: "Stage 2", dryMass: 2200, fuelMass: 28500, thrust: 420000, isp: 330 },
     ],
   },
   electron: {
@@ -211,7 +219,7 @@ const CHALLENGES = [
     objective: "Stage at least once and achieve a stable orbit around Earth.",
     startingState: "A two-stage rocket on the Earth pad — a much bigger first stage plus a smaller, more efficient second stage.",
     successCondition: "The rocket has staged at least once AND orbit status reads 'Orbiting.'",
-    hint: "Let the first stage burn out completely and stage automatically, then keep pitching over toward horizontal through the second stage's burn — Earth's atmosphere and stronger gravity mean you need both stages' fuel to get there, unlike the Moon.",
+    hint: "One continuous burn to fuel depletion doesn't work here any more than it did on the Moon — Earth's deeper gravity well and real atmosphere make it worse, not better. Pitch from about 5° to 75-80° over the first stage's burn (it'll stage automatically on depletion), keep the second stage burning at that pitch until Apoapsis reaches roughly 150-200 km, then cut the throttle and coast. Once Apoapsis stops climbing and you're falling back past it, throttle back up pitched at 90° (straight sideways) for a short burn to raise Periapsis above the surface — the same burn-coast-circularize sequence as Orbit the Moon, just fought against atmosphere and stronger gravity the whole way up.",
     explanation: "This stacks Orbit the Moon's two-variable altitude/speed insertion on top of a THIRD moving part — the staging event itself changes the vehicle's mass and available thrust mid-flight, plus you're fighting Earth's atmosphere and stronger gravity the whole way, so the same insertion technique now has to survive a discontinuity in the middle of the burn.",
     source: "The rocket equation applied per stage (Δv = Isp·g0·ln(m0/m1)) — staging discards dead mass so the remaining fuel buys more Δv.",
     check: (s) => s.status === "Orbiting" && s.staged,
@@ -232,13 +240,13 @@ const CHALLENGES = [
     id: "efficient_orbit", name: "Fuel-Efficient Orbit", difficulty: "Impossible",
     concept: "Multi-variable optimization, not just reaching a state",
     body: "earth", stagePreset: "twoStage",
-    objective: "Achieve a stable Earth orbit using no more than 70% of your total starting fuel — genuinely difficult, but flyable with a well-timed pitch and throttle.",
+    objective: "Achieve a stable Earth orbit while leaving at least a sliver of fuel unused — no more than 98% of your total starting fuel spent. Real orbital rockets already spend the vast majority of their propellant just reaching orbit; this is about not wasting the little margin you do have, not about doing it on a near-empty tank.",
     startingState: "Same two-stage rocket and Earth pad start as Two-Stage Orbit.",
-    successCondition: "Orbit status reads 'Orbiting' AND total fuel used across both stages is at most 70% of the combined starting fuel mass.",
-    hint: "Full throttle wastes fuel fighting drag low in the atmosphere. Climb closer to vertical at a lower throttle through the thick lower air, THEN pitch hard toward horizontal and open the throttle once you're higher up and drag has dropped off — the goal is minimizing gravity AND drag losses at once, not just eventually reaching orbit.",
-    explanation: "Every earlier orbit challenge only asked whether you could reach the state at all. This asks for the state under a resource constraint, which means the ascent profile itself becomes the thing being optimized — burn timing, pitch profile, and throttle all trade off against each other instead of any one of them alone being 'more is better.'",
-    source: "Gravity losses and drag losses are both real, separate Δv costs baked into this ascent — an efficient profile minimizes the time spent fighting either one.",
-    check: (s) => s.status === "Orbiting" && s.fuelUsedFraction <= 0.7,
+    successCondition: "Orbit status reads 'Orbiting' AND total fuel used across both stages is at most 98% of the combined starting fuel mass.",
+    hint: "Use the same burn-coast-circularize sequence as Two-Stage Orbit, but tighten every part of it: a lower throttle (70-90%) while still deep in the thick lower atmosphere cuts drag losses, a shallower early pitch cuts gravity losses, and cutting the ascent burn as soon as Apoapsis is comfortably above 80-100 km (rather than climbing to 150-200 km) leaves more fuel for a shorter circularization burn — a sloppy flight burns every last drop; a clean one leaves a couple percent to spare.",
+    explanation: "Every earlier orbit challenge only asked whether you could reach the state at all. This asks for the state under a resource constraint, which means the ascent profile itself becomes the thing being optimized — burn timing, pitch profile, and throttle all trade off against each other instead of any one of them alone being 'more is better.' At this vehicle's Isp, the mass ratio real orbital velocity requires means even a near-optimal ascent still spends the vast majority of the tank — that's not a bug, it's the same reason real orbital rockets are themselves mostly propellant by mass; the achievable margin here is real but thin.",
+    source: "Gravity losses and drag losses are both real, separate Δv costs baked into this ascent; the rocket equation (Δv = Isp·g0·ln(m0/m1)) is why reaching orbital velocity at all requires burning most of the propellant even under near-ideal piloting.",
+    check: (s) => s.status === "Orbiting" && s.fuelUsedFraction <= 0.98,
   },
 ];
 assertFullLadder(CHALLENGES, "Rocket Simulator");

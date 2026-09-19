@@ -52,21 +52,31 @@ export const CHALLENGES = [
     id: "fan_lift",
     name: "Spring Launch",
     difficulty: "Easy",
-    concept: "A single instantaneous impulse vs. a fixed height",
-    objective: "Turn up the spring pad's power until the ball launches high enough to clear the marked line above it — its default power barely gets it off the ground.",
-    startingState: "A ball rests on a spring pad set to a low power, with a target line marked well above it.",
-    successCondition: "The ball's flight reaches at or above the marked line (y ≤ 900) at some point after launch.",
-    hint: "A spring sets the ball's launch speed the instant it's touched — check the spring pad's own Power property and raise it. Peak height scales with the SQUARE of launch speed, so it takes less of an increase than you might expect; try around 20.",
-    explanation: "Unlike a fan's continuous push, a spring imparts one clean, instantaneous velocity — there's no fighting a sustained opposing force over time, just a single number that either buys enough height or doesn't. It's the simplest version of an 'is this enough' question, before later tiers add aim, timing, or more than one variable at once.",
-    source: "Kinematics of vertical launch: peak height h = v²/(2g) — height grows with the square of launch speed.",
-    goalCheck: (items) => {
+    concept: "A single instantaneous impulse vs. a target BAND, not just a minimum",
+    objective: "Turn up the spring pad's power so the ball's peak height lands between the two marked lines — too little power falls short of the lower line, too much sails past the upper one.",
+    startingState: "A ball rests on a spring pad set to a low power, with two target lines marked above it: a lower line it must clear and an upper line it must not.",
+    successCondition: "The ball's peak height (once it starts falling back) lands between the two marked lines (750 ≤ apex y ≤ 900) — not short, not over.",
+    hint: "A spring sets the ball's launch speed the instant it's touched — check the spring pad's own Power property. Peak height scales with the SQUARE of launch speed, so the window between clearing the lower line and overshooting the upper one is narrower than it looks; try around 20-21.",
+    explanation: "The original version of this only asked for a minimum height, so any power above threshold worked forever — turning the dial up further never hurt. Bounding the peak between two lines turns it into a real target: the same square-law sensitivity that makes a small power increase buy a lot of extra height also means overshooting the top line takes only slightly more power than clearing the bottom one.",
+    source: "Kinematics of vertical launch: peak height h = v²/(2g) — height grows with the square of launch speed, so a narrow height window maps to a narrow power window.",
+    // Verified live (headless PhysicsSim run against this exact build()):
+    // power 19-22 lands the apex inside [750,900]; 18 and below stays short
+    // of 900, 22.5 and above overshoots past 750 — a real, if narrow, window
+    // on both sides, not an open-ended "more is fine."
+    goalCheck: (items, tracker) => {
       const ball = items.find((it) => it.id === "chal_fl_ball");
-      return !!ball && ball.y <= 900;
+      if (!ball) return false;
+      if (tracker._flMinY === undefined) tracker._flMinY = ball.y;
+      tracker._flMinY = Math.min(tracker._flMinY, ball.y);
+      const falling = ball.vy > 0.5;
+      return falling && tracker._flMinY <= 900 && tracker._flMinY >= 750;
     },
+    sustainFrames: 5,
     build() {
       return [
         { id: "chal_fl_ground", type: "board", x: 0, y: 1400, rotation: 0, width: 3200, height: 60, material: "wood", fixed: true },
         { id: "chal_fl_marker", type: "board", x: 300, y: 900, rotation: 0, width: 200, height: 6, material: "rubber", fixed: true },
+        { id: "chal_fl_ceiling", type: "board", x: 300, y: 750, rotation: 0, width: 200, height: 6, material: "rubber", fixed: true },
         { id: "chal_fl_pad", type: "springPad", x: 0, y: 1380, rotation: 0, width: 90, height: 20, material: "rubber", power: 12, fixed: true },
         { id: "chal_fl_ball", type: "ball", x: 0, y: 1355, rotation: 0, radius: 20, material: "rubber", fixed: false },
       ];

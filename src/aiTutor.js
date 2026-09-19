@@ -59,7 +59,7 @@ function render() {
     <p class="ai-tutor-disclaimer"><strong>Not connected yet</strong> — every message below gets a real, honest error, not a fabricated answer.</p>
     <div id="ait-history" class="ai-tutor-history"></div>
     <div class="ai-tutor-composer">
-      <textarea id="ait-input" class="ai-tutor-input" rows="2" placeholder="Ask the AI Tutor something…"></textarea>
+      <textarea id="ait-input" class="ai-tutor-input" rows="1" placeholder="Ask the AI Tutor something…"></textarea>
       <button id="ait-saved" title="My Saved Chats">My Saved Chats</button>
       <button id="ait-send" class="primary">Send</button>
     </div>
@@ -78,7 +78,15 @@ function render() {
 // Saving a chat is what lets it be shared with a teacher/classmate (see
 // the Dashboard) — same generic "Save current" + list panel every other
 // mode's My Saved ___ uses, just with the current messages array as data.
+//
+// Hides the AI Tutor modal first: both it and #saves-modal are plain
+// `.modal`s at the same z-index, and #ai-tutor-modal sits later in
+// index.html, so opening Saves on top of a still-visible AI Tutor modal
+// rendered the Saves panel BEHIND it — visible only after closing AI
+// Tutor first. Matches the "See Plans" button just above, which hides
+// this modal before opening Plans for the same reason.
 function openSavedChats() {
+  modal.classList.add("hidden");
   openSavesPanel({
     kind: "ai-chats",
     title: "My Saved Chats",
