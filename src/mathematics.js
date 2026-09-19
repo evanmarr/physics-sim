@@ -1,7 +1,7 @@
 import { compileExpression } from "./mathExpr.js";
 import { openSavesPanel } from "./auth.js";
 import { openModelInfo } from "./modelInfo.js";
-import { DEWEY_MAIN_CLASSES, DEWEY_DIVISIONS } from "./deweyData.js";
+import { DEWEY_MAIN_CLASSES, DEWEY_DIVISIONS, DEWEY_SECTIONS } from "./deweyData.js";
 
 const GRAPH_MODEL_INFO = {
   title: "Graph",
@@ -19,8 +19,8 @@ const CHART_MODEL_INFO = {
 };
 const DEWEY_MODEL_INFO = {
   title: "Dewey Decimal Lookup",
-  concept: "The real Dewey Decimal Classification's second-summary table (see src/deweyData.js) — the 10 main classes and 100 divisions exactly as published, not a simplified stand-in. A typed number is matched to the real division it falls under (e.g. 512.7 falls under 510 Mathematics); a typed word is matched against each division's official caption plus a curated list of everyday subject/genre synonyms (e.g. \"cooking\" finds 640).",
-  limitations: ["Only goes two levels deep (main class + division, i.e. numbers ending in a multiple of 10) — the full DDC has roughly 1,000 three-digit sections and further decimal subdivisions beyond that, which aren't included here."],
+  concept: "All three of the real Dewey Decimal Classification's own published summary tables (see src/deweyData.js) — the 10 main classes, 100 divisions, AND all 1,000 three-digit sections (e.g. 512 Algebra, 641 Food & drink) — exactly as published, not a simplified stand-in. A typed number resolves to the specific section it falls under (512.7 -> section 512 Algebra, part of 510 Mathematics, part of 500 Science); a typed word or phrase is matched against every section's and division's real caption plus divisions' curated everyday subject/genre synonyms (e.g. \"cooking\" finds 641), matching word-by-word so multi-word phrases don't need to appear in that exact order.",
+  limitations: ["Doesn't go past the third summary — real call numbers often continue with further decimal subdivisions (e.g. 512.73) beyond the three-digit section, which aren't included here."],
   sources: ["OCLC's Dewey Decimal Classification, Edition 23 summary tables"],
 };
 
@@ -269,53 +269,76 @@ export class MathematicsMode {
     const input = document.createElement("input");
     input.type = "text";
     input.value = this.dewey.query;
-    input.placeholder = "e.g. 510, or \"astronomy\"";
+    input.placeholder = "e.g. 512, or \"algebra\"";
     input.addEventListener("input", () => { this.dewey.query = input.value; this._renderDeweyResults(); });
     wrap.appendChild(input);
     this.controlsEl.appendChild(wrap);
 
     const hint = document.createElement("p");
     hint.className = "chem-hint";
-    hint.textContent = "Type a Dewey number to see what it means, or a subject/genre to find its number.";
+    hint.textContent = "Type a Dewey number to see the specific section it falls under, or a subject/genre (even a multi-word one) to find its number.";
     this.controlsEl.appendChild(hint);
 
     this._renderDeweyResults();
   }
 
-  // Numeric direction: which division (a multiple of ten) does this
-  // number actually fall under? Works for a bare division (510 -> itself)
-  // and for a real book-style call number (512.7 -> still 510), by
-  // flooring to the nearest 10.
+  // Numeric direction: resolves to the specific 3-digit SECTION a number
+  // falls under (e.g. 512.7 -> section 512 Algebra), not just the coarser
+  // 10-wide division — one full level more specific than before. Division
+  // and main class are still resolved too, as parent context.
   _deweyLookupNumber(raw) {
     const n = parseFloat(raw);
     if (!Number.isFinite(n) || n < 0 || n > 999) return null;
+    const sectionCode = String(Math.floor(n)).padStart(3, "0");
     const divisionCode = String(Math.floor(n / 10) * 10).padStart(3, "0");
     const mainCode = String(Math.floor(n / 100) * 100).padStart(3, "0");
+    const section = DEWEY_SECTIONS.find((s) => s.code === sectionCode);
     const division = DEWEY_DIVISIONS.find((d) => d.code === divisionCode);
     const mainClass = DEWEY_MAIN_CLASSES.find((c) => c.code === mainCode);
-    return { division, mainClass, exact: division && Number(division.code) === n };
+    return { section, division, mainClass, exact: section && Number(section.code) === n };
   }
 
-  // Text direction: rank every division by how well it matches, using the
-  // real caption first (an exact or leading match beats a keyword hit,
-  // which beats a keyword merely containing the query as a substring).
+  // Text direction: rank every SECTION (1,000, real captions only) and
+  // DIVISION (100, real captions + curated everyday keyword synonyms) by
+  // how well it matches, then merge into one list. Multi-word queries
+  // ("computer programming", "public health") now match against every word
+  // in a caption, not just as one literal substring, so word order and
+  // extra words in the caption don't block a real match.
   _deweySearchText(raw) {
     const q = raw.trim().toLowerCase();
     if (!q) return [];
+    const qWords = q.split(/\s+/).filter(Boolean);
+    const nameWords = (name) => name.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+
+    const scoreOf = (name, keywords) => {
+      const lower = name.toLowerCase();
+      const words = nameWords(name);
+      if (lower === q) return 100;
+      if (keywords?.some((k) => k === q)) return 95;
+      if (lower.startsWith(q)) return 85;
+      if (keywords?.some((k) => k.startsWith(q))) return 75;
+      if (qWords.length > 1 && qWords.every((w) => words.includes(w))) return 70;
+      if (lower.includes(q)) return 60;
+      if (keywords?.some((k) => k.includes(q))) return 55;
+      if (qWords.length > 1 && qWords.some((w) => words.includes(w))) return 40;
+      return 0;
+    };
+
     const scored = [];
-    for (const d of DEWEY_DIVISIONS) {
-      const name = d.name.toLowerCase();
-      let score = 0;
-      if (name === q) score = 100;
-      else if (name.startsWith(q)) score = 80;
-      else if (name.includes(q)) score = 60;
-      else if (d.keywords.some((k) => k === q)) score = 90;
-      else if (d.keywords.some((k) => k.startsWith(q))) score = 70;
-      else if (d.keywords.some((k) => k.includes(q))) score = 50;
-      if (score > 0) scored.push({ division: d, score });
+    for (const s of DEWEY_SECTIONS) {
+      const score = scoreOf(s.name, s.keywords);
+      if (score > 0) scored.push({ code: s.code, name: s.name, kind: "section", score });
     }
-    scored.sort((a, b) => b.score - a.score);
-    return scored.slice(0, 8).map((s) => s.division);
+    for (const d of DEWEY_DIVISIONS) {
+      const score = scoreOf(d.name, d.keywords);
+      if (score > 0) scored.push({ code: d.code, name: d.name, kind: "division", score });
+    }
+    // A tie goes to the more specific (section-level) hit over its own
+    // coarser parent division, since a section-level match is exactly the
+    // "more specific and detailed" result someone typing a real subject
+    // (not just a browsing-level category) is after.
+    scored.sort((a, b) => b.score - a.score || (a.kind === "section" ? -1 : 1));
+    return scored.slice(0, 10);
   }
 
   _renderDeweyResults() {
@@ -348,17 +371,17 @@ export class MathematicsMode {
     const looksNumeric = /^\d/.test(query);
     if (looksNumeric) {
       const result = this._deweyLookupNumber(query);
-      if (!result || !result.division) {
+      if (!result || !result.section) {
         el.innerHTML = `<p class="panel-empty">"${escapeHtmlLocal(query)}" isn't a Dewey number between 000 and 999.</p>`;
         return;
       }
-      const { division, mainClass, exact } = result;
+      const { section, division, mainClass, exact } = result;
       el.innerHTML = `
         <div class="math-dewey-result">
-          <div class="math-dewey-result-code">${division.code}</div>
-          <div class="math-dewey-result-name">${escapeHtmlLocal(division.name)}</div>
-          ${!exact ? `<div class="math-dewey-result-note">${escapeHtmlLocal(query)} falls within this division (the ${division.code}s).</div>` : ""}
-          ${mainClass ? `<div class="math-dewey-result-parent">Part of ${mainClass.code} — ${escapeHtmlLocal(mainClass.name)}</div>` : ""}
+          <div class="math-dewey-result-code">${section.code}</div>
+          <div class="math-dewey-result-name">${escapeHtmlLocal(section.name)}</div>
+          ${!exact ? `<div class="math-dewey-result-note">${escapeHtmlLocal(query)} falls within this section (the ${section.code}s).</div>` : ""}
+          ${division ? `<div class="math-dewey-result-parent">Part of ${division.code} — ${escapeHtmlLocal(division.name)}${mainClass ? `, itself part of ${mainClass.code} — ${escapeHtmlLocal(mainClass.name)}` : ""}</div>` : ""}
         </div>
       `;
       return;
@@ -366,18 +389,18 @@ export class MathematicsMode {
 
     const matches = this._deweySearchText(query);
     if (!matches.length) {
-      el.innerHTML = `<p class="panel-empty">No Dewey division matches "${escapeHtmlLocal(query)}" — try a broader subject (e.g. "science" instead of a specific topic).</p>`;
+      el.innerHTML = `<p class="panel-empty">No Dewey number matches "${escapeHtmlLocal(query)}" — try a broader or differently-worded subject (e.g. "science" instead of a specific topic).</p>`;
       return;
     }
     const list = div("math-dewey-matches");
-    for (const d of matches) {
+    for (const m of matches) {
       const row = document.createElement("button");
       row.className = "math-dewey-match-row";
-      row.innerHTML = `<span class="math-dewey-match-code">${d.code}</span><span>${escapeHtmlLocal(d.name)}</span>`;
+      row.innerHTML = `<span class="math-dewey-match-code">${m.code}</span><span class="math-dewey-match-name">${escapeHtmlLocal(m.name)}</span><span class="math-dewey-match-kind">${m.kind === "section" ? "section" : "division"}</span>`;
       row.addEventListener("click", () => {
         const input = this.controlsEl.querySelector(".math-dewey-search input");
-        this.dewey.query = d.code;
-        if (input) input.value = d.code;
+        this.dewey.query = m.code;
+        if (input) input.value = m.code;
         this._renderDeweyResults();
       });
       list.appendChild(row);

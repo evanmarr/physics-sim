@@ -1688,6 +1688,11 @@ input[type="range"] { accent-color: var(--accent); cursor: pointer; }
   flex-shrink: 0; width: 42px; font-weight: 700; font-family: ui-monospace, Menlo, monospace;
   color: var(--cool-2);
 }
+.math-dewey-match-name { flex: 1; }
+.math-dewey-match-kind {
+  flex-shrink: 0; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em;
+  color: var(--text-dim); border: 1px solid var(--border); border-radius: 999px; padding: 2px 8px;
+}
 
 /* ---------- Whiteboard ---------- */
 .wb-root {
