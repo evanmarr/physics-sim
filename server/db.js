@@ -595,6 +595,26 @@ export async function markAllNotificationsRead(email) {
   await query("UPDATE notifications SET read_at = $1 WHERE recipient_email = $2 AND read_at IS NULL", [Date.now(), email]);
 }
 
+// The reverse of markNotificationsRead — also scoped by recipient_email.
+// One at a time (not a single bulk UPDATE) because reopening a row can
+// collide with notifications_group_unread_idx: if a NEWER unread
+// notification already exists for the same group_key (e.g. someone else
+// favorited the same world after you read the first notice), reopening
+// the old one would violate that partial unique index. That's caught and
+// skipped per-row rather than failing the whole request — the row just
+// stays read, which is the only sane outcome once a fresher unread one
+// already exists for that group.
+export async function markNotificationsUnread(email, ids) {
+  if (!ids?.length) return;
+  for (const id of ids) {
+    try {
+      await query("UPDATE notifications SET read_at = NULL WHERE recipient_email = $1 AND id = $2", [email, id]);
+    } catch (e) {
+      if (e.code !== "23505") throw e;
+    }
+  }
+}
+
 // Someone favorited/remixed the recipient's world. Merges into the same
 // group_key while unread — see notifications_group_unread_idx — so a
 // burst of activity on one world reads as "3 people interacted with X"
@@ -614,6 +634,27 @@ export async function upsertInteractionNotification({ recipientEmail, actorName,
        title = format('%s people interacted with "%s"', notifications.count + 1, $7::text),
        updated_at = $6`,
     [crypto.randomUUID(), recipientEmail, groupKey, singularTitle, simId, now, simName]
+  );
+}
+
+// Someone subscribed to the recipient (a creator). Same escalating-group
+// shape as upsertInteractionNotification above ("X subscribed to you" ->
+// "N people subscribed to you" while unread) — this is still just an
+// inbox notice about something that happened, never a persisted,
+// always-visible follower count anywhere in the UI.
+export async function upsertSubscribeNotification({ recipientEmail, actorName }) {
+  const now = Date.now();
+  const groupKey = "new_subscriber";
+  const singularTitle = `${actorName} subscribed to you`;
+  await query(
+    `INSERT INTO notifications (id, recipient_email, kind, group_key, title, body, link_kind, link_id, count, created_at, updated_at, read_at)
+     VALUES ($1, $2, 'new_subscriber', $3, $4, '', NULL, NULL, 1, $5, $5, NULL)
+     ON CONFLICT (recipient_email, group_key) WHERE group_key IS NOT NULL AND read_at IS NULL
+     DO UPDATE SET
+       count = notifications.count + 1,
+       title = format('%s people subscribed to you', notifications.count + 1),
+       updated_at = $5`,
+    [crypto.randomUUID(), recipientEmail, groupKey, singularTitle, now]
   );
 }
 
@@ -646,14 +687,18 @@ export async function insertBroadcastNotifications(recipientEmails, { kind, titl
   const now = Date.now();
   let inserted = 0;
   for (const recipientEmail of recipientEmails) {
-    const rows = await query(
-      `INSERT INTO notifications (id, recipient_email, kind, group_key, title, body, link_kind, link_id, count, created_at, updated_at, read_at)
-       VALUES ($1, $2, $3, NULL, $4, $5, NULL, $6, 1, $7, $7, NULL)
-       ON CONFLICT (recipient_email, kind, link_id) WHERE group_key IS NULL AND link_id IS NOT NULL DO NOTHING
-       RETURNING id`,
-      [crypto.randomUUID(), recipientEmail, kind, title, body, broadcastId, now]
-    );
-    if (rows.length) inserted++;
+    try {
+      const rows = await query(
+        `INSERT INTO notifications (id, recipient_email, kind, group_key, title, body, link_kind, link_id, count, created_at, updated_at, read_at)
+         VALUES ($1, $2, $3, NULL, $4, $5, NULL, $6, 1, $7, $7, NULL)
+         ON CONFLICT (recipient_email, kind, link_id) WHERE group_key IS NULL AND link_id IS NOT NULL DO NOTHING
+         RETURNING id`,
+        [crypto.randomUUID(), recipientEmail, kind, title, body, broadcastId, now]
+      );
+      if (rows.length) inserted++;
+    } catch (e) {
+      if (e.code !== "23503") throw e; // no account with this email anymore — skip it, don't fail the whole batch
+    }
   }
   return inserted;
 }

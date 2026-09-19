@@ -101,6 +101,7 @@ export const unpublishSim = (id) => api(`/community-sims?id=${encodeURIComponent
 // nothing social-graph-shaped like a visible follower count.
 export const fetchNotifications = () => api("/notifications").then((d) => ({ notifications: d.notifications, unreadCount: d.unreadCount }));
 export const markNotificationsRead = (ids) => api("/notifications-read", { method: "POST", body: { ids } }).catch((e) => ({ error: e.message }));
+export const markNotificationsUnread = (ids) => api("/notifications-read", { method: "POST", body: { ids, read: false } }).catch((e) => ({ error: e.message }));
 export const markAllNotificationsRead = () => api("/notifications-read", { method: "POST", body: { all: true } }).catch((e) => ({ error: e.message }));
 export const fetchSubscribedCreatorEmails = () => api("/creator-subscribe").then((d) => d.creatorEmails).catch(() => []);
 export const toggleCreatorSubscription = (creatorEmail) => api("/creator-subscribe", { method: "POST", body: { creatorEmail } }).catch((e) => ({ error: e.message }));

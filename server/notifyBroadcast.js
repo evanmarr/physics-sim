@@ -11,10 +11,12 @@
 // rows to the notifications table for signed-in users to see next time
 // they open the bell. Real email/push is explicitly out of scope for now.
 //
-// Usage:
-//   node server/notifyBroadcast.js product-update "Title" "Body text" [broadcastId]
-//   node server/notifyBroadcast.js newsletter "Title" "Body text" [broadcastId]
-//   node server/notifyBroadcast.js donor-thanks donor@example.com "Title" "Body text" [broadcastId]
+// Usage (always with --env-file=.env.local, same as `npm start` and
+// server/newsletter/send.js — without it, DATABASE_URL isn't set and this
+// fails with an opaque connection error):
+//   node --env-file=.env.local server/notifyBroadcast.js product-update "Title" "Body text" [broadcastId]
+//   node --env-file=.env.local server/notifyBroadcast.js newsletter "Title" "Body text" [broadcastId]
+//   node --env-file=.env.local server/notifyBroadcast.js donor-thanks donor@example.com "Title" "Body text" [broadcastId]
 //
 // broadcastId is this run's idempotency key (see db.js's
 // notifications_oneshot_idx) — re-running the SAME broadcastId is a
@@ -31,9 +33,9 @@ const KIND_FOR = { "product-update": "product_update", "newsletter": "newsletter
 function usageAndExit() {
   console.error(
     "Usage:\n" +
-    '  node server/notifyBroadcast.js product-update "Title" "Body text" [broadcastId]\n' +
-    '  node server/notifyBroadcast.js newsletter "Title" "Body text" [broadcastId]\n' +
-    '  node server/notifyBroadcast.js donor-thanks donor@example.com "Title" "Body text" [broadcastId]'
+    '  node --env-file=.env.local server/notifyBroadcast.js product-update "Title" "Body text" [broadcastId]\n' +
+    '  node --env-file=.env.local server/notifyBroadcast.js newsletter "Title" "Body text" [broadcastId]\n' +
+    '  node --env-file=.env.local server/notifyBroadcast.js donor-thanks donor@example.com "Title" "Body text" [broadcastId]'
   );
   process.exitCode = 1;
 }
@@ -78,7 +80,16 @@ async function main() {
 
 main()
   .catch((err) => {
-    console.error("Broadcast failed:", err.message);
+    // A connection failure (missing DATABASE_URL is the usual cause) shows
+    // up as an AggregateError with an EMPTY .message — the real detail is
+    // in .errors — so a bare err.message here would just print "Broadcast
+    // failed:" with nothing after it, which is exactly what happens
+    // without --env-file=.env.local.
+    const detail = err?.message || err?.errors?.map((e) => e.message).join("; ") || String(err);
+    console.error("Broadcast failed:", detail);
+    if (!process.env.DATABASE_URL) {
+      console.error("DATABASE_URL isn't set — run this with: node --env-file=.env.local server/notifyBroadcast.js ...");
+    }
     process.exitCode = 1;
   })
   .finally(() => db.closePool());

@@ -5,11 +5,11 @@
 // newest-first with a real persistent read/unread state. Deliberately
 // absent: follower counts, popularity rankings, streaks, trending, DMs —
 // none of that belongs in a science-sandbox app's notifications.
-import { getUser, onAuthChange, fetchNotifications, markNotificationsRead, markAllNotificationsRead, escapeHtml } from "./auth.js";
+import { getUser, onAuthChange, fetchNotifications, markNotificationsRead, markNotificationsUnread, markAllNotificationsRead, escapeHtml } from "./auth.js";
 
 const KIND_LABELS = {
-  interaction: "Activity", new_world: "New world", product_update: "Product update",
-  newsletter: "Newsletter", donor_thanks: "Thank you",
+  interaction: "Activity", new_world: "New world", new_subscriber: "Subscriber",
+  product_update: "Product update", newsletter: "Newsletter", donor_thanks: "Thank you",
 };
 
 let modal, box, btn, badgeEl;
@@ -95,14 +95,25 @@ async function render() {
     await markAllNotificationsRead();
     render();
   });
+  // Clicking anywhere on an unread row is a quick "I've seen this" (marks
+  // read); the explicit toggle link below is what covers BOTH directions,
+  // including reopening something you read by mistake.
   box.querySelectorAll(".notif-row").forEach((row) => {
     row.addEventListener("click", async (e) => {
-      // The Open link handles its own click (and its own read-marking via
-      // the same call) — don't double-fire the row's.
-      if (e.target.closest(".notif-open")) return;
+      if (e.target.closest(".notif-open") || e.target.closest(".notif-toggle-read")) return;
       const id = row.dataset.id;
       const n = notifications.find((x) => x.id === id);
-      if (n?.readAt == null) { await markNotificationsRead([id]); row.classList.remove("notif-unread"); setBadge(Math.max(0, unreadCount - 1)); unreadCount = Math.max(0, unreadCount - 1); }
+      if (n?.readAt == null) { await markNotificationsRead([id]); render(); }
+    });
+  });
+  box.querySelectorAll(".notif-toggle-read").forEach((link) => {
+    link.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      const id = link.closest(".notif-row").dataset.id;
+      const n = notifications.find((x) => x.id === id);
+      if (n?.readAt == null) await markNotificationsRead([id]);
+      else await markNotificationsUnread([id]);
+      render();
     });
   });
   box.querySelectorAll(".notif-open").forEach((link) => {
@@ -132,6 +143,7 @@ function rowHtml(n) {
           <span class="dashboard-row-kind">${escapeHtml(KIND_LABELS[n.kind] || n.kind)}</span>
           · ${timeAgo(n.updatedAt)}
           ${n.linkKind === "community-sim" && n.linkId ? ` · <a href="#" class="notif-open">Open</a>` : ""}
+          · <a href="#" class="notif-toggle-read">${unread ? "Mark as read" : "Mark as unread"}</a>
         </div>
       </div>
       ${unread ? `<span class="notif-dot" title="Unread"></span>` : ""}

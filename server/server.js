@@ -1001,10 +1001,16 @@ export async function handleApi(req, res, url) {
     ]);
     return sendJson(res, 200, { notifications, unreadCount });
   }
+  // body.read === false marks the given ids UNREAD (reopening them);
+  // anything else (or body.all) marks read, same as before.
   if (parts[1] === "notifications-read" && req.method === "POST") {
     const body = await readJsonBody(req);
     if (body.all) await db.markAllNotificationsRead(email);
-    else if (Array.isArray(body.ids) && body.ids.length) await db.markNotificationsRead(email, body.ids.map(String));
+    else if (Array.isArray(body.ids) && body.ids.length) {
+      const ids = body.ids.map(String);
+      if (body.read === false) await db.markNotificationsUnread(email, ids);
+      else await db.markNotificationsRead(email, ids);
+    }
     const unreadCount = await db.countUnreadNotifications(email);
     return sendJson(res, 200, { ok: true, unreadCount });
   }
@@ -1022,6 +1028,12 @@ export async function handleApi(req, res, url) {
     if (!creatorEmail) return sendJson(res, 400, { error: "Missing creator." });
     if (creatorEmail === email) return sendJson(res, 400, { error: "You can't subscribe to yourself." });
     const subscribed = await db.toggleCreatorSubscription(email, creatorEmail);
+    // Only the transition TO subscribed notifies — unsubscribing is silent,
+    // matching the same rule favoriting/remixing follows.
+    if (subscribed) {
+      const actorName = await creatorDisplayName(email);
+      await db.upsertSubscribeNotification({ recipientEmail: creatorEmail, actorName });
+    }
     return sendJson(res, 200, { subscribed });
   }
   // Verifies a Locked object's 6-digit unlock code (see src/panel.js) —
