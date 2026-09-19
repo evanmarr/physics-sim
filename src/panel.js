@@ -253,7 +253,7 @@ export function renderPhysicsMathPanel(container, spec, onClose, onEdit) {
       // (negative mass, negative grip, a bounce that adds energy on
       // rebound). Everything else (power, range, radius) has no floor
       // that isn't just a Learn-mode UI convenience, so Advanced drops it.
-      const physicalFloor = new Set(["densityOverride", "frictionOverride", "restitutionOverride"]);
+      const physicalFloor = new Set(["densityOverride", "frictionOverride", "restitutionOverride", "shatterThresholdOverride"]);
       const input = document.createElement("input");
       input.type = advanced ? "number" : "range";
       if (advanced) {

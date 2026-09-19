@@ -27,6 +27,7 @@ function fmt(n, digits = 2) {
 export function effectiveDensity(spec, mat) { return spec.densityOverride ?? mat.density; }
 export function effectiveFriction(spec, mat) { return spec.frictionOverride ?? mat.friction; }
 export function effectiveRestitution(spec, mat) { return spec.restitutionOverride ?? mat.restitution; }
+export function effectiveShatterThreshold(spec, mat) { return spec.shatterThresholdOverride ?? mat.shatterImpactThreshold; }
 
 // Returns an array of { formula, note, edit? } lines, or null if there's
 // nothing meaningful to show for this object. A line with `edit` is a
@@ -75,9 +76,11 @@ export function physicsMath(spec) {
   });
 
   if (mat.shatters) {
+    const shatterThreshold = effectiveShatterThreshold(spec, mat);
     lines.push({
-      formula: `shatters if impact speed ≥ ${mat.shatterImpactThreshold}`,
-      note: `A soft tap just bounces off; hit it hard enough and it breaks instead.`,
+      formula: `shatters if impact speed ≥ ${fmt(shatterThreshold, 1)}`,
+      note: `A soft tap just bounces off; hit it hard enough and it breaks instead. Lower this and even a light touch shatters it; raise it and it takes a real hit.`,
+      edit: { key: "shatterThresholdOverride", value: shatterThreshold, min: 0, max: 30, step: 0.5 },
     });
   }
 

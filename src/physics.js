@@ -1,5 +1,5 @@
 import { materialOf } from "./materials.js";
-import { effectiveDensity, effectiveFriction, effectiveRestitution } from "./physicsEdu.js";
+import { effectiveDensity, effectiveFriction, effectiveRestitution, effectiveShatterThreshold } from "./physicsEdu.js";
 import { makeId, cannonCatchRadius } from "./objectTypes.js";
 import { trianglePoints } from "./render.js";
 
@@ -840,9 +840,11 @@ export class PhysicsSim {
     // (handled directly in _doDetonate), should break glass.
     if (other.plugin?.material === "glass") return;
     const mat = materialOf("glass");
+    const spec = this.specs.find((s) => s.id === body.plugin.gameId);
+    const threshold = spec ? effectiveShatterThreshold(spec, mat) : mat.shatterImpactThreshold;
     const rv = Vector.sub(body.velocity, other.velocity);
     const speed = Vector.magnitude(rv);
-    if (speed >= mat.shatterImpactThreshold) {
+    if (speed >= threshold) {
       this.pending.push({ type: "shatter", body });
     }
   }
