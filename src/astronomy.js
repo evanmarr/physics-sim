@@ -1026,7 +1026,7 @@ function buildChallengeModal(ctx, getDate, setDate) {
         setDate(result.date);
         if (result.likely) {
           ctx.state.completedChallenges.add("astro_find_eclipse");
-          refreshAchievements();
+          refreshAchievements("astro_find_eclipse");
           ctx.showToast("Challenge complete: Found the next solar eclipse!");
         }
       });

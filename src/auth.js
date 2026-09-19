@@ -106,6 +106,14 @@ export const markAllNotificationsRead = () => api("/notifications-read", { metho
 export const fetchSubscribedCreatorEmails = () => api("/creator-subscribe").then((d) => d.creatorEmails).catch(() => []);
 export const toggleCreatorSubscription = (creatorEmail) => api("/creator-subscribe", { method: "POST", body: { creatorEmail } }).catch((e) => ({ error: e.message }));
 
+// ---------- Weekly Challenge completion count ----------
+// Public read (no sign-in needed to see "N people completed this," same as
+// a community sim's favorite count) — recording a completion does need an
+// account, since counting anonymous clients honestly would need its own
+// device-id scheme this app doesn't otherwise have.
+export const fetchWeeklyChallengeCount = (week) => api(`/weekly-challenge-count?week=${encodeURIComponent(week)}`).then((d) => d.count).catch(() => null);
+export const completeWeeklyChallenge = (week, challengeId) => api("/weekly-challenge-complete", { method: "POST", body: { week, challengeId } }).then((d) => d.count).catch(() => null);
+
 // Onboarding quiz answers (src/onboarding.js) — writing them back through
 // api("/me")'s own shape keeps `user` in sync immediately, same as
 // title/subscribed changes elsewhere in this file.

@@ -195,7 +195,7 @@ export class HistoryMode {
     const challenge = HISTORY_CHALLENGES.find((c) => c.id === this.activeChallengeId);
     if (!challenge || challenge.categoryKey !== this.categoryKey || challenge.title !== entry.title) return;
     this.activeChallengeId = null;
-    if (this.ctx.state) { this.ctx.state.completedChallenges.add(challenge.id); refreshAchievements(); }
+    if (this.ctx.state) { this.ctx.state.completedChallenges.add(challenge.id); refreshAchievements(challenge.id); }
     this.ctx.showToast?.(`Challenge complete: found "${entry.title}"!`);
   }
 

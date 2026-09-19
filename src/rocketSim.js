@@ -480,7 +480,7 @@ export class RocketSimMode {
   _completeChallenge() {
     const ch = this.activeChallenge;
     this.activeChallenge = null;
-    if (this.ctx.state) { this.ctx.state.completedChallenges.add("rocket_" + ch.id); refreshAchievements(); }
+    if (this.ctx.state) { this.ctx.state.completedChallenges.add("rocket_" + ch.id); refreshAchievements("rocket_" + ch.id); }
     this.ctx.showToast?.(`Challenge complete: ${ch.name}!`);
     this._renderChallengePanel();
   }

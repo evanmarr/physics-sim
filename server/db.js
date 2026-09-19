@@ -325,6 +325,19 @@ export function ensureSchema() {
     -- server/notifyBroadcast.js), so a retried publish/broadcast can only
     -- ever insert the same row once, retry or not.
     CREATE UNIQUE INDEX IF NOT EXISTS notifications_oneshot_idx ON notifications(recipient_email, kind, link_id) WHERE group_key IS NULL AND link_id IS NOT NULL;
+
+    -- One row per (week, user) — the weekly challenge is a single shared
+    -- pick for everyone that week (see main.js's weeklyChallenge()), so
+    -- there's nothing to key on per-challenge; the primary key alone
+    -- keeps a retried "I finished it" request from ever double-counting
+    -- the same person twice in the same week.
+    CREATE TABLE IF NOT EXISTS weekly_challenge_completions (
+      week_key TEXT NOT NULL,
+      challenge_id TEXT NOT NULL,
+      email TEXT NOT NULL REFERENCES users(email) ON DELETE CASCADE,
+      completed_at BIGINT NOT NULL,
+      PRIMARY KEY (week_key, email)
+    );
   `);
   return readySchema;
 }
@@ -701,6 +714,26 @@ export async function insertBroadcastNotifications(recipientEmails, { kind, titl
     }
   }
   return inserted;
+}
+
+// ---------- weekly challenge completions ----------
+
+export async function recordWeeklyChallengeCompletion(weekKey, challengeId, email, completedAt) {
+  await query(
+    `INSERT INTO weekly_challenge_completions (week_key, challenge_id, email, completed_at) VALUES ($1, $2, $3, $4)
+     ON CONFLICT (week_key, email) DO NOTHING`,
+    [weekKey, challengeId, email, completedAt]
+  );
+}
+
+export async function countWeeklyChallengeCompletions(weekKey) {
+  const rows = await query("SELECT COUNT(*)::int AS n FROM weekly_challenge_completions WHERE week_key = $1", [weekKey]);
+  return rows[0]?.n ?? 0;
+}
+
+export async function hasCompletedWeeklyChallenge(weekKey, email) {
+  const rows = await query("SELECT 1 FROM weekly_challenge_completions WHERE week_key = $1 AND email = $2", [weekKey, email]);
+  return rows.length > 0;
 }
 
 // ---------- classrooms ----------

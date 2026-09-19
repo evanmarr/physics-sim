@@ -23,7 +23,7 @@ import { SoundMode } from "./sound.js";
 import { SustainabilityMode } from "./sustainability.js";
 import { traceLightRays } from "./lightOptics.js";
 import { openQuiz } from "./quiz.js";
-import { initAuthUI, openSavesPanel, sendFeedback, fetchCommunitySimById, verifyUnlockCode, escapeHtml, getUser, onAuthChange, fetchFeaturedSims, fetchCommunitySims, fetchMyFavoriteIds, fetchItems } from "./auth.js";
+import { initAuthUI, openSavesPanel, sendFeedback, fetchCommunitySimById, verifyUnlockCode, escapeHtml, getUser, onAuthChange, fetchFeaturedSims, fetchCommunitySims, fetchMyFavoriteIds, fetchItems, fetchWeeklyChallengeCount, completeWeeklyChallenge } from "./auth.js";
 import { difficultyBadgeHtml } from "./challengeTiers.js";
 import { initClassroomUI } from "./classroom.js";
 import { initPlansUI } from "./plans.js";
@@ -37,7 +37,7 @@ import { renderExperienceLevelPicker, getExperienceLevel } from "./experienceLev
 import { initWorldShareUI } from "./worldShare.js";
 import { initDashboardUI, registerShareApplier } from "./dashboard.js";
 import { initNotificationsUI } from "./notifications.js";
-import { initAchievementsUI, refreshAchievements } from "./achievements.js";
+import { initAchievementsUI, refreshAchievements, onChallengeCompleted } from "./achievements.js";
 import { initSearchUI } from "./search.js";
 import { initOnboarding } from "./onboarding.js";
 import { initTutorial } from "./tutorial.js";
@@ -737,6 +737,7 @@ function wireTopbar(renderer) {
   initDashboardUI();
   initNotificationsUI();
   initAchievementsUI(state);
+  onChallengeCompleted(checkWeeklyCompletion);
   initSearchUI(searchIndex);
   initOnboarding();
   initTutorial();
@@ -1023,7 +1024,7 @@ function checkChallengeFrame(items) {
 function awardChallenge(challenge) {
   if (!state.completedChallenges.has(challenge.id)) {
     state.completedChallenges.add(challenge.id);
-    refreshAchievements();
+    refreshAchievements(challenge.id);
     scheduleSave();
   }
   showToast(`Challenge complete: ${challenge.name}`);
@@ -1207,27 +1208,58 @@ function dailyChallenge() {
 // system, and rotating once a week (an ISO-ish year+week key) instead of
 // once a day — a reason to check back on a sandbox you don't visit often,
 // without needing a server-side scheduler here either.
+//
+// `id` on every entry is the EXACT string that ends up in
+// state.completedChallenges for that challenge (see achievements.js's own
+// comment on this same per-sandbox prefixing) — that's what lets
+// checkWeeklyCompletion() below recognize "the challenge that was just
+// completed happens to be this week's pick" and report it to the server.
 function weeklyPool() {
   return [
-    ...CHALLENGES.map((c) => ({ sandbox: "Physics", name: c.name, detail: c.objective, go: () => openPhysicsChallengeById(c.id) })),
-    ...CHEMISTRY_CHALLENGES.map((c) => ({ sandbox: "Chemistry", name: c.name, detail: c.description, go: () => { window._setMode("chemistry"); chemistryMode.openChallenges(); } })),
-    ...HISTORY_CHALLENGES.map((c) => ({ sandbox: "History", name: c.title, detail: c.hint, go: () => { window._setMode("history"); historyMode.openChallenges(); } })),
-    ...CYBER_CHALLENGES.map((c) => ({ sandbox: "Cybersecurity", name: c.hint, detail: "", go: () => { window._setMode("cybersecurity"); cybersecurityMode.openChallenges(); } })),
-    ...ROCKET_CHALLENGES.map((c) => ({ sandbox: "Rocket Simulator", name: c.name, detail: c.objective, go: () => { window._setMode("astronomy"); astronomyMode.openRocketChallenges(); } })),
-    { sandbox: "Astronomy", name: "Find the Next Solar Eclipse", detail: "Search forward from today for the next real solar eclipse alignment.", go: () => { window._setMode("astronomy"); astronomyMode.openChallenges(); } },
+    ...CHALLENGES.map((c) => ({ sandbox: "Physics", name: c.name, detail: c.objective, id: c.id, go: () => openPhysicsChallengeById(c.id) })),
+    ...CHEMISTRY_CHALLENGES.map((c) => ({ sandbox: "Chemistry", name: c.name, detail: c.description, id: "chem_" + c.id, go: () => { window._setMode("chemistry"); chemistryMode.openChallenges(); } })),
+    ...HISTORY_CHALLENGES.map((c) => ({ sandbox: "History", name: c.title, detail: c.hint, id: c.id, go: () => { window._setMode("history"); historyMode.openChallenges(); } })),
+    ...CYBER_CHALLENGES.map((c) => ({ sandbox: "Cybersecurity", name: c.hint, detail: "", id: c.id, go: () => { window._setMode("cybersecurity"); cybersecurityMode.openChallenges(); } })),
+    ...ROCKET_CHALLENGES.map((c) => ({ sandbox: "Rocket Simulator", name: c.name, detail: c.objective, id: "rocket_" + c.id, go: () => { window._setMode("astronomy"); astronomyMode.openRocketChallenges(); } })),
+    { sandbox: "Astronomy", name: "Find the Next Solar Eclipse", detail: "Search forward from today for the next real solar eclipse alignment.", id: "astro_find_eclipse", go: () => { window._setMode("astronomy"); astronomyMode.openChallenges(); } },
   ];
+}
+
+function weekKey(date = new Date()) {
+  const jan1 = Date.UTC(date.getUTCFullYear(), 0, 1);
+  const week = Math.ceil(((Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()) - jan1) / 86400000 + 1) / 7);
+  return `${date.getUTCFullYear()}-W${week}`;
 }
 
 function weeklyChallenge() {
   const pool = weeklyPool();
   if (!pool.length) return null;
-  const now = new Date();
-  const jan1 = Date.UTC(now.getUTCFullYear(), 0, 1);
-  const week = Math.ceil(((Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()) - jan1) / 86400000 + 1) / 7);
-  const key = `${now.getUTCFullYear()}-W${week}`;
+  const key = weekKey();
   let h = 0;
   for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) | 0;
   return pool[Math.abs(h) % pool.length];
+}
+
+// Fired (via achievements.js's onChallengeCompleted, which every sandbox's
+// own completion call site already reports to) whenever anything completes
+// anywhere — checks whether it happens to be THIS week's pick, and if so
+// reports it to the server and refreshes the on-screen count so it updates
+// live without needing a page reload.
+function checkWeeklyCompletion(id) {
+  const weekly = weeklyChallenge();
+  if (!weekly || weekly.id !== id) return;
+  completeWeeklyChallenge(weekKey(), id).then((count) => {
+    if (count != null) setWeeklyChallengeCountUI(count);
+  });
+}
+
+function setWeeklyChallengeCountUI(count) {
+  const el = document.getElementById("weekly-challenge-count");
+  if (el) el.textContent = countLabel(count);
+}
+
+function countLabel(count) {
+  return `${count.toLocaleString()} ${count === 1 ? "person has" : "people have"} completed this`;
 }
 
 // Global search's index: all 12 sandboxes (so typing a subject name jumps
@@ -1478,9 +1510,11 @@ async function buildHomeRails(container, onNavigate) {
       <div class="home-rail-card-badge"><span class="sandbox-badge">${escapeHtml(weekly.sandbox)}</span></div>
       <div class="home-rail-card-title">${escapeHtml(weekly.name || "")}</div>
       ${weekly.detail ? `<div class="home-rail-card-sub">${escapeHtml(weekly.detail)}</div>` : ""}
+      <div class="home-rail-card-count" id="weekly-challenge-count">…</div>
     `;
     card.addEventListener("click", () => weekly.go());
     addRail(container, "Weekly Challenge", [card]);
+    fetchWeeklyChallengeCount(weekKey()).then((count) => { if (count != null) setWeeklyChallengeCountUI(count); });
   }
 
   // Featured Templates — a few of Physics's own easier scenes, reused as

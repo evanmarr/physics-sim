@@ -770,6 +770,14 @@ export async function handleApi(req, res, url) {
     return sendJson(res, 200, found);
   }
 
+  // Public so the Weekly Challenge card can show "N people completed this"
+  // to a signed-out visitor too, same as a community sim's favorite count.
+  if (parts[1] === "weekly-challenge-count" && req.method === "GET") {
+    const week = String(url.searchParams.get("week") || "").slice(0, 20);
+    if (!week) return sendJson(res, 400, { error: "Missing week." });
+    return sendJson(res, 200, { count: await db.countWeeklyChallengeCompletions(week) });
+  }
+
   // Everything past this point requires a signed-in session.
   const email = await sessionUser(req);
   if (parts[1] === "me") {
@@ -777,6 +785,18 @@ export async function handleApi(req, res, url) {
     return sendJson(res, 200, publicUser(await db.getUser(email)));
   }
   if (!email) return sendJson(res, 401, { error: "Sign in to save and load your work." });
+
+  // Idempotent — safe to call every time the client sees the weekly
+  // challenge complete, not just the first (see db.js's ON CONFLICT DO
+  // NOTHING keyed on (week_key, email)).
+  if (parts[1] === "weekly-challenge-complete" && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const week = String(body.week || "").slice(0, 20);
+    const challengeId = String(body.challengeId || "").slice(0, 80);
+    if (!week || !challengeId) return sendJson(res, 400, { error: "Missing week or challengeId." });
+    await db.recordWeeklyChallengeCompletion(week, challengeId, email, Date.now());
+    return sendJson(res, 200, { count: await db.countWeeklyChallengeCompletions(week) });
+  }
 
   if (parts[1] === "title" && req.method === "POST") {
     const body = await readJsonBody(req);

@@ -132,21 +132,29 @@ async function render() {
   });
 }
 
+const KIND_INITIALS = {
+  interaction: "A", new_world: "W", new_subscriber: "S",
+  product_update: "U", newsletter: "N", donor_thanks: "T",
+};
+
 function rowHtml(n) {
   const unread = n.readAt == null;
+  const kindLabel = KIND_LABELS[n.kind] || n.kind;
   return `
     <div class="notif-row ${unread ? "notif-unread" : ""}" data-id="${n.id}">
+      <div class="notif-icon" data-kind="${escapeHtml(n.kind)}" title="${escapeHtml(kindLabel)}">${KIND_INITIALS[n.kind] || "?"}</div>
       <div class="notif-row-main">
-        <div class="notif-row-title">${escapeHtml(n.title)}</div>
+        <div class="notif-row-top">
+          <span class="notif-row-title">${escapeHtml(n.title)}</span>
+          <span class="notif-row-time">${timeAgo(n.updatedAt)}</span>
+        </div>
         ${n.body ? `<div class="notif-row-body">${escapeHtml(n.body)}</div>` : ""}
-        <div class="notif-row-meta">
-          <span class="dashboard-row-kind">${escapeHtml(KIND_LABELS[n.kind] || n.kind)}</span>
-          · ${timeAgo(n.updatedAt)}
-          ${n.linkKind === "community-sim" && n.linkId ? ` · <a href="#" class="notif-open">Open</a>` : ""}
-          · <a href="#" class="notif-toggle-read">${unread ? "Mark as read" : "Mark as unread"}</a>
+        <div class="notif-row-actions">
+          <span class="notif-kind-pill">${escapeHtml(kindLabel)}</span>
+          ${n.linkKind === "community-sim" && n.linkId ? `<a href="#" class="notif-action-link notif-open">Open</a>` : ""}
+          <a href="#" class="notif-action-link notif-toggle-read">${unread ? "Mark as read" : "Mark as unread"}</a>
         </div>
       </div>
-      ${unread ? `<span class="notif-dot" title="Unread"></span>` : ""}
     </div>
   `;
 }

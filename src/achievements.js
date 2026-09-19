@@ -87,13 +87,27 @@ export function initAchievementsUI(state) {
   refreshBadge();
 }
 
-// Called after any challenge completes anywhere (see main.js's shared
-// completeChallenge-style call sites) so the topbar count stays live
+const completionListeners = [];
+
+// Lets main.js (or anything else) react to "a challenge completed
+// somewhere," without achievements.js needing to know anything about what
+// that reaction is — see main.js's checkWeeklyCompletion, which uses this
+// same event to notice when the just-completed challenge happens to be the
+// current Weekly Challenge.
+export function onChallengeCompleted(fn) {
+  completionListeners.push(fn);
+}
+
+// Called after any challenge completes anywhere (see every sandbox's own
+// completedChallenges.add(id) call site) so the topbar count stays live
 // without polling — completedChallenges only ever grows during a session,
-// so a cheap recompute on that one event is all this needs.
-export function refreshAchievements() {
+// so a cheap recompute on that one event is all this needs. `id` is the
+// exact string just added to completedChallenges; omit it if there's
+// nothing new to report (e.g. a plain refresh).
+export function refreshAchievements(id) {
   refreshBadge();
   if (modal && !modal.classList.contains("hidden")) render();
+  if (id != null) completionListeners.forEach((fn) => fn(id));
 }
 
 function refreshBadge() {

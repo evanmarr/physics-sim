@@ -533,7 +533,7 @@ function buildChallengeModal(economy) {
           const ok = lastResult && c.check(lastResult);
           if (ok) {
             economy.state.completedChallenges.add("chem_" + c.id);
-            refreshAchievements();
+            refreshAchievements("chem_" + c.id);
             render(lastResult);
           } else {
             btn.textContent = "Not yet — try again";

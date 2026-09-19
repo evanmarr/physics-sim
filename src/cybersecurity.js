@@ -194,7 +194,7 @@ export class CybersecurityMode {
     const challenge = CYBER_CHALLENGES.find((c) => c.id === this.activeChallengeId);
     if (!challenge || challenge.entryId !== entry.id) return;
     this.activeChallengeId = null;
-    if (this.ctx.state) { this.ctx.state.completedChallenges.add(challenge.id); refreshAchievements(); }
+    if (this.ctx.state) { this.ctx.state.completedChallenges.add(challenge.id); refreshAchievements(challenge.id); }
     this.ctx.showToast?.(`Challenge complete: found "${entry.name}"!`);
   }
 
