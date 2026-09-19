@@ -1248,8 +1248,18 @@ function weeklyChallenge() {
 function checkWeeklyCompletion(id) {
   const weekly = weeklyChallenge();
   if (!weekly || weekly.id !== id) return;
+  // Recording it needs an account (see auth.js's comment on this same
+  // function) — completing challenges themselves never has, so plenty of
+  // people hit this signed out. Without this, completeWeeklyChallenge's
+  // 401 gets swallowed silently and the count on screen just never moves,
+  // with nothing telling you why.
+  if (!getUser()) {
+    showToast("Sign in to have this count toward the shared Weekly Challenge total.");
+    return;
+  }
   completeWeeklyChallenge(weekKey(), id).then((count) => {
     if (count != null) setWeeklyChallengeCountUI(count);
+    else showToast("Couldn't record that toward the Weekly Challenge total — check your connection.");
   });
 }
 
