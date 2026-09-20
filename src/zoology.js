@@ -182,6 +182,7 @@ export class ZoologyMode {
 
     const width = stage.clientWidth || 600, height = 420;
     const PAD = 34; // keeps a node's 30px circle (plus label) fully inside the stage
+    const MIN_SEP = 84; // matches forceCollide(42) below — sum of two nodes' collide radii
     const svg = d3.select(stage).append("svg")
       .attr("viewBox", `0 0 ${width} ${height}`)
       .attr("preserveAspectRatio", "xMidYMid meet")
@@ -207,8 +208,27 @@ export class ZoologyMode {
           // Clamp to the stage so a dragged node can never end up (or be
           // flung, via the simulation's own forces once released) outside
           // the visible SVG — the whole web must stay inside its container.
-          d.fx = Math.max(PAD, Math.min(width - PAD, e.x));
-          d.fy = Math.max(PAD, Math.min(height - PAD, e.y));
+          let fx = Math.max(PAD, Math.min(width - PAD, e.x));
+          let fy = Math.max(PAD, Math.min(height - PAD, e.y));
+          // forceCollide only pushes nodes apart AFTER a drag ends (it's a
+          // simulation force, and dragging pins the node via fx/fy, which
+          // simply overrides it) — so nothing stopped a dragged node from
+          // being dropped directly on top of / through another one while
+          // the pointer is still down. Push the dragged point back out to
+          // the same minimum separation forceCollide enforces everywhere
+          // else, every frame of the drag itself, not just at release.
+          for (const other of nodes) {
+            if (other === d) continue;
+            const dx = fx - other.x, dy = fy - other.y;
+            const dist = Math.hypot(dx, dy);
+            if (dist > 0 && dist < MIN_SEP) {
+              const push = MIN_SEP - dist;
+              fx += (dx / dist) * push;
+              fy += (dy / dist) * push;
+            }
+          }
+          d.fx = Math.max(PAD, Math.min(width - PAD, fx));
+          d.fy = Math.max(PAD, Math.min(height - PAD, fy));
         })
         .on("end", (e, d) => { if (!e.active) sim.alphaTarget(0); d.fx = null; d.fy = null; })
     );

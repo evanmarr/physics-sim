@@ -343,6 +343,16 @@ input[type="range"] { accent-color: var(--accent); cursor: pointer; }
 .search-row:hover, .search-row.search-row-active { border-color: var(--cool-2); background: color-mix(in srgb, var(--cool-2) 8%, var(--panel)); }
 .search-row-title { font-weight: 600; font-size: 13.5px; }
 .search-row-sub { font-size: 11.5px; color: var(--text-dim); }
+/* Mobile: a sub-16px input font makes Safari/Chrome auto-zoom the whole page
+   in on focus (their long-standing "prevent tiny inputs" heuristic), which
+   is what actually made this look broken — the modal itself is fine, it's
+   the browser zooming past it. Bumping to 16px (their threshold) stops
+   that; the button/row padding bumps just give real touch targets instead
+   of ones sized for a mouse pointer. */
+:root[data-device="mobile"] #search-btn { width: 40px; height: 40px; }
+:root[data-device="mobile"] .search-input { font-size: 16px; padding: 12px 14px; }
+:root[data-device="mobile"] .search-row { padding: 12px 14px; }
+:root[data-device="mobile"] #search-modal-box.classroom-box { width: calc(100vw - 24px); max-height: 80vh; }
 
 #achievements-wrap { position: relative; display: flex; }
 #achievements-btn {

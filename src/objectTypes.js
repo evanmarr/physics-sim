@@ -139,7 +139,11 @@ export const OBJECT_DEFS = {
     icon: "◎",
     category: "core",
     defaultSpec: () => ({ type: "ballBearing", x: 0, y: 0, rotation: 0, radius: 9, material: "metal", fixed: true }),
-    fields: [],
+    // "Fixed" only matters when this bearing ISN'T pivoting anything (see
+    // physics.js's pivotBearingIds) — sitting inside a board/triangle/ball/
+    // bomb always overrides it static so the hinge works. Standalone, it
+    // behaves like any other dynamic metal ball unless left Fixed.
+    fields: ["fixed"],
   },
   peg: {
     label: "Peg",
@@ -201,8 +205,10 @@ export const OBJECT_DEFS = {
     category: "core",
     // Continuous radial force on metal objects within range: positive power
     // attracts, negative repels.
-    defaultSpec: () => ({ type: "magnet", x: 0, y: 0, rotation: 0, radius: 20, material: "metal", power: 20, range: 350 }),
-    fields: ["power", "range"],
+    defaultSpec: () => ({ type: "magnet", x: 0, y: 0, rotation: 0, radius: 20, material: "metal", power: 20, range: 350, fixed: true }),
+    // Fixed by default (a wall-mounted magnet), but can be unfixed so it
+    // gets pulled toward fixed metal instead — see physics.js's _applyMagnets.
+    fields: ["power", "range", "fixed"],
   },
   portal: {
     label: "Portal",

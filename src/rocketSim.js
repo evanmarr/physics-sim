@@ -655,7 +655,7 @@ export class RocketSimMode {
       `;
 
       const armBtn = document.createElement("button");
-      armBtn.textContent = this.activeChallenge?.id === ch.id ? "Armed" : "Arm this challenge";
+      armBtn.textContent = this.activeChallenge?.id === ch.id ? "Armed ✓" : "Arm this challenge";
       armBtn.style.marginTop = "6px";
       armBtn.addEventListener("click", () => {
         this.activeChallenge = ch;

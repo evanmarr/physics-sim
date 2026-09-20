@@ -121,6 +121,7 @@ export class PhysicsSim {
     // nothing, which is exactly the "why won't this swing" trap.
     const pivots = []; // { bearingSpec, hostSpec }
     const pivotHostIds = new Set();
+    const pivotBearingIds = new Set(); // bearings actually pivoting >=1 host — must stay static for the hinge to work
     // A bearing sits physically embedded inside its host(s) (that's how a
     // pivot point works), so besides the point constraint that lets each
     // host swing around it, the bearing and every one of its hosts must
@@ -137,6 +138,7 @@ export class PhysicsSim {
       if (spec.type !== "ballBearing") continue;
       const hosts = this._findPivotHosts(spec, specById, BEARING_HOST_TYPES);
       if (!hosts.length) continue;
+      pivotBearingIds.add(spec.id);
       const group = Body.nextGroup(true);
       noCollideGroupById.set(spec.id, group);
       for (const host of hosts) {
@@ -154,7 +156,7 @@ export class PhysicsSim {
     const wireLinks = this._computeWireLinks(specById);
 
     for (const spec of this.specs) {
-      const body = this._createBody(spec, pivotHostIds.has(spec.id), noCollideGroupById.get(spec.id));
+      const body = this._createBody(spec, pivotHostIds.has(spec.id), noCollideGroupById.get(spec.id), pivotBearingIds.has(spec.id));
       if (!body) continue;
       this.byId.set(spec.id, body);
       Composite.add(world, body);
@@ -202,44 +204,6 @@ export class PhysicsSim {
         damping: 0,
       });
       Composite.add(world, constraint);
-    }
-
-    // Join: weld every spec sharing a joinGroup together into one rigid
-    // cluster. Unlike a Ball Bearing pivot (one point constraint, free to
-    // rotate), a weld uses TWO point constraints per pair at distinct
-    // anchor points — locking both relative translation AND rotation, the
-    // same technique real 2D engines (e.g. Box2D's weld joint) use instead
-    // of merging separate bodies into one. Each member keeps its own real
-    // mass/density/material; under extreme force a weld can flex slightly
-    // rather than being physically unbreakable, which is the honest
-    // simplification of this approach versus a true single compound body.
-    const joinGroups = new Map(); // joinGroup id -> [{ spec, body }]
-    for (const spec of this.specs) {
-      if (!spec.joinGroup) continue;
-      const body = this.byId.get(spec.id);
-      if (!body) continue;
-      if (!joinGroups.has(spec.joinGroup)) joinGroups.set(spec.joinGroup, []);
-      joinGroups.get(spec.joinGroup).push({ spec, body });
-    }
-    for (const members of joinGroups.values()) {
-      if (members.length < 2) continue;
-      // Joined members never solid-collide with each other (same
-      // shared-negative-group technique as a bearing + its host) — a weld
-      // that also fights its own collision response would jitter apart.
-      const group = Body.nextGroup(true);
-      for (const { body } of members) body.collisionFilter.group = group;
-      const [primary, ...rest] = members;
-      for (const { spec: otherSpec, body: otherBody } of rest) {
-        for (const [ax, ay] of [[primary.spec.x, primary.spec.y], [primary.spec.x + 20, primary.spec.y + 20]]) {
-          const pointA = _worldToLocalOffset(ax, ay, primary.spec.x, primary.spec.y, primary.spec.rotation || 0);
-          const pointB = _worldToLocalOffset(ax, ay, otherSpec.x, otherSpec.y, otherSpec.rotation || 0);
-          Composite.add(world, Constraint.create({
-            bodyA: primary.body, pointA,
-            bodyB: otherBody, pointB,
-            length: 0, stiffness: 1, damping: 0.3,
-          }));
-        }
-      }
     }
 
     // ropes: a chain of small segment bodies, anchored at the rope's placed
@@ -431,7 +395,7 @@ export class PhysicsSim {
     return links;
   }
 
-  _createBody(spec, forceDynamic = false, noCollideGroup = null) {
+  _createBody(spec, forceDynamic = false, noCollideGroup = null, isPivotBearing = false) {
     const mat = materialOf(spec.material);
     const common = {
       isStatic: forceDynamic ? false : !!spec.fixed,
@@ -458,9 +422,16 @@ export class PhysicsSim {
         body = Bodies.circle(spec.x, spec.y, spec.radius, common);
         break;
       case "ballBearing":
+        // Pivoting a host forces this bearing static regardless of its own
+        // Fixed checkbox (the hinge point can't move); standalone, it's a
+        // normal metal ball governed by spec.fixed like everything else.
+        body = Bodies.circle(spec.x, spec.y, spec.radius, { ...common, isStatic: isPivotBearing ? true : common.isStatic, isSensor: false });
+        break;
       case "peg":
-      case "magnet":
         body = Bodies.circle(spec.x, spec.y, spec.radius, { ...common, isStatic: true, isSensor: false });
+        break;
+      case "magnet":
+        body = Bodies.circle(spec.x, spec.y, spec.radius, { ...common, isSensor: false });
         break;
       case "lightSource":
         body = Bodies.circle(spec.x, spec.y, spec.radius || 15, { ...common, isStatic: true, isSensor: true });
@@ -735,7 +706,13 @@ export class PhysicsSim {
       .filter(Boolean);
     for (const { body: magnet, spec } of this.magnetMeta.values()) {
       for (const body of bodies) {
-        if (body === magnet || body.isStatic || body.isSensor) continue;
+        // A magnet welded/fixed in place only ever pulls loose metal toward
+        // it, same as before. Unfixed, it's just as attractable as any other
+        // metal object — including toward a FIXED metal object, which is
+        // the whole point of unfixing it. Two static bodies can't move at
+        // all either way, so that pair is the only one worth skipping.
+        if (body === magnet || body.isSensor) continue;
+        if (magnet.isStatic && body.isStatic) continue;
         if (body.plugin?.material !== "metal") continue;
         const delta = Vector.sub(magnet.position, body.position);
         const dist = Vector.magnitude(delta);
@@ -750,8 +727,9 @@ export class PhysicsSim {
         const refDist = 40;
         const falloff = Math.min(1, (refDist / Math.max(dist, refDist)) ** 4);
         const dir = Vector.normalise(delta);
-        const mag = spec.power * FAN_FORCE_SCALE * falloff * body.mass;
-        Body.applyForce(body, body.position, { x: dir.x * mag, y: dir.y * mag });
+        const mag = spec.power * FAN_FORCE_SCALE * falloff;
+        if (!body.isStatic) Body.applyForce(body, body.position, { x: dir.x * mag * body.mass, y: dir.y * mag * body.mass });
+        if (!magnet.isStatic) Body.applyForce(magnet, magnet.position, { x: -dir.x * mag * magnet.mass, y: -dir.y * mag * magnet.mass });
       }
     }
   }
@@ -1070,8 +1048,43 @@ export class PhysicsSim {
   applyLiveEdit(id, patch) {
     const spec = this.specs.find((s) => s.id === id);
     if (spec) Object.assign(spec, patch);
-    const body = this.byId.get(id);
+    let body = this.byId.get(id);
     if (!body) return;
+
+    // A Ball's donut hole isn't just a visual — it's a different Matter.js
+    // collision body (a compound ring of wedges vs. a plain circle, see
+    // _createBody's "ball" case). The render-only update below used to be
+    // the ONLY thing that happened here, which let the on-screen hole move
+    // while the live body kept colliding as whatever shape it was built
+    // with at Play time — a ball dragged open past the ring threshold mid-
+    // Play would visibly have a hole but still solidly bounce things off
+    // its (stale, holeless) center, which is the "center hole bouncing" a
+    // player actually sees. Rebuilding the body here keeps what you see and
+    // what you collide with in sync, the same way resizing already does.
+    if (spec && spec.type === "ball" && "holeRatio" in patch) {
+      const old = body;
+      const common = {
+        isStatic: old.isStatic,
+        angle: old.angle,
+        friction: old.friction,
+        frictionAir: old.frictionAir,
+        restitution: old.restitution,
+        density: old.density,
+        label: old.label,
+        ...(old.collisionFilter?.group ? { collisionFilter: { group: old.collisionFilter.group } } : {}),
+      };
+      const rebuilt = spec.holeRatio > 0.05
+        ? Body.create({ parts: _ringParts(old.position.x, old.position.y, spec.radius, spec.radius * spec.holeRatio, RING_SEGMENTS), ...common })
+        : Bodies.circle(old.position.x, old.position.y, spec.radius, common);
+      rebuilt.plugin = old.plugin;
+      Body.setVelocity(rebuilt, old.velocity);
+      Body.setAngularVelocity(rebuilt, old.angularVelocity);
+      Composite.remove(this.engine.world, old);
+      Composite.add(this.engine.world, rebuilt);
+      this.byId.set(id, rebuilt);
+      body = rebuilt;
+    }
+
     const render = body.plugin?.render;
 
     if (spec && ("x" in patch || "y" in patch)) Body.setPosition(body, { x: spec.x, y: spec.y });
@@ -1355,16 +1368,6 @@ function _ringParts(cx, cy, outerR, innerR, segments) {
     parts.push(Bodies.fromVertices(cx + centroidX, cy + centroidY, [relative], {}, true));
   }
   return parts;
-}
-
-// Converts a world point into a spec's own local (unrotated) frame — used
-// to bind a Join weld constraint's anchor points so they stay fixed
-// relative to each body as it rotates, the same math the Ball Bearing
-// pivot already uses for its own single anchor point.
-function _worldToLocalOffset(worldX, worldY, originX, originY, rotationDeg) {
-  const dx = worldX - originX, dy = worldY - originY;
-  const cos = Math.cos(-rotationDeg * RAD), sin = Math.sin(-rotationDeg * RAD);
-  return { x: dx * cos - dy * sin, y: dx * sin + dy * cos };
 }
 
 // Samples points along the magnet→target segment and checks each against

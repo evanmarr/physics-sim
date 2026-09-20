@@ -517,7 +517,7 @@ function buildChallengeModal(economy) {
       const completed = economy.state.completedChallenges.has("chem_" + c.id);
       const info = div("info");
       info.innerHTML = `
-        <div class="name">${c.name}${completed ? " (Completed)" : ""}</div>
+        <div class="name">${c.name}${completed ? " ✓" : ""}</div>
         <div class="concept-tag">${c.concept}</div>
         <div class="desc">${c.description}</div>
       `;

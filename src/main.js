@@ -359,8 +359,6 @@ function renderPanelUI() {
     onOpenMath: () => { state.mathPanelOpen = true; renderMathPanelUI(); renderPanelUI(); },
   });
   renderMathPanelUI();
-  const joinBtn = document.getElementById("join-btn");
-  if (joinBtn) joinBtn.disabled = state.selectedIds.size < 2 || state.playing;
 }
 
 // The one path that clears a Locked checkbox — free when this world was
@@ -403,30 +401,6 @@ function deleteObject(id) {
   renderAll();
   renderPanelUI();
   scheduleSave();
-}
-
-// Flexible/routing objects, not solid rigid shapes — welding one to
-// something else doesn't mean anything physically, so Join refuses rather
-// than silently doing something nonsensical.
-const JOIN_INCOMPATIBLE_TYPES = new Set(["rope", "wire"]);
-
-function joinSelected() {
-  if (state.selectedIds.size < 2 || state.playing) return;
-  const specs = state.objects.filter((o) => state.selectedIds.has(o.id));
-  if (specs.some((o) => o.locked)) { showToast("Locked — uncheck Locked in the panel to edit"); return; }
-  const bad = specs.filter((o) => JOIN_INCOMPATIBLE_TYPES.has(o.type));
-  if (bad.length) {
-    const labels = [...new Set(bad.map((o) => OBJECT_DEFS[o.type].label))].join(", ");
-    showToast(`Can't join ${labels} — not a rigid shape.`);
-    return;
-  }
-  pushUndoNow();
-  const groupId = makeId("join");
-  for (const spec of specs) spec.joinGroup = groupId;
-  renderAll();
-  renderPanelUI();
-  scheduleSave();
-  showToast(`Joined ${specs.length} objects`);
 }
 
 function deleteSelected() {
@@ -660,7 +634,6 @@ function wireTopbar(renderer) {
 
   document.getElementById("undo-btn").addEventListener("click", () => undo());
   document.getElementById("redo-btn").addEventListener("click", () => redo());
-  document.getElementById("join-btn").addEventListener("click", () => joinSelected());
 
   document.getElementById("light-mode-btn").addEventListener("click", () => {
     state.lightMode = !state.lightMode;
@@ -1078,7 +1051,7 @@ function wireChallenges() {
       info.className = "info";
       const name = document.createElement("div");
       name.className = "name";
-      name.innerHTML = `${escapeHtml(c.name)}${c.difficulty ? " " + difficultyBadgeHtml(c.difficulty) : ""}${state.completedChallenges.has(c.id) ? " (Completed)" : ""}`;
+      name.innerHTML = `${escapeHtml(c.name)}${c.difficulty ? " " + difficultyBadgeHtml(c.difficulty) : ""}${state.completedChallenges.has(c.id) ? " ✓" : ""}`;
       const concept = document.createElement("div");
       concept.className = "concept-tag";
       concept.textContent = c.concept;
@@ -2068,9 +2041,6 @@ function wireKeyboard(renderer) {
     } else if ((e.code === "Delete" || e.code === "Backspace") && state.selectedIds.size && !state.playing) {
       e.preventDefault();
       deleteSelected();
-    } else if (e.code === "KeyJ" && !cmd && state.selectedIds.size >= 2 && !state.playing) {
-      e.preventDefault();
-      joinSelected();
     } else if (e.code === "Escape") {
       state.selectedIds = new Set();
       state.selectedId = null;
@@ -2114,11 +2084,6 @@ function pasteClipboardAt(x, y) {
 
 function _pasteWithOffset(dx, dy) {
   pushUndoNow();
-  // A pasted group that was joined stays joined to its own copies, not
-  // welded to the originals — same idea as clearing targetId below, just
-  // remapped instead of dropped, since the whole point of copying a welded
-  // cluster is to get another independent welded cluster.
-  const joinGroupRemap = new Map();
   const pasted = clipboard.map((spec) => {
     const s = cloneSpec(spec);
     s.id = makeId(s.type);
@@ -2126,10 +2091,6 @@ function _pasteWithOffset(dx, dy) {
     s.y = snap(s.y + dy);
     if (s.x2 != null) { s.x2 = snap(s.x2 + dx); s.y2 = snap(s.y2 + dy); } // flexible-endpoint objects (rope/track): shift both ends together
     if (s.targetId) s.targetId = null; // don't silently share a trigger link with the original
-    if (s.joinGroup) {
-      if (!joinGroupRemap.has(s.joinGroup)) joinGroupRemap.set(s.joinGroup, makeId("join"));
-      s.joinGroup = joinGroupRemap.get(s.joinGroup);
-    }
     return s;
   });
   state.objects.push(...pasted);
