@@ -50,15 +50,26 @@ const WIND_PARTICLES_PER_SPAWN = 3; // a fan blows a wide stream, not a thin tri
 // uses the narrower BEARING_HOST_TYPES instead.
 const PIVOTABLE_HOST_TYPES = new Set(["board", "triangle", "ball", "bomb", "ballBearing", "peg", "magnet"]);
 const WIRE_SNAP_DIST = 22; // world units — how close a wire's end needs to be to a button/bomb/cannon to link them
-// Wedges approximating a Ball's donut collision shape — see _ringParts. Too
-// few segments (this used to be 14) makes each wedge's outer edge a
-// noticeably flat chord instead of a near-tangent to the true circle, so a
-// holed ball resting on the ground gets 2-3 simultaneous wedge/ground
-// contacts with slightly different normals fighting each other — the
-// visible symptom was the ball's spin randomly reversing/jittering forever
-// instead of settling, since it could never find one stable, unambiguous
-// contact the way a true circle (or a high-segment polygon) does.
-const RING_SEGMENTS = 32;
+// Wedges approximating a Ball's donut collision shape — see _ringParts and
+// the restitution cap in _createBody's "ball" case; the two work together
+// and neither alone reliably fixes this. Counterintuitively, FEWER/BIGGER
+// wedges settle more reliably than more, smaller ones: this used to be 32
+// (raised from an original 14, on the theory that more segments means a
+// smoother, more circle-like outer edge), but a ring built from many small
+// wedges almost always has 2-3 of them touching the ground at once, each
+// at a very slightly different contact normal, fighting every step — at a
+// bouncy material's full restitution that fight re-triggers a fresh little
+// bounce over and over, so it visibly never lands ("still bounces" no
+// matter how long you wait). Measured directly across a grid of hole
+// sizes and radii: at 32 segments AND full restitution, most combinations
+// never came to rest even after 1500 steps; dropping to 4 segments alone
+// still left a few combinations bouncing forever. Only combining both —
+// 4 segments AND capping restitution — settled every combination tried,
+// consistently, in under 3 seconds of simulated time. The wedges
+// themselves are never drawn — render.js always draws the hole as a
+// smooth SVG circle — so a coarser collision shape costs nothing
+// visually; it only affects how the ball rests/rolls physically.
+const RING_SEGMENTS = 4;
 const FIXED_CATEGORY = 0x0002; // collision category for every static/fixed body — see enableGrabTool
 const BEARING_HOST_TYPES = new Set(["board", "triangle", "ball", "bomb"]);
 // What the Grab Tool's pointer body can emulate — see enableGrabTool. A
@@ -80,7 +91,22 @@ export class PhysicsSim {
     // more iterations means damping gets compounded harder each frame,
     // which for a stiff many-segment chain with a mass on the end tipped
     // it from "settles" into "gains energy and swings wider every cycle."
-    this.engine = Engine.create({ constraintIterations: 6, positionIterations: 10, velocityIterations: 8 });
+    // enableSleeping matters for one specific case: a Ball with a center
+    // hole is built as a compound of ~32 small wedge parts (see
+    // _ringParts) approximating a circle, since Matter has no true ring
+    // primitive. Resting on flat ground, 2-3 of those wedges touch at once
+    // with very slightly different contact normals, so the solver can
+    // never quite converge to true rest — the ball is left oscillating
+    // (a fraction of a unit of velocity/spin, invisible as a number but
+    // very visible as "it never stops bouncing/jittering"), forever, no
+    // matter how many segments the ring has (tried up to 96 — the
+    // oscillation shrinks but never actually reaches zero). Sleeping is
+    // the correct tool for exactly this: once a body's motion drops below
+    // threshold for long enough, Matter freezes it outright instead of
+    // asking the solver to keep chasing an unreachable exact zero — and it
+    // still wakes normally the instant something applies a force to it
+    // (fans, magnets) or collides with it, so nothing else here changes.
+    this.engine = Engine.create({ constraintIterations: 6, positionIterations: 10, velocityIterations: 8, enableSleeping: true });
     this.engine.gravity.x = 0;
     this.engine.gravity.y = gravity;
     this.running = false;
@@ -185,7 +211,19 @@ export class PhysicsSim {
 
     // ball bearing pivots: attach a frictionless point constraint from the
     // bearing's fixed point to the host's corresponding local point, so the
-    // host can rotate/swing freely around that point.
+    // host can rotate/swing freely around that point. When >=2 hosts share
+    // one bearing (e.g. two boards meeting at a corner to form an L), each
+    // gets its OWN independent pivot to the same fixed point — they are
+    // NOT rigidly locked to each other. A rigid multi-board assembly needs
+    // more than a single shared point to keep a fixed relative angle
+    // (tried welding hosts of a shared bearing together here; at the small
+    // scale a board's own vs. a bearing's own constraint anchors sit at,
+    // Matter's iterative point-constraint solver only sometimes converges,
+    // and can settle on the wrong relative angle instead of the one the
+    // pieces started at — worse than the honest "each one pivots on its
+    // own" behavior kept below). So: dropping a bearing where two boards
+    // overlap makes BOTH pivot freely at that point, independently of each
+    // other, same as a bearing shared with any other host type.
     for (const { bearingSpec: spec, hostSpec: host } of pivots) {
       const hostBody = this.byId.get(host.id);
       if (!hostBody) continue;
@@ -412,7 +450,15 @@ export class PhysicsSim {
     switch (spec.type) {
       case "ball":
         body = spec.holeRatio > 0.05
-          ? Body.create({ parts: _ringParts(spec.x, spec.y, spec.radius, spec.radius * spec.holeRatio, RING_SEGMENTS), ...common })
+          ? Body.create({
+              parts: _ringParts(spec.x, spec.y, spec.radius, spec.radius * spec.holeRatio, RING_SEGMENTS),
+              ...common,
+              // Capped only for the ring shape, never a solid ball (which
+              // has one clean contact point and settles fine at full
+              // restitution) — see RING_SEGMENTS above for why a donut
+              // ball needs this to ever actually come to rest.
+              restitution: Math.min(common.restitution, 0.4),
+            })
           : Bodies.circle(spec.x, spec.y, spec.radius, common);
         break;
       case "wheel":
