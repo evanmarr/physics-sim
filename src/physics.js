@@ -146,6 +146,7 @@ export class PhysicsSim {
     const pivots = []; // { bearingSpec, hostSpec }
     const pivotHostIds = new Set();
     const pivotBearingIds = new Set(); // bearings actually pivoting >=1 host — must stay static for the hinge to work
+    const hostsByBearingId = new Map(); // bearing id -> [hostSpec] — >=2 means a rigid merge (see below)
     // A bearing sits physically embedded inside its host(s) (that's how a
     // pivot point works), so besides the point constraint that lets each
     // host swing around it, the bearing and every one of its hosts must
@@ -163,12 +164,44 @@ export class PhysicsSim {
       const hosts = this._findPivotHosts(spec, specById, BEARING_HOST_TYPES);
       if (!hosts.length) continue;
       pivotBearingIds.add(spec.id);
+      hostsByBearingId.set(spec.id, hosts);
       const group = Body.nextGroup(true);
       noCollideGroupById.set(spec.id, group);
       for (const host of hosts) {
         pivots.push({ bearingSpec: spec, hostSpec: host });
         pivotHostIds.add(host.id);
         noCollideGroupById.set(host.id, group);
+      }
+    }
+
+    // A bearing pivoting exactly ONE host just needs that host to swing
+    // freely, which the per-host point constraint below already does. A
+    // bearing pivoting TWO OR MORE at once (e.g. two boards meeting at a
+    // corner to form an L) is different: those hosts are meant to hold
+    // their shape relative to EACH OTHER, not just each independently
+    // orbit the same fixed point. A second constraint between them (the
+    // way the old Join feature welded two separate bodies) is unreliable
+    // here — tried it, and Matter's iterative solver only sometimes
+    // converges, occasionally locking onto the wrong relative angle
+    // instead of the one they started at. A genuinely rigid alternative
+    // that has no such ambiguity: build every host of a multi-host
+    // bearing as ONE real compound Matter body up front (the same
+    // technique _ringParts uses for a donut Ball's collision shape) —
+    // there's no solver involved in keeping compound parts rigid to each
+    // other, so this can't ever settle into the wrong shape. Skipped for
+    // a solo host, where the ordinary single-body path below already
+    // does the right thing.
+    const mergedHostIds = new Set();
+    const mergedBodyByBearingId = new Map(); // bearing id -> the shared compound body, for the pivot loop below
+    for (const [bearingId, hosts] of hostsByBearingId) {
+      if (hosts.length < 2) continue;
+      const merged = this._buildMergedHostBody(hosts);
+      merged.collisionFilter.group = noCollideGroupById.get(bearingId);
+      Composite.add(world, merged);
+      mergedBodyByBearingId.set(bearingId, merged);
+      for (const host of hosts) {
+        mergedHostIds.add(host.id);
+        this.byId.set(host.id, merged);
       }
     }
 
@@ -180,6 +213,7 @@ export class PhysicsSim {
     const wireLinks = this._computeWireLinks(specById);
 
     for (const spec of this.specs) {
+      if (mergedHostIds.has(spec.id)) continue; // already built above, as part of a merged compound
       const body = this._createBody(spec, pivotHostIds.has(spec.id), noCollideGroupById.get(spec.id), pivotBearingIds.has(spec.id));
       if (!body) continue;
       this.byId.set(spec.id, body);
@@ -209,20 +243,33 @@ export class PhysicsSim {
 
     // ball bearing pivots: attach a frictionless point constraint from the
     // bearing's fixed point to the host's corresponding local point, so the
-    // host can rotate/swing freely around that point. When >=2 hosts share
-    // one bearing (e.g. two boards meeting at a corner to form an L), each
-    // gets its OWN independent pivot to the same fixed point — they are
-    // NOT rigidly locked to each other. A rigid multi-board assembly needs
-    // more than a single shared point to keep a fixed relative angle
-    // (tried welding hosts of a shared bearing together here; at the small
-    // scale a board's own vs. a bearing's own constraint anchors sit at,
-    // Matter's iterative point-constraint solver only sometimes converges,
-    // and can settle on the wrong relative angle instead of the one the
-    // pieces started at — worse than the honest "each one pivots on its
-    // own" behavior kept below). So: dropping a bearing where two boards
-    // overlap makes BOTH pivot freely at that point, independently of each
-    // other, same as a bearing shared with any other host type.
+    // host can rotate/swing freely around that point. A solo host gets its
+    // own point constraint straight to the bearing, same as always; a
+    // multi-host bearing gets exactly ONE constraint instead, to the
+    // merged compound body built above — the compound's own rigidity is
+    // what keeps every one of its hosts holding its shape as the whole
+    // thing swings, not a second constraint doing that job.
+    const pivotedBearingIds = new Set();
     for (const { bearingSpec: spec, hostSpec: host } of pivots) {
+      if (mergedHostIds.has(host.id)) {
+        if (pivotedBearingIds.has(spec.id)) continue; // one pivot per merged bearing, not one per host
+        pivotedBearingIds.add(spec.id);
+        const merged = mergedBodyByBearingId.get(spec.id);
+        this.pivotHostBodies.push(merged);
+        // merged.angle is 0 at this point (freshly built, see
+        // _buildMergedHostBody) so its local frame still matches world
+        // space exactly — no rotation to account for yet.
+        const constraint = Constraint.create({
+          pointA: { x: spec.x, y: spec.y },
+          bodyB: merged,
+          pointB: { x: spec.x - merged.position.x, y: spec.y - merged.position.y },
+          length: 0,
+          stiffness: 1,
+          damping: 0,
+        });
+        Composite.add(world, constraint);
+        continue;
+      }
       const hostBody = this.byId.get(host.id);
       if (!hostBody) continue;
       this.pivotHostBodies.push(hostBody);
@@ -398,6 +445,86 @@ export class PhysicsSim {
       if (pointInShape(bearing.x, bearing.y, spec)) hosts.push(spec);
     }
     return hosts;
+  }
+
+  // Builds every host of one shared Ball Bearing as a SINGLE real compound
+  // Matter body (the same technique _ringParts uses for a donut Ball) —
+  // each host's own shape, in its own real position and rotation, as one
+  // of the compound's parts. A compound's parts can't drift relative to
+  // each other; there's no constraint/solver step involved in holding
+  // their shape, so (unlike a second point constraint between separate
+  // bodies) this can never settle into the wrong relative angle. The
+  // tradeoff: this is a genuinely rigid weld, not a hinge between the
+  // hosts themselves — which is exactly "two boards forming a rigid L,
+  // pivoting together on the bearing" and nothing more elaborate.
+  _buildMergedHostBody(hosts) {
+    const parts = hosts.map((host) => {
+      const verts = this._hostLocalVertices(host);
+      const mat = materialOf(host.material);
+      return Bodies.fromVertices(host.x, host.y, [verts], {
+        friction: effectiveFriction(host, mat),
+        restitution: effectiveRestitution(host, mat),
+        density: Math.max(effectiveDensity(host, mat) * DENSITY_SCALE, 0.0001),
+      }, true);
+    });
+    const primary = hosts[0];
+    const merged = Body.create({ parts, label: `mergedHosts:${primary.id}` });
+    // One render item per merged host, not one for the compound as a
+    // whole — see collectRenderItems. dx/dy are stored in the compound's
+    // OWN local frame; since `merged.angle` is exactly 0 right after
+    // Body.create (nothing has rotated it yet), world and local
+    // coordinates still coincide at this instant, so a plain subtraction
+    // is enough here.
+    merged.plugin = {
+      gameId: primary.id,
+      material: primary.material,
+      gameDensity: materialOf(primary.material).density,
+      gameArea: hosts.reduce((sum, host) => sum + areaOf(host), 0),
+      shattered: false,
+      transient: false,
+      multiRender: hosts.map((host) => ({
+        gameId: host.id,
+        dx: host.x - merged.position.x,
+        dy: host.y - merged.position.y,
+        rotationOffsetDeg: host.rotation || 0,
+        render: {
+          type: host.type, material: host.material,
+          width: host.width, height: host.height, radius: host.radius,
+          holeRatio: host.holeRatio, fixed: false,
+        },
+      })),
+    };
+    return merged;
+  }
+
+  // Local (unrotated-frame) vertices for a Ball Bearing host's own shape —
+  // used only to build a merged compound (see _buildMergedHostBody).
+  // ball/bomb are approximated as a 24-gon, same as everywhere else in
+  // this app a circle needs to be one part of a compound (see
+  // _ringParts) — Matter has no way to give one PART of a compound its
+  // own true circular collider.
+  _hostLocalVertices(spec) {
+    const rad = (spec.rotation || 0) * RAD;
+    const cos = Math.cos(rad), sin = Math.sin(rad);
+    const rot = (x, y) => ({ x: x * cos - y * sin, y: x * sin + y * cos });
+    switch (spec.type) {
+      case "board": {
+        const hw = spec.width / 2, hh = spec.height / 2;
+        return [rot(-hw, -hh), rot(hw, -hh), rot(hw, hh), rot(-hw, hh)];
+      }
+      case "triangle":
+        return trianglePoints(spec.width ?? spec.size ?? 130, spec.height).map((p) => rot(p.x, p.y));
+      case "ball":
+      case "bomb": {
+        const n = 24, r = spec.radius;
+        return Array.from({ length: n }, (_, i) => {
+          const a = (i / n) * Math.PI * 2;
+          return { x: Math.cos(a) * r, y: Math.sin(a) * r };
+        });
+      }
+      default:
+        return [rot(-20, -20), rot(20, -20), rot(20, 20), rot(-20, 20)];
+    }
   }
 
   // The nearest button/bomb/cannon within snap distance of a world point —
@@ -1378,6 +1505,32 @@ export class PhysicsSim {
     const items = [];
     const now = this.simTime;
     for (const body of Composite.allBodies(this.engine.world)) {
+      // A merged Ball Bearing assembly (see _buildMergedHostBody) is ONE
+      // Matter body but represents several original objects — one render
+      // item per host, each computed from the compound's live
+      // position/angle plus that host's own fixed offset within it,
+      // rather than the one item every other body gets below.
+      if (body.plugin?.multiRender) {
+        const cos = Math.cos(body.angle), sin = Math.sin(body.angle);
+        for (const entry of body.plugin.multiRender) {
+          items.push({
+            id: entry.gameId,
+            type: entry.render.type,
+            x: body.position.x + entry.dx * cos - entry.dy * sin,
+            y: body.position.y + entry.dx * sin + entry.dy * cos,
+            vx: body.velocity.x,
+            vy: body.velocity.y,
+            rotation: body.angle * DEG + entry.rotationOffsetDeg,
+            width: entry.render.width, height: entry.render.height, radius: entry.render.radius,
+            material: entry.render.material,
+            holeRatio: entry.render.holeRatio,
+            fixed: body.isStatic,
+            transient: false,
+            opacity: 1,
+          });
+        }
+        continue;
+      }
       const r = body.plugin?.render;
       if (!r || r.hidden) continue;
       let opacity = 1;
