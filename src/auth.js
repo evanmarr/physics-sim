@@ -114,6 +114,14 @@ export const toggleCreatorSubscription = (creatorEmail) => api("/creator-subscri
 export const fetchWeeklyChallengeCount = (week) => api(`/weekly-challenge-count?week=${encodeURIComponent(week)}`).then((d) => d.count).catch(() => null);
 export const completeWeeklyChallenge = (week, challengeId) => api("/weekly-challenge-complete", { method: "POST", body: { week, challengeId } }).then((d) => d.count).catch(() => null);
 
+// ---------- Per-account challenge completions (Achievements/badges) ----------
+// Both require a signed-in session (unlike the weekly count above) —
+// there's no meaningful "device" identity to key an anonymous visitor's
+// progress on, so a signed-out player's completions stay local-only until
+// they sign in, same as everything else in state.completedChallenges.
+export const fetchChallengeCompletions = () => api("/challenge-completions").then((d) => d.completed).catch(() => null);
+export const completeChallengeRemote = (challengeId) => api("/challenge-complete", { method: "POST", body: { challengeId } }).then(() => true).catch(() => false);
+
 // Onboarding quiz answers (src/onboarding.js) — writing them back through
 // api("/me")'s own shape keeps `user` in sync immediately, same as
 // title/subscribed changes elsewhere in this file.

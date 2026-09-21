@@ -28,6 +28,7 @@ export function effectiveDensity(spec, mat) { return spec.densityOverride ?? mat
 export function effectiveFriction(spec, mat) { return spec.frictionOverride ?? mat.friction; }
 export function effectiveRestitution(spec, mat) { return spec.restitutionOverride ?? mat.restitution; }
 export function effectiveShatterThreshold(spec, mat) { return spec.shatterThresholdOverride ?? mat.shatterImpactThreshold; }
+export function effectiveShardLifespanMs(spec, mat) { return spec.shardLifespanOverride ?? mat.shardLifespanMs ?? 3200; }
 
 // Returns an array of { formula, note, edit? } lines, or null if there's
 // nothing meaningful to show for this object. A line with `edit` is a
@@ -81,6 +82,12 @@ export function physicsMath(spec) {
       formula: `shatters if impact speed ≥ ${fmt(shatterThreshold, 1)}`,
       note: `A soft tap just bounces off; hit it hard enough and it breaks instead. Lower this and even a light touch shatters it; raise it and it takes a real hit.`,
       edit: { key: "shatterThresholdOverride", value: shatterThreshold, min: 0, max: 30, step: 0.5 },
+    });
+    const shardLifespanMs = effectiveShardLifespanMs(spec, mat);
+    lines.push({
+      formula: `shard lifespan = ${fmt(shardLifespanMs / 1000, 1)} s`,
+      note: `How long a broken shard sticks around (fading out over its last stretch) before disappearing. Shorter clears debris out of the way fast; longer leaves it scattered on screen.`,
+      edit: { key: "shardLifespanOverride", value: shardLifespanMs, min: 200, max: 15000, step: 100, resetValue: mat.shardLifespanMs ?? 3200 },
     });
   }
 

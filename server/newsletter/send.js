@@ -18,7 +18,13 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONTENT_FILE = path.join(__dirname, "content.json");
 const NEWS_FILE = path.join(__dirname, "news.txt");
 const ADS_FILE = path.join(__dirname, "ads.txt");
-const SITE_URL = process.env.SITE_URL || "http://localhost:5173";
+// Falls back to the real production domain, not localhost — this script
+// is run standalone (see this file's top comment), so on Vercel there's no
+// request to infer the host from like a normal route would have, and
+// SITE_URL was never actually set there. Without this, every unsubscribe
+// link in a real newsletter pointed at localhost:5173, dead for anyone but
+// whoever had a local dev server running at that exact moment.
+const SITE_URL = process.env.SITE_URL || "https://kinetic-sims.vercel.app";
 const NEWS_PLACEHOLDER_MARKER = "Replace this with this month's science news";
 
 async function loadNewsletterState() {

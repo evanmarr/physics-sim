@@ -196,6 +196,54 @@ export function renderPanel(container, spec, state, handlers) {
   container.appendChild(del);
 }
 
+// Multiple objects selected at once — instead of the single-object panel
+// above (which has nowhere to put N different specs), this offers the
+// handful of properties that make sense on almost any object type
+// regardless of what's actually selected: material, fixed/locked, and the
+// same weight/friction/bounciness overrides the single panel exposes.
+// `handlers.onChangeAll(patch)` applies one patch to every selected spec at
+// once (one undo step, not one per object — see main.js's patchAllSelected).
+export function renderMultiPanel(container, specs, state, handlers) {
+  container.innerHTML = "";
+
+  const title = document.createElement("div");
+  title.className = "panel-title";
+  title.innerHTML = `<span>${specs.length} objects selected</span>`;
+  container.appendChild(title);
+
+  if (specs.some((s) => s.locked)) {
+    container.appendChild(helpText("One or more selected objects are locked — editing here skips those and only applies to the rest."));
+  }
+
+  const editable = specs.filter((s) => !s.locked);
+  const set = (patch) => handlers.onChangeAll(editable.map((s) => s.id), patch);
+
+  // A mixed selection has no single "current" material/value to show — the
+  // material swatch just shows the FIRST editable object's, and every
+  // slider starts from that same object's own value, purely as a
+  // reasonable starting point for dragging from, not a claim that every
+  // selected object already has that value.
+  const first = editable[0];
+  if (!first) {
+    container.appendChild(helpText("Every selected object is locked."));
+    return;
+  }
+  const mat = materialOf(first.material);
+
+  container.appendChild(materialField(first.material, (v) => set({ material: v })));
+  container.appendChild(sliderField("Weight", first.densityOverride ?? mat.density, 0.05, 15, 0.05, (v) => set({ densityOverride: v })));
+  container.appendChild(sliderField("Friction", first.frictionOverride ?? mat.friction, 0, 1.5, 0.02, (v) => set({ frictionOverride: v })));
+  container.appendChild(sliderField("Flexibility (bounciness)", first.restitutionOverride ?? mat.restitution, 0, 1, 0.02, (v) => set({ restitutionOverride: v })));
+  container.appendChild(checkboxField("Fixed (ignores gravity/forces)", first.fixed, (v) => set({ fixed: v })));
+  container.appendChild(checkboxField("Locked", first.locked, (v) => set({ locked: v })));
+
+  const del = document.createElement("button");
+  del.className = "panel-delete danger";
+  del.textContent = `Delete ${editable.length}`;
+  del.addEventListener("click", () => handlers.onDeleteAll(editable.map((s) => s.id)));
+  container.appendChild(del);
+}
+
 // The standalone "physics math" panel, shown between the canvas and the
 // property panel — open by default, closable via the × in its title.
 // `onEdit(key, value)` fires when the user drags one of the editable
@@ -351,19 +399,38 @@ function sliderField(label, value, min, max, step, onChange, onLiveChange, unitS
   const l = document.createElement("label");
   const valSpan = document.createElement("span");
   const format = (raw) => Math.round((raw / unitScale) * 10) / 10 + (unitSuffix ? ` ${unitSuffix}` : "");
-  valSpan.textContent = format(value);
+  const advanced = getExperienceLevel() === "advanced";
   l.textContent = label + " ";
-  l.appendChild(valSpan);
+  if (!advanced) {
+    valSpan.textContent = format(value);
+    l.appendChild(valSpan);
+  }
   const input = document.createElement("input");
-  input.type = "range";
-  input.min = min; input.max = max; input.step = step;
-  input.value = value;
-  input.addEventListener("input", () => {
-    valSpan.textContent = format(input.value);
-    const v = parseFloat(input.value);
-    onChange(v);
-    onLiveChange?.(v);
-  });
+  // Advanced trades the slider for a real number box — type an exact
+  // value (including past the slider's own min/max, which exists mostly
+  // to keep a drag gesture meaningful) instead of dragging for it.
+  if (advanced) {
+    input.type = "number";
+    input.step = step;
+    input.value = Math.round((value / unitScale) * 100) / 100;
+    if (unitSuffix) input.className = "math-edit-input";
+    input.addEventListener("change", () => {
+      const v = (parseFloat(input.value) || 0) * unitScale;
+      input.value = Math.round((v / unitScale) * 100) / 100;
+      onChange(v);
+      onLiveChange?.(v);
+    });
+  } else {
+    input.type = "range";
+    input.min = min; input.max = max; input.step = step;
+    input.value = value;
+    input.addEventListener("input", () => {
+      valSpan.textContent = format(input.value);
+      const v = parseFloat(input.value);
+      onChange(v);
+      onLiveChange?.(v);
+    });
+  }
   wrap.appendChild(l);
   wrap.appendChild(input);
   return wrap;

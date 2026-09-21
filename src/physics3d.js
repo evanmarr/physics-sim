@@ -17,6 +17,8 @@ import { getUser, onAuthChange } from "./auth.js";
 
 const ROOM_HALF = 8; // meters — floor is ROOM_HALF*2 square, walls this far out
 const WALL_HEIGHT = 4;
+const DEFAULT_CAMERA_POS = { x: 10, y: 9, z: 14 };
+const DEFAULT_CAMERA_TARGET = { x: 0, y: 1.5, z: 0 };
 
 function div(cls) {
   const el = document.createElement("div");
@@ -58,6 +60,13 @@ export class Physics3DMode {
   // real sandbox and a locked preview accordingly — never renders (or
   // steps physics for) the real sandbox for a non-Plus account.
   _syncAccess() {
+    // This also fires from the auth-change subscription below, which lives
+    // for this instance's whole lifetime — including while the user is
+    // sitting in Physics 2D and this mode is unmounted (e.g. a slow initial
+    // /api/me resolving late, or a login/logout elsewhere on the page).
+    // Rebuilding the DOM at that point used to be actively harmful, not
+    // just wasted work — see the classList fix below for why.
+    if (!this._running) return;
     const allowed = this._hasAccess();
     if (allowed === this._lastAllowed && this._built) return;
     this._lastAllowed = allowed;
@@ -69,7 +78,16 @@ export class Physics3DMode {
   }
 
   _buildLockedPreview() {
-    this.root.className = "physics3d-locked";
+    // classList, not a full `className =` overwrite — main.js toggles a
+    // "hidden" class on this same element from OUTSIDE this class (see
+    // initPhysics3DTabs/unmountPhysics3D) to switch between Physics 2D
+    // and 3D. Overwriting className here used to silently strip that
+    // "hidden" class any time this ran — including from the `_running`
+    // guard above's failure mode — which is what made Physics 3D
+    // occasionally appear rendered in a split view under Physics 2D
+    // instead of actually being switched to.
+    this.root.classList.remove("physics3d-wrap");
+    this.root.classList.add("physics3d-locked");
     const box = div("physics3d-locked-box");
     box.innerHTML = `
       <div class="physics3d-locked-badge">KINETIC PLUS</div>
@@ -86,7 +104,8 @@ export class Physics3DMode {
   // ---------- the real sandbox (Plus only) ----------
 
   _buildSandbox() {
-    this.root.className = "physics3d-wrap";
+    this.root.classList.remove("physics3d-locked");
+    this.root.classList.add("physics3d-wrap");
     this._built = true;
 
     this.toolbar = div("physics3d-toolbar");
@@ -143,6 +162,11 @@ export class Physics3DMode {
     clearBtn.textContent = "Clear";
     clearBtn.addEventListener("click", () => this._clear());
 
+    const resetViewBtn = document.createElement("button");
+    resetViewBtn.textContent = "Reset View";
+    resetViewBtn.title = "Re-center and re-orbit the camera — doesn't touch your objects";
+    resetViewBtn.addEventListener("click", () => this._resetView());
+
     const note = div("physics3d-note");
     note.textContent = "Drag empty space to orbit · drag an object to move it · scroll to zoom · right-drag or shift+two-finger to pan · space to play/pause · R to reset";
 
@@ -151,7 +175,18 @@ export class Physics3DMode {
     p.appendChild(this.playBtn);
     p.appendChild(resetBtn);
     p.appendChild(clearBtn);
+    p.appendChild(resetViewBtn);
     p.appendChild(note);
+  }
+
+  // Only the camera — same starting orbit position/target the scene is
+  // built with, not anything touching this.objects (that's Reset/Clear's
+  // job) — a known, fixed place to get back to after orbiting/panning/
+  // zooming off somewhere disorienting.
+  _resetView() {
+    this.camera.position.set(DEFAULT_CAMERA_POS.x, DEFAULT_CAMERA_POS.y, DEFAULT_CAMERA_POS.z);
+    this.controls.target.set(DEFAULT_CAMERA_TARGET.x, DEFAULT_CAMERA_TARGET.y, DEFAULT_CAMERA_TARGET.z);
+    this.controls.update();
   }
 
   _buildScene() {
@@ -159,7 +194,7 @@ export class Physics3DMode {
     this.scene.background = new THREE.Color(0x0d1220);
 
     this.camera = new THREE.PerspectiveCamera(55, 1, 0.05, 500);
-    this.camera.position.set(10, 9, 14);
+    this.camera.position.set(DEFAULT_CAMERA_POS.x, DEFAULT_CAMERA_POS.y, DEFAULT_CAMERA_POS.z);
 
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
     this.viewerWrap.appendChild(this.renderer.domElement);
@@ -167,7 +202,7 @@ export class Physics3DMode {
     this.controls = new THREE.OrbitControls(this.camera, this.renderer.domElement);
     this.controls.enableDamping = true;
     this.controls.dampingFactor = 0.08;
-    this.controls.target.set(0, 1.5, 0);
+    this.controls.target.set(DEFAULT_CAMERA_TARGET.x, DEFAULT_CAMERA_TARGET.y, DEFAULT_CAMERA_TARGET.z);
     this.controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN };
     // Two-finger touch defaults to combined dolly+pan; holding Shift swaps
     // it to a plain two-finger pan instead (checked fresh at the start of

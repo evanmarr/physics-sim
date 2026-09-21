@@ -1,6 +1,6 @@
 import { Renderer, openSpeedUnitMenu, currentSpeedUnitLabel } from "./render.js";
 import { renderPalette } from "./palette.js";
-import { renderPanel, renderPhysicsMathPanel } from "./panel.js";
+import { renderPanel, renderPhysicsMathPanel, renderMultiPanel } from "./panel.js";
 import { CHALLENGES, findChallenge, ChallengeTracker } from "./challenges.js";
 import { CHEMISTRY_CHALLENGES } from "./chemistryChallenges.js";
 import { HISTORY_CHALLENGES } from "./historyChallenges.js";
@@ -23,7 +23,7 @@ import { SoundMode } from "./sound.js";
 import { SustainabilityMode } from "./sustainability.js";
 import { traceLightRays } from "./lightOptics.js";
 import { openQuiz } from "./quiz.js";
-import { initAuthUI, openSavesPanel, sendFeedback, fetchCommunitySimById, verifyUnlockCode, escapeHtml, getUser, onAuthChange, fetchFeaturedSims, fetchCommunitySims, fetchMyFavoriteIds, fetchItems, fetchWeeklyChallengeCount, completeWeeklyChallenge } from "./auth.js";
+import { initAuthUI, openSavesPanel, sendFeedback, fetchCommunitySimById, verifyUnlockCode, escapeHtml, getUser, onAuthChange, fetchFeaturedSims, fetchCommunitySims, fetchMyFavoriteIds, fetchItems, fetchWeeklyChallengeCount, completeWeeklyChallenge, fetchChallengeCompletions, completeChallengeRemote } from "./auth.js";
 import { difficultyBadgeHtml } from "./challengeTiers.js";
 import { initClassroomUI } from "./classroom.js";
 import { initPlansUI } from "./plans.js";
@@ -250,6 +250,18 @@ function patchObjectSilent(id, patch) {
   Object.assign(spec, patch);
 }
 
+// The multi-select panel's "mass edit" — applies one patch to every given
+// id at once, as a single undo step (markUndo's own debounce merges the
+// per-id calls below rather than creating one step per object).
+function patchAllSelected(ids, patch) {
+  for (const id of ids) {
+    patchObjectSilent(id, patch);
+    if (state.playing && sim) sim.applyLiveEdit(id, patch);
+  }
+  renderAll();
+  scheduleSave();
+}
+
 // ---- Undo (physics mode) ----
 // Every edit that mutates state.objects/gravity funnels through here.
 // Continuous bursts (dragging a slider, dragging an object) are coalesced
@@ -350,8 +362,18 @@ function renderPaletteUI() {
 }
 
 function renderPanelUI() {
+  const panelEl = document.getElementById("prop-panel");
+  if (state.selectedIds.size > 1) {
+    const specs = state.objects.filter((o) => state.selectedIds.has(o.id));
+    renderMultiPanel(panelEl, specs, state, {
+      onChangeAll: (ids, patch) => patchAllSelected(ids, patch),
+      onDeleteAll: () => deleteSelected(),
+    });
+    renderMathPanelUI();
+    return;
+  }
   const spec = state.objects.find((o) => o.id === state.selectedId) || null;
-  renderPanel(document.getElementById("prop-panel"), spec, state, {
+  renderPanel(panelEl, spec, state, {
     onChange: (id, patch) => { patchObject(id, patch); },
     onDelete: (id) => { deleteObject(id); },
     onUnlock: () => requestUnlock(),
@@ -584,6 +606,12 @@ function wireTopbar(renderer) {
     state.grabShape = e.target.value;
     if (state.grabToolActive && sim) { sim.disableGrabTool(); sim.enableGrabTool(state.grabShape); }
   });
+  // Only the camera — same starting pan/zoom the app opens with (line ~203
+  // above), not "fit to objects", since the whole point is a known, fixed
+  // place to get back to after scrolling/zooming off into nowhere.
+  document.getElementById("reset-view-btn").addEventListener("click", () => {
+    renderer.centerOn(0, WORLD.groundY - 700, 0.7);
+  });
 
   const gravitySlider = document.getElementById("gravity-slider");
   const gravityVal = document.getElementById("gravity-val");
@@ -711,6 +739,8 @@ function wireTopbar(renderer) {
   initNotificationsUI();
   initAchievementsUI(state);
   onChallengeCompleted(checkWeeklyCompletion);
+  onChallengeCompleted(syncChallengeToAccount);
+  onAuthChange(syncChallengeCompletionsFromAccount);
   initSearchUI(searchIndex);
   initOnboarding();
   initTutorial();
@@ -1234,6 +1264,36 @@ function checkWeeklyCompletion(id) {
     if (count != null) setWeeklyChallengeCountUI(count);
     else showToast("Couldn't record that toward the Weekly Challenge total — check your connection.");
   });
+}
+
+// Same "fires on every completion, anywhere" hook checkWeeklyCompletion
+// uses, for a different job: mirroring it to the account so Achievements
+// and every sandbox's own "(Completed)" markers follow the SIGNED-IN
+// ACCOUNT instead of being stuck on whichever device/browser first earned
+// them. Silently does nothing signed out — completing challenges locally
+// has never required an account, and there's no device identity worth
+// syncing progress against, so it just stays local (as it always has)
+// until a sign-in triggers syncChallengeCompletionsFromAccount below.
+function syncChallengeToAccount(id) {
+  if (!getUser()) return;
+  completeChallengeRemote(id);
+}
+
+// Pulls this account's full completion history down and merges it into
+// the LOCAL set (union, never removes anything already completed on this
+// device) — called once right after sign-in resolves. A brand new device
+// signing into an existing account picks up every challenge/achievement
+// that account already earned elsewhere; nothing already completed here
+// but not yet synced (e.g. earned signed-out, just signed in) is lost.
+async function syncChallengeCompletionsFromAccount() {
+  if (!getUser()) return;
+  const completed = await fetchChallengeCompletions();
+  if (!completed) return;
+  let changed = false;
+  for (const id of completed) {
+    if (!state.completedChallenges.has(id)) { state.completedChallenges.add(id); changed = true; }
+  }
+  if (changed) { refreshAchievements(); scheduleSave(); }
 }
 
 function setWeeklyChallengeCountUI(count) {

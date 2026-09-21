@@ -338,6 +338,22 @@ export function ensureSchema() {
       completed_at BIGINT NOT NULL,
       PRIMARY KEY (week_key, email)
     );
+
+    -- Every individual challenge a signed-in account has ever completed,
+    -- across all 12 sandboxes (physics/chemistry/history/cybersecurity/
+    -- rocket/astronomy each mint their own challenge_id strings, some
+    -- sandbox-prefixed — see achievements.js — this table doesn't care,
+    -- it's free-form text). Unlike weekly_challenge_completions this is
+    -- unbounded per user (one row per challenge, not per week), which is
+    -- exactly what lets Achievements/badges (a running count/set of every
+    -- challenge ever done) sync across devices instead of living only in
+    -- one browser's localStorage.
+    CREATE TABLE IF NOT EXISTS challenge_completions (
+      email TEXT NOT NULL REFERENCES users(email) ON DELETE CASCADE,
+      challenge_id TEXT NOT NULL,
+      completed_at BIGINT NOT NULL,
+      PRIMARY KEY (email, challenge_id)
+    );
   `);
   return readySchema;
 }
@@ -734,6 +750,21 @@ export async function countWeeklyChallengeCompletions(weekKey) {
 export async function hasCompletedWeeklyChallenge(weekKey, email) {
   const rows = await query("SELECT 1 FROM weekly_challenge_completions WHERE week_key = $1 AND email = $2", [weekKey, email]);
   return rows.length > 0;
+}
+
+// ---------- per-account challenge completions (achievements/badges) ----------
+
+export async function recordChallengeCompletion(email, challengeId, completedAt) {
+  await query(
+    `INSERT INTO challenge_completions (email, challenge_id, completed_at) VALUES ($1, $2, $3)
+     ON CONFLICT (email, challenge_id) DO NOTHING`,
+    [email, challengeId, completedAt]
+  );
+}
+
+export async function getChallengeCompletions(email) {
+  const rows = await query("SELECT challenge_id FROM challenge_completions WHERE email = $1", [email]);
+  return rows.map((r) => r.challenge_id);
 }
 
 // ---------- classrooms ----------

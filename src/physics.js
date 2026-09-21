@@ -1,5 +1,5 @@
 import { materialOf } from "./materials.js";
-import { effectiveDensity, effectiveFriction, effectiveRestitution, effectiveShatterThreshold } from "./physicsEdu.js";
+import { effectiveDensity, effectiveFriction, effectiveRestitution, effectiveShatterThreshold, effectiveShardLifespanMs } from "./physicsEdu.js";
 import { makeId, cannonCatchRadius } from "./objectTypes.js";
 import { trianglePoints } from "./render.js";
 
@@ -194,12 +194,24 @@ export class PhysicsSim {
     const mergedHostIds = new Set();
     const mergedBodyByBearingId = new Map(); // bearing id -> the shared compound body, for the pivot loop below
     for (const [bearingId, hosts] of hostsByBearingId) {
-      if (hosts.length < 2) continue;
-      const merged = this._buildMergedHostBody(hosts);
+      // Only board/triangle hosts are eligible to merge into a rigid
+      // bracket — a ball or bomb sharing the same bearing keeps the
+      // ordinary independent-pivot treatment below instead. _hostLocalVertices
+      // can only approximate a ball/bomb as a solid polygon (a compound
+      // part can't carry a real hole), so merging one would silently turn
+      // a donut Ball into a solid disc — full restitution, no hole, and
+      // permanently unable to settle (_settleRingOnContact only ever
+      // looks at a body's own `plugin.render`, which a merged compound
+      // doesn't have). A rigid L-bracket is specifically a
+      // board/triangle thing; nothing here needs a ball/bomb to be part
+      // of that rigid assembly.
+      const mergeable = hosts.filter((h) => h.type === "board" || h.type === "triangle");
+      if (mergeable.length < 2) continue;
+      const merged = this._buildMergedHostBody(mergeable);
       merged.collisionFilter.group = noCollideGroupById.get(bearingId);
       Composite.add(world, merged);
       mergedBodyByBearingId.set(bearingId, merged);
-      for (const host of hosts) {
+      for (const host of mergeable) {
         mergedHostIds.add(host.id);
         this.byId.set(host.id, merged);
       }
@@ -682,7 +694,15 @@ export class PhysicsSim {
       render: {
         type: spec.type,
         material: spec.material,
-        width: spec.width, height: spec.height, radius: spec.radius,
+        // A triangle built from a legacy `size` field (old saved/shared
+        // worlds predate the width rename — _createBody's own triangle
+        // case, and areaOf(), both still fall back to it) needs the same
+        // fallback here: without it, render.width stays undefined for
+        // such a spec, and applyLiveEdit's live-resize guard below
+        // silently never fires for it (`render.width != null` is false),
+        // even though the panel's Width slider still moves.
+        width: spec.type === "triangle" ? (spec.width ?? spec.size) : spec.width,
+        height: spec.height, radius: spec.radius,
         holeRatio: spec.holeRatio,
         fixed: !!spec.fixed,
         power: spec.power, range: spec.range,
@@ -763,6 +783,25 @@ export class PhysicsSim {
     const bodies = Composite.allBodies(this.engine.world);
     this._fanTick++;
     const spawnNow = this._fanTick % WIND_SPAWN_EVERY_N_TICKS === 0;
+    // The wind PARTICLES themselves already can't pass through a wall —
+    // they're real bodies that physically collide with one, same as
+    // anything else (see _spawnWindParticle). But the invisible force
+    // field applied directly below was checking only distance/angle from
+    // the fan, with nothing stopping it from reaching straight through a
+    // solid board/triangle in between — so an object hidden behind a wall
+    // still felt the fan as if the wall weren't there, even though the
+    // visible wind stream correctly stopped at it. Same
+    // line-of-sample-points technique _applyMagnets already uses against
+    // its own `blocksMagnetism` list, just for every board/triangle
+    // rather than an opt-in flag — a fan blowing at a wall should always
+    // be blocked by it, the same way its own particles already are.
+    const windBlockers = this.specs
+      .filter((s) => s.type === "board" || s.type === "triangle")
+      .map((s) => {
+        const b = this.byId.get(s.id);
+        return b ? { type: s.type, x: b.position.x, y: b.position.y, rotation: b.angle * DEG, width: s.width, height: s.height, size: s.size } : null;
+      })
+      .filter(Boolean);
     for (const { body: fan, spec } of this.fanMeta.values()) {
       const angle = fan.angle;
       const dir = { x: Math.cos(angle), y: Math.sin(angle) };
@@ -794,6 +833,10 @@ export class PhysicsSim {
         const lx = dx * cos - dy * sin;
         const ly = dx * sin + dy * cos;
         if (lx < halfWidth || lx > reach || Math.abs(ly) > catchHalf) continue;
+        // A board/triangle standing between the fan and this body — other
+        // than the fan's OWN housing, right at the mouth — shields it from
+        // the stream entirely, same as a real wall would.
+        if (windBlockers.length && isLineOfEffectBlocked(fan.position, body.position, windBlockers)) continue;
         const alongFalloff = 1 - (lx - halfWidth) / spec.range;
 
         // Forward lift — strongest on the centerline, fading to nothing at
@@ -888,7 +931,7 @@ export class PhysicsSim {
         const delta = Vector.sub(magnet.position, body.position);
         const dist = Vector.magnitude(delta);
         if (dist > spec.range || dist < 0.01) continue;
-        if (blockers.length && isMagnetismBlocked(magnet.position, body.position, blockers)) continue;
+        if (blockers.length && isLineOfEffectBlocked(magnet.position, body.position, blockers)) continue;
         // A real permanent magnet's pull on ferrous metal falls off as
         // roughly the inverse 4th power of distance (steeper than gravity's
         // inverse square, since it's the *gradient* of a dipole field acting
@@ -1100,6 +1143,8 @@ export class PhysicsSim {
     const bounds = body.bounds;
     const w = Math.max(bounds.max.x - bounds.min.x, 20);
     const h = Math.max(bounds.max.y - bounds.min.y, 20);
+    const shatteredSpec = this.specs.find((s) => s.id === body.plugin.gameId);
+    const shardLifespanMs = shatteredSpec ? effectiveShardLifespanMs(shatteredSpec, materialOf("glass")) : SHARD_LIFESPAN_MS;
 
     Composite.allConstraints(world).forEach((c) => {
       if (c.bodyA === body || c.bodyB === body) Composite.remove(world, c);
@@ -1133,7 +1178,7 @@ export class PhysicsSim {
         shattered: true,
         transient: true,
         spawnedAt: now,
-        lifespanMs: SHARD_LIFESPAN_MS,
+        lifespanMs: shardLifespanMs,
         render: { type: "shard", material: "glass", radius: size, fixed: false },
       };
       Composite.add(world, shard);
@@ -1614,10 +1659,13 @@ function _ringParts(cx, cy, outerR, innerR, segments) {
   return parts;
 }
 
-// Samples points along the magnet→target segment and checks each against
+// Samples points along the source→target segment and checks each against
 // every blocking object's shape — cheap, and good enough for "is there a
 // wall in the way" without needing real line/polygon intersection math.
-function isMagnetismBlocked(a, b, blockers) {
+// Shared by magnets (against the opt-in `blocksMagnetism` list) and fans
+// (against every board/triangle) — same question either way: is there
+// something solid between the source of this effect and its target.
+function isLineOfEffectBlocked(a, b, blockers) {
   const steps = 8;
   for (let i = 1; i < steps; i++) {
     const t = i / steps;

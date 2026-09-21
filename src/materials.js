@@ -39,6 +39,7 @@ export const MATERIALS = {
     fillOpacity: 0.45,
     shatters: true,
     shatterImpactThreshold: 9, // relative speed (world units/step-ish) needed to shatter
+    shardLifespanMs: 3200, // how long a broken shard sticks around before fading/despawning
     refractiveIndex: 1.5, // used by Light Mode's ray tracer
   },
 };

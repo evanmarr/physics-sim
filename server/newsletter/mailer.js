@@ -43,8 +43,19 @@ export async function sendEmail({ to, subject, html }) {
   }
 
   if (isVercel) {
-    console.log(`[mailer stub] GMAIL_USER/GMAIL_APP_PASSWORD not set — would send "${subject}" to ${to}:\n${html}`);
-    return { sent: false };
+    // Unlike the local-dev stub below, this isn't a safe fallback — there's
+    // no developer watching a console or an outbox folder on a live
+    // deployment. This used to return {sent: false} here and every caller
+    // (signup/login/resend-code, sendBanNotice) ignored that return value
+    // entirely, so a production deploy missing these two env vars looked
+    // completely normal to every signal we had — the API still answered
+    // {pending: true}, the client still showed "check your email", and
+    // nothing anywhere logged more than a console.log buried in function
+    // logs no one was looking at. Throwing here instead means the actual
+    // request fails loudly (a real 500, caught by the route below) instead
+    // of every verification code silently vanishing forever.
+    console.error(`[mailer] GMAIL_USER/GMAIL_APP_PASSWORD not set on Vercel — refusing to silently no-op sending "${subject}" to ${to}`);
+    throw new Error("Email is not configured on this deployment (GMAIL_USER/GMAIL_APP_PASSWORD missing).");
   }
   await fs.mkdir(OUTBOX_DIR, { recursive: true });
   const safeName = to.replace(/[^a-z0-9.@-]/gi, "_");

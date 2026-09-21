@@ -798,6 +798,26 @@ export async function handleApi(req, res, url) {
     return sendJson(res, 200, { count: await db.countWeeklyChallengeCompletions(week) });
   }
 
+  // Every challenge this account has ever completed, across all 12
+  // sandboxes — fetched once at sign-in/load and merged into the client's
+  // local state.completedChallenges (see main.js), so Achievements/badges
+  // and each sandbox's own "(Completed)" markers follow the ACCOUNT
+  // instead of being stuck on whichever browser/device first earned them.
+  if (parts[1] === "challenge-completions" && req.method === "GET") {
+    return sendJson(res, 200, { completed: await db.getChallengeCompletions(email) });
+  }
+
+  // Idempotent, same as weekly-challenge-complete above — safe to call
+  // every time a challenge completes locally, not just the first (ON
+  // CONFLICT DO NOTHING keyed on (email, challenge_id)).
+  if (parts[1] === "challenge-complete" && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const challengeId = String(body.challengeId || "").slice(0, 80);
+    if (!challengeId) return sendJson(res, 400, { error: "Missing challengeId." });
+    await db.recordChallengeCompletion(email, challengeId, Date.now());
+    return sendJson(res, 200, { ok: true });
+  }
+
   if (parts[1] === "title" && req.method === "POST") {
     const body = await readJsonBody(req);
     await db.setUserTitle(email, clampTitle(body.title));

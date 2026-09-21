@@ -49,44 +49,93 @@
   .stage svg, .stage canvas{display:block; width:100%; height:100%;}
   .row{display:flex; align-items:center; gap:8px; margin-top:12px; font-size:12.5px; color:var(--text-dim);}
   .row input{width:120px;}
-  .counts{display:flex; gap:14px; margin-top:12px; font-size:13px; font-weight:600;}
+  .counts{display:flex; gap:12px; margin-top:12px; font-size:12.5px; font-weight:600; flex-wrap:wrap;}
   .counts .s{color:var(--accent);}
   .counts .i{color:#f87171;}
   .counts .r{color:#34d399;}
+  .counts .d{color:#9499a8;}
   button.restart{
     margin-top:10px; padding:7px 12px; font-size:12.5px; border-radius:8px;
     border:1px solid var(--border); background:var(--bg-elev); color:var(--text); cursor:pointer;
   }
   button.restart:hover{border-color:var(--accent);}
+  .demo-head{max-height:calc(100vh - 32px); overflow-y:auto;}
+  .preset-row{margin-top:4px;}
+  .preset-row select{
+    width:100%; padding:7px 9px; font-size:12.5px; border-radius:8px; margin-top:4px;
+    border:1px solid var(--border); background:var(--bg-elev); color:var(--text); font-family:inherit;
+  }
+  .preset-note{font-size:11.5px; color:var(--text-dim); margin-top:6px; line-height:1.5;}
+  .settings-label{font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:var(--text-dim); margin-top:16px; font-weight:600;}
 </style>
 </head>
 <body>
 
 <div class="demo-head">
-  <div class="kicker">SIR model · d3-force · epidemiology</div>
+  <div class="kicker">SIRD model · d3-force · epidemiology</div>
   <h1>Epidemic spread</h1>
   <p>Not from Observable &mdash; the classic Susceptible &rarr; Infected &rarr;
-    Recovered model, laid out as a real contact network instead of a chart.
-    <span style="color:#7dd3fc">Blue</span> nodes are susceptible,
-    <span style="color:#f87171">red</span> are contagious, and
+    Recovered/Deceased model, laid out as a real contact network instead of a
+    chart. <span style="color:#7dd3fc">Blue</span> nodes are susceptible,
+    <span style="color:#f87171">red</span> are contagious,
     <span style="color:#34d399">green</span> have recovered and can't be
-    reinfected. Each tick, every infected node has a chance to pass it to
-    each susceptible neighbor it's actually connected to (not just anyone
-    nearby) before eventually recovering on its own.</p>
+    reinfected, and <span style="color:#9499a8">gray</span> have died and no
+    longer take part. Each tick, every infected node has a chance to pass it
+    to each susceptible neighbor it's actually connected to (not just anyone
+    nearby) before eventually recovering — or not.</p>
+
+  <div class="preset-row">
+    <span class="settings-label" style="margin-top:0">Disease preset</span>
+    <select id="preset-select">
+      <option value="custom">Custom</option>
+      <option value="cold">Common cold</option>
+      <option value="flu">Seasonal flu</option>
+      <option value="covid">COVID-19 (2020 strain)</option>
+      <option value="measles">Measles</option>
+      <option value="ebola">Ebola</option>
+    </select>
+    <p class="preset-note" id="preset-note"></p>
+  </div>
+
+  <span class="settings-label">Disease</span>
   <div class="row">
     <span>Infection chance</span>
     <input type="range" id="infect-slider" min="0" max="1" step="0.01" value="0.12">
     <span id="infect-value">0.12</span>
   </div>
   <div class="row">
-    <span>Recovery time</span>
+    <span>Infectious duration</span>
     <input type="range" id="recover-slider" min="20" max="300" step="10" value="120">
     <span id="recover-value">120</span>
   </div>
+  <div class="row">
+    <span>Mortality chance</span>
+    <input type="range" id="mortality-slider" min="0" max="1" step="0.01" value="0">
+    <span id="mortality-value">0.00</span>
+  </div>
+
+  <span class="settings-label">Population</span>
+  <div class="row">
+    <span>Population size</span>
+    <input type="range" id="population-slider" min="40" max="260" step="10" value="130">
+    <span id="population-value">130</span>
+  </div>
+  <div class="row">
+    <span>Contacts per person</span>
+    <input type="range" id="contacts-slider" min="1" max="8" step="1" value="3">
+    <span id="contacts-value">3</span>
+  </div>
+  <div class="row">
+    <span>Initial infected</span>
+    <input type="range" id="initial-slider" min="1" max="10" step="1" value="3">
+    <span id="initial-value">3</span>
+  </div>
+
   <div class="counts">
     <span class="s" id="count-s"></span>
     <span class="i" id="count-i"></span>
     <span class="r" id="count-r"></span>
+    <span class="d" id="count-d"></span>
   </div>
   <button class="restart" id="restart-btn">Restart outbreak</button>
 </div>
@@ -101,26 +150,123 @@ const context = canvas.getContext("2d");
 stage.appendChild(canvas);
 
 let width, height;
-const N = 130;
+let N = 130;
+let perNode = 3;
+let initialInfected = 3;
 let infectChance = 0.12;
 let recoverTicks = 120;
+let mortalityChance = 0;
+
+// Loosely modeled after published R0 / case-fatality estimates, retuned so
+// the differences actually read visually in ~15 seconds of a stylized
+// contact-network sim, not literal clinical figures — a teaching
+// approximation, not epidemiological data.
+const PRESETS = {
+  cold: {
+    label: "Common cold",
+    infect: 0.10, recover: 70, mortality: 0.00, population: 130, contacts: 3, initial: 3,
+    note: "Very mild and short-lived — almost everyone who catches it recovers within days.",
+  },
+  flu: {
+    label: "Seasonal flu",
+    infect: 0.15, recover: 90, mortality: 0.02, population: 150, contacts: 3, initial: 3,
+    note: "More contagious than a cold with a small but real chance of death, especially in vulnerable groups.",
+  },
+  covid: {
+    label: "COVID-19 (2020 strain)",
+    infect: 0.22, recover: 150, mortality: 0.08, population: 170, contacts: 4, initial: 3,
+    note: "Spreads faster than flu, stays infectious longer, and was considerably more lethal before vaccines.",
+  },
+  measles: {
+    label: "Measles",
+    infect: 0.60, recover: 110, mortality: 0.03, population: 170, contacts: 6, initial: 2,
+    note: "One of the most contagious diseases ever recorded (R0 ~12-18) — watch how fast it tears through the network.",
+  },
+  ebola: {
+    label: "Ebola",
+    infect: 0.16, recover: 230, mortality: 0.55, population: 130, contacts: 2, initial: 1,
+    note: "Not very contagious person-to-person, but brutally lethal for anyone it does infect.",
+  },
+};
 
 const infectSlider = document.getElementById("infect-slider");
 const infectValue = document.getElementById("infect-value");
 const recoverSlider = document.getElementById("recover-slider");
 const recoverValue = document.getElementById("recover-value");
+const mortalitySlider = document.getElementById("mortality-slider");
+const mortalityValue = document.getElementById("mortality-value");
+const populationSlider = document.getElementById("population-slider");
+const populationValue = document.getElementById("population-value");
+const contactsSlider = document.getElementById("contacts-slider");
+const contactsValue = document.getElementById("contacts-value");
+const initialSlider = document.getElementById("initial-slider");
+const initialValue = document.getElementById("initial-value");
+const presetSelect = document.getElementById("preset-select");
+const presetNote = document.getElementById("preset-note");
 const countS = document.getElementById("count-s");
 const countI = document.getElementById("count-i");
 const countR = document.getElementById("count-r");
+const countD = document.getElementById("count-d");
 const restartBtn = document.getElementById("restart-btn");
+
+// Any manual tweak to a setting means it's no longer exactly a preset —
+// this flag just stops applyPreset() itself (which also sets these same
+// sliders) from immediately resetting the dropdown back to "custom".
+let applyingPreset = false;
+function markCustom() { if (!applyingPreset) presetSelect.value = "custom"; }
 
 infectSlider.addEventListener("input", () => {
   infectChance = Number(infectSlider.value);
   infectValue.textContent = infectChance.toFixed(2);
+  markCustom();
 });
 recoverSlider.addEventListener("input", () => {
   recoverTicks = Number(recoverSlider.value);
   recoverValue.textContent = String(recoverTicks);
+  markCustom();
+});
+mortalitySlider.addEventListener("input", () => {
+  mortalityChance = Number(mortalitySlider.value);
+  mortalityValue.textContent = mortalityChance.toFixed(2);
+  markCustom();
+});
+populationSlider.addEventListener("input", () => {
+  N = Number(populationSlider.value);
+  populationValue.textContent = String(N);
+  markCustom();
+});
+populationSlider.addEventListener("change", () => buildNetwork());
+contactsSlider.addEventListener("input", () => {
+  perNode = Number(contactsSlider.value);
+  contactsValue.textContent = String(perNode);
+  markCustom();
+});
+contactsSlider.addEventListener("change", () => buildNetwork());
+initialSlider.addEventListener("input", () => {
+  initialInfected = Number(initialSlider.value);
+  initialValue.textContent = String(initialInfected);
+  markCustom();
+});
+initialSlider.addEventListener("change", () => buildNetwork());
+
+function applyPreset(key) {
+  const p = PRESETS[key];
+  if (!p) { presetNote.textContent = ""; return; }
+  applyingPreset = true;
+  infectSlider.value = p.infect; infectChance = p.infect; infectValue.textContent = p.infect.toFixed(2);
+  recoverSlider.value = p.recover; recoverTicks = p.recover; recoverValue.textContent = String(p.recover);
+  mortalitySlider.value = p.mortality; mortalityChance = p.mortality; mortalityValue.textContent = p.mortality.toFixed(2);
+  populationSlider.value = p.population; N = p.population; populationValue.textContent = String(p.population);
+  contactsSlider.value = p.contacts; perNode = p.contacts; contactsValue.textContent = String(p.contacts);
+  initialSlider.value = p.initial; initialInfected = p.initial; initialValue.textContent = String(p.initial);
+  presetNote.textContent = p.note;
+  applyingPreset = false;
+  buildNetwork();
+}
+
+presetSelect.addEventListener("change", () => {
+  if (presetSelect.value === "custom") { presetNote.textContent = ""; return; }
+  applyPreset(presetSelect.value);
 });
 
 let simulation, nodes, links, tick = 0;
@@ -164,14 +310,13 @@ start();
 function buildNetwork() {
   nodes = Array.from({ length: N }, (_, i) => ({
     id: i,
-    state: 0, // 0 susceptible, 1 infected, 2 recovered
+    state: 0, // 0 susceptible, 1 infected, 2 recovered, 3 deceased
     infectedAt: 0,
     x: width / 2 + (Math.random() - 0.5) * width * 0.7,
     y: height / 2 + (Math.random() - 0.5) * height * 0.7,
   }));
 
   links = [];
-  const perNode = 3;
   for (const a of nodes) {
     const distances = nodes
       .filter((b) => b !== a)
@@ -185,8 +330,8 @@ function buildNetwork() {
     }
   }
 
-  // Patient zero: a small cluster so the outbreak has somewhere to start.
-  for (let k = 0; k < 3; k++) {
+  // Patient zero (or a small cluster): where the outbreak starts.
+  for (let k = 0; k < Math.min(initialInfected, nodes.length); k++) {
     const n = nodes[Math.floor(Math.random() * nodes.length)];
     n.state = 1;
     n.infectedAt = 0;
@@ -227,7 +372,14 @@ function stepEpidemic() {
   tick++;
   for (const n of nodes) {
     if (n.state !== 1) continue;
-    if (tick - n.infectedAt > recoverTicks) { n.state = 2; continue; }
+    if (tick - n.infectedAt > recoverTicks) {
+      // A single roll of the disease's mortality chance decides whether this
+      // node recovers (immune, state 2) or dies (state 3) — dead nodes stay
+      // on screen as a visible cost of the outbreak, but can't infect or be
+      // infected again.
+      n.state = Math.random() < mortalityChance ? 3 : 2;
+      continue;
+    }
     for (const nb of n.neighbors) {
       if (nb.state === 0 && Math.random() < infectChance / 60) {
         nb.state = 1;
@@ -247,10 +399,10 @@ function draw() {
     context.lineTo(l.target.x, l.target.y);
     context.stroke();
   }
-  const colors = ["#7dd3fc", "#f87171", "#34d399"];
-  let s = 0, i = 0, r = 0;
+  const colors = ["#7dd3fc", "#f87171", "#34d399", "#9499a8"];
+  let s = 0, i = 0, r = 0, d = 0;
   for (const n of nodes) {
-    if (n.state === 0) s++; else if (n.state === 1) i++; else r++;
+    if (n.state === 0) s++; else if (n.state === 1) i++; else if (n.state === 2) r++; else d++;
     context.beginPath();
     context.arc(n.x, n.y, n.state === 1 ? 6 : 5, 0, 2 * Math.PI);
     context.fillStyle = colors[n.state];
@@ -261,6 +413,7 @@ function draw() {
   countS.textContent = `${s} susceptible`;
   countI.textContent = `${i} infected`;
   countR.textContent = `${r} recovered`;
+  countD.textContent = `${d} deceased`;
 }
 
 restartBtn.addEventListener("click", buildNetwork);
