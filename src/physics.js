@@ -2,6 +2,7 @@ import { materialOf } from "./materials.js";
 import { effectiveDensity, effectiveFriction, effectiveRestitution, effectiveShatterThreshold, effectiveShardLifespanMs } from "./physicsEdu.js";
 import { makeId, cannonCatchRadius } from "./objectTypes.js";
 import { trianglePoints } from "./render.js";
+import { WORLD } from "./world.js";
 
 const { Engine, World, Composite, Bodies, Body, Constraint, Events, Vector } = Matter;
 
@@ -308,6 +309,37 @@ export class PhysicsSim {
       if (spec.type === "rope") this._buildRope(spec, specById);
     }
 
+    this._buildWorldBoundary();
+  }
+
+  // The dashed "world-border" rectangle the editor draws (see render.js) at
+  // WORLD.min/maxX/Y was purely decorative — a placement guide, nothing
+  // physical ever enforced it. A cannon, bomb, fan, or just enough bounces
+  // could send an object drifting past it in open space forever: nothing
+  // to bounce off of, nothing to stop it, gone for good with no way back.
+  // Four plain static walls just outside those bounds give the sandbox an
+  // actual, physical edge — objects bounce/rest against them like any
+  // other solid surface instead of sailing through into the void. Not
+  // part of `this.specs`/`byId` (there's no corresponding editor object,
+  // nothing to select or save) and never rendered (collectRenderItems
+  // only ever looks at `body.plugin.render`, which these don't have).
+  _buildWorldBoundary() {
+    const world = this.engine.world;
+    const margin = 100; // wall thickness, centered just outside the border so its INNER face lines up with WORLD's own bound
+    const spanX = WORLD.maxX - WORLD.minX + margin * 4;
+    const spanY = WORLD.maxY - WORLD.minY + margin * 4;
+    const walls = [
+      Bodies.rectangle((WORLD.minX + WORLD.maxX) / 2, WORLD.minY - margin / 2, spanX, margin, { isStatic: true }),
+      Bodies.rectangle((WORLD.minX + WORLD.maxX) / 2, WORLD.maxY + margin / 2, spanX, margin, { isStatic: true }),
+      Bodies.rectangle(WORLD.minX - margin / 2, (WORLD.minY + WORLD.maxY) / 2, margin, spanY, { isStatic: true }),
+      Bodies.rectangle(WORLD.maxX + margin / 2, (WORLD.minY + WORLD.maxY) / 2, margin, spanY, { isStatic: true }),
+    ];
+    for (const wall of walls) {
+      wall.friction = 0.3;
+      wall.restitution = 0.1;
+      wall.label = "worldBoundary";
+      Composite.add(world, wall);
+    }
   }
 
   _buildRope(spec, specById) {

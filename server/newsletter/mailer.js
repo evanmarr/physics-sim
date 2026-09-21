@@ -55,7 +55,16 @@ export async function sendEmail({ to, subject, html }) {
     // request fails loudly (a real 500, caught by the route below) instead
     // of every verification code silently vanishing forever.
     console.error(`[mailer] GMAIL_USER/GMAIL_APP_PASSWORD not set on Vercel — refusing to silently no-op sending "${subject}" to ${to}`);
-    throw new Error("Email is not configured on this deployment (GMAIL_USER/GMAIL_APP_PASSWORD missing).");
+    // .status makes server.js's global error handler forward THIS message
+    // to the client instead of a bare, unactionable "Server error" — this
+    // is a deployment misconfiguration the admin needs to go fix (set
+    // both vars in Vercel → Settings → Environment Variables, same values
+    // already in .env.local — see README.md), not a bug in the request
+    // itself, and there's nothing sensitive in the message to withhold.
+    throw Object.assign(
+      new Error("Email isn't configured on this deployment yet (GMAIL_USER/GMAIL_APP_PASSWORD missing on Vercel) — sign-in/signup can't send a verification code until that's set."),
+      { status: 503 }
+    );
   }
   await fs.mkdir(OUTBOX_DIR, { recursive: true });
   const safeName = to.replace(/[^a-z0-9.@-]/gi, "_");
