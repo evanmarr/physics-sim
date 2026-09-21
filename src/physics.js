@@ -50,26 +50,23 @@ const WIND_PARTICLES_PER_SPAWN = 3; // a fan blows a wide stream, not a thin tri
 // uses the narrower BEARING_HOST_TYPES instead.
 const PIVOTABLE_HOST_TYPES = new Set(["board", "triangle", "ball", "bomb", "ballBearing", "peg", "magnet"]);
 const WIRE_SNAP_DIST = 22; // world units — how close a wire's end needs to be to a button/bomb/cannon to link them
-// Wedges approximating a Ball's donut collision shape — see _ringParts and
-// the restitution cap in _createBody's "ball" case; the two work together
-// and neither alone reliably fixes this. Counterintuitively, FEWER/BIGGER
-// wedges settle more reliably than more, smaller ones: this used to be 32
-// (raised from an original 14, on the theory that more segments means a
-// smoother, more circle-like outer edge), but a ring built from many small
-// wedges almost always has 2-3 of them touching the ground at once, each
-// at a very slightly different contact normal, fighting every step — at a
-// bouncy material's full restitution that fight re-triggers a fresh little
-// bounce over and over, so it visibly never lands ("still bounces" no
-// matter how long you wait). Measured directly across a grid of hole
-// sizes and radii: at 32 segments AND full restitution, most combinations
-// never came to rest even after 1500 steps; dropping to 4 segments alone
-// still left a few combinations bouncing forever. Only combining both —
-// 4 segments AND capping restitution — settled every combination tried,
-// consistently, in under 3 seconds of simulated time. The wedges
-// themselves are never drawn — render.js always draws the hole as a
-// smooth SVG circle — so a coarser collision shape costs nothing
-// visually; it only affects how the ball rests/rolls physically.
-const RING_SEGMENTS = 4;
+// Wedges approximating a Ball's donut collision shape — see _ringParts.
+// This number is a genuine tradeoff, tuned by direct measurement across
+// every combination of radius (20-90) and hole size (0.1-0.85):
+//   - Fewer/bigger wedges rest more easily (fewer simultaneous
+//     ground contacts at slightly different normals to fight each
+//     other) but roll worse — at max radius, 4 big flat wedge faces
+//     roll over each other as distinct bumps, reading exactly like
+//     "rolling over a groove/indent" in whatever it's on.
+//   - More/smaller wedges roll smoother but rest far worse — at 32
+//     (the old value), several combinations never came to rest even
+//     after 1500+ steps no matter how restitution was tuned.
+// 10 is the smallest count that measured smooth (<0.03-unit vertical
+// wobble) while rolling at max radius, and — combined with the
+// restitution cap below and _settleRingOnContact — every combination
+// tried came to a full, exact stop within a few seconds of simulated
+// time.
+const RING_SEGMENTS = 10;
 const FIXED_CATEGORY = 0x0002; // collision category for every static/fixed body — see enableGrabTool
 const BEARING_HOST_TYPES = new Set(["board", "triangle", "ball", "bomb"]);
 // What the Grab Tool's pointer body can emulate — see enableGrabTool. A
@@ -119,6 +116,7 @@ export class PhysicsSim {
     this.fanMeta = new Map(); // fanId -> {body, spec}
     this.magnetMeta = new Map(); // magnetId -> {body, spec}
     this.springMeta = new Map(); // springPadId -> {spec, cooldownUntil}
+    this._ringRestCounters = new Map(); // bodyId -> consecutive slow-contact ticks, see _settleRingOnContact
     this._lastDelta = 16; // ms, updated each frame in start() — beforeUpdate handlers need real elapsed time
     // Simulated clock, not wall-clock — advances by the *scaled* delta each
     // frame (see start()), so anything timed against it (wind particles,
@@ -781,7 +779,17 @@ export class PhysicsSim {
   }
 
   _handlePair(pair, phase) {
-    const a = pair.bodyA, b = pair.bodyB;
+    // A collision pair references the actual PARTS that touched, not the
+    // parent — for any plain (non-compound) body a part IS its own parent,
+    // but for a donut Ball (a compound of ~32 wedges, see RING_SEGMENTS)
+    // that's almost always one of the individual wedges, which carries
+    // none of the game-level `plugin` data (gameId, render, material, …)
+    // set on the compound root. Every check below (glass, buttons, bombs,
+    // springs, portals, cannon-catch, and _settleRingOnContact) reads that
+    // plugin data, so without this a donut ball colliding with any of
+    // those silently did nothing at all.
+    const a = pair.bodyA.parent || pair.bodyA;
+    const b = pair.bodyB.parent || pair.bodyB;
     if (phase === "start" && a.plugin?.gameId && b.plugin?.gameId) {
       this.callbacks.onEvent?.({ type: "collision", a: a.plugin.gameId, b: b.plugin.gameId });
     }
@@ -797,6 +805,43 @@ export class PhysicsSim {
     this._checkSpring(b, a, phase);
     this._checkPortal(a, b, phase);
     this._checkPortal(b, a, phase);
+    this._settleRingOnContact(a, phase);
+    this._settleRingOnContact(b, phase);
+  }
+
+  // A donut Ball's ~ring-of-wedges collision shape (see RING_SEGMENTS)
+  // never quite reaches a real, exact zero on its own no matter how the
+  // wedges/restitution are tuned — 2-3 wedges are always touching
+  // whatever it rests on at once, at very slightly different contact
+  // normals, so the solver keeps finding a tiny bit of residual
+  // motion to fight over. Rather than chase that number to zero (or
+  // sacrifice rolling smoothness by using very few, very large wedges —
+  // which just trades this bug for an equally visible "rolling over
+  // bumps" one, especially on a big-radius ball), this watches actual
+  // sustained contact directly: once a ring ball has been touching the
+  // same kind of thing, barely moving, for several consecutive physics
+  // steps in a row, it's resting — so it's forced fully still. Gating on
+  // real contact (not just "moving slowly") is what keeps this from ever
+  // misfiring on a ball that's still genuinely falling or rolling: those
+  // don't hold a slow, sustained contact the way actually coming to rest
+  // does.
+  _settleRingOnContact(body, phase) {
+    if (body.isStatic || !body.plugin?.render) return;
+    const render = body.plugin.render;
+    if (render.type !== "ball" || !(render.holeRatio > 0.05)) return;
+    if (phase !== "active") { this._ringRestCounters.delete(body.id); return; }
+    const speed = Vector.magnitude(body.velocity);
+    const angSpeed = Math.abs(body.angularVelocity);
+    if (speed < 2 && angSpeed < 1) {
+      const count = (this._ringRestCounters.get(body.id) || 0) + 1;
+      this._ringRestCounters.set(body.id, count);
+      if (count > 6) {
+        Body.setVelocity(body, { x: 0, y: 0 });
+        Body.setAngularVelocity(body, 0);
+      }
+    } else {
+      this._ringRestCounters.set(body.id, 0);
+    }
   }
 
   // Teleports anything (except another portal) that touches a portal to
