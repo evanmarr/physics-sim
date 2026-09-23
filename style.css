@@ -303,7 +303,9 @@ input[type="range"] { accent-color: var(--accent); cursor: pointer; }
 #play-btn { min-width: 92px; }
 #play-btn.playing { background: var(--danger); border-color: var(--danger); color: #2a0b0b; }
 
-#gravity-controls { display: flex; align-items: center; gap: 8px; color: var(--text-dim); }
+#gravity-controls, #air-controls, #surface-controls { display: flex; align-items: center; gap: 8px; color: var(--text-dim); }
+#air-controls input { width: 110px; }
+#surface-controls input { width: 100px; }
 #gravity-controls input { width: 140px; }
 #gravity-val { color: var(--text); font-weight: 600; }
 #speed-controls { display: flex; align-items: center; gap: 8px; color: var(--text-dim); }
@@ -449,41 +451,30 @@ input[type="range"] { accent-color: var(--accent); cursor: pointer; }
   display: inline-block; white-space: nowrap;
 }
 
-#physics3d-root { flex: 1; min-height: 0; }
-.physics3d-wrap { display: flex; flex-direction: column; height: 100%; position: relative; }
-.physics3d-toolbar {
-  display: flex; align-items: center; gap: 8px; flex-wrap: wrap; flex-shrink: 0;
-  padding: 8px 16px; background: var(--panel); border-bottom: 1px solid var(--border);
-}
-.physics3d-note { font-size: 11.5px; color: var(--text-dim); margin-left: auto; }
-.physics3d-viewer { flex: 1; min-height: 0; background: #0d1220; }
-.physics3d-viewer canvas { display: block; width: 100%; height: 100%; }
-.physics3d-panel {
-  position: absolute; right: 16px; top: 56px; width: 220px;
-  background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px;
-  box-shadow: 0 8px 24px -8px rgba(0,0,0,.4);
-  max-height: calc(100% - 72px); overflow-y: auto; box-sizing: border-box;
-}
+
+
+
+
+
+
+
 /* The floating absolute-positioned panel above overlaps the toolbar and
    the 3D view itself on a narrow phone screen — there's no room beside
    the viewport for it to float over without covering something. On
    mobile it drops into the normal document flow instead, as a full-width
    panel stacked below the 3D view (toolbar -> 3D view -> panel), same
    idea as Physics 2D's own mobile stacking. */
-:root[data-device="mobile"] .physics3d-panel {
-  position: static; width: 100%; max-height: none; border-radius: 0;
-  border-left: none; border-right: none; box-shadow: none;
-}
-:root[data-device="mobile"] .physics3d-viewer { min-height: 45vh; flex: 1 1 45vh; }
-:root[data-device="mobile"] .physics3d-wrap { overflow-y: auto; }
-.physics3d-panel h3 { margin: 0 0 8px; font-size: 13px; }
-.physics3d-panel label { display: block; font-size: 11px; color: var(--text-dim); margin: 8px 0 3px; }
-.physics3d-panel input[type="number"], .physics3d-panel input[type="range"] { width: 100%; }
-.physics3d-panel button { width: 100%; margin-top: 10px; }
-.physics3d-size-row { display: flex; gap: 6px; }
-.physics3d-size-row input[type="number"] { width: 0; flex: 1; min-width: 0; }
 
-#physics3d-root.physics3d-locked { display: flex; align-items: center; justify-content: center; height: 100%; background: var(--bg); }
+
+
+
+
+
+
+
+
+
+
 
 #ai-tutor-modal {
   align-items: stretch; justify-content: stretch; padding: 0;
@@ -560,17 +551,10 @@ input[type="range"] { accent-color: var(--accent); cursor: pointer; }
   background: linear-gradient(120deg, var(--cool-1), var(--cool-2)); color: #0b1220;
 }
 .ai-tutor-composer button:disabled { opacity: .55; }
-.physics3d-locked-box {
-  max-width: 420px; text-align: center; padding: 32px 28px; border-radius: 14px;
-  background: var(--panel); border: 1px solid var(--border);
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--cool-2) 20%, transparent);
-}
-.physics3d-locked-badge {
-  display: inline-block; font-size: 10.5px; font-weight: 700; letter-spacing: .06em; padding: 3px 10px; margin-bottom: 10px;
-  border-radius: 999px; background: linear-gradient(120deg, var(--cool-1), var(--cool-2)); color: #0b1220;
-}
-.physics3d-locked-box h2 { margin: 0 0 8px; }
-.physics3d-locked-box p { color: var(--text-dim); font-size: 13.5px; line-height: 1.6; margin: 0 0 18px; }
+
+
+
+
 
 #chemistry-root {
   position: absolute;

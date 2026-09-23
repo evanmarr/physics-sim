@@ -21,13 +21,13 @@ import { EconomicsMode } from "./economics.js";
 import { ZoologyMode } from "./zoology.js";
 import { SoundMode } from "./sound.js";
 import { SustainabilityMode } from "./sustainability.js";
+import { WarMode } from "./war.js";
 import { traceLightRays } from "./lightOptics.js";
 import { openQuiz } from "./quiz.js";
 import { initAuthUI, openSavesPanel, sendFeedback, fetchCommunitySimById, verifyUnlockCode, escapeHtml, getUser, onAuthChange, fetchFeaturedSims, fetchCommunitySims, fetchMyFavoriteIds, fetchItems, fetchWeeklyChallengeCount, completeWeeklyChallenge, fetchChallengeCompletions, completeChallengeRemote } from "./auth.js";
 import { difficultyBadgeHtml } from "./challengeTiers.js";
 import { initClassroomUI } from "./classroom.js";
 import { initPlansUI } from "./plans.js";
-import { Physics3DMode } from "./physics3d.js";
 import { initAITutorUI, openAITutor, applySharedAiChat } from "./aiTutor.js";
 import { initCustomItemsUI, openCustomItemsHome } from "./customItems.js";
 import { initPhysicsGraphPanel, renderPhysicsGraphPanel, pushGraphSample, resetGraphPanel } from "./physicsGraphPanel.js";
@@ -53,6 +53,12 @@ const state = {
   selectedIds: new Set(),
   playing: false,
   gravity: 1,
+  airFriction: 1, // multiplier on every object's air drag; 1.0 = ordinary Earth air
+  view: "side", // "side" (gravity, ground) or "top" (looking straight down: no gravity, surface drag)
+  surfaceFriction: 0.3,
+  sideObjects: null,
+  topObjects: null,
+  sideGravity: 1,
   completedChallenges: new Set(),
   activeChallengeId: null,
   mathPanelOpen: true,
@@ -75,7 +81,6 @@ let tracker = null;
 let clipboard = null; // in-app copy/paste buffer — an array of specs, not the OS clipboard
 let chemistryMode = null;
 let astronomyMode = null;
-let physics3dMode = null; // lazily created on first "Physics 3D" tab click, within Physics mode itself — see initPhysics3DTabs
 let historyMode = null;
 let cybersecurityMode = null;
 let mathematicsMode = null;
@@ -84,6 +89,7 @@ let economicsMode = null;
 let zoologyMode = null;
 let soundMode = null;
 let sustainabilityMode = null;
+let warMode = null;
 
 // Old saves stored a rope as x/y + rotation + length; the current model is
 // two independent endpoints (x,y) and (x2,y2). Backfill x2/y2 from the old
@@ -116,6 +122,32 @@ function migrateRopeSpecs(objects) {
 const REMOVED_TYPES = new Set(["battery", "lightbulb", "switchComp", "resistor", "transistor", "motor", "track"]);
 function dropRemovedTypes(objects) {
   return objects.filter((spec) => !REMOVED_TYPES.has(spec.type));
+}
+
+const TOP_KEY = "kinetic-topview-v1";
+function loadTopObjects() {
+  try { const d = JSON.parse(localStorage.getItem(TOP_KEY)); if (d && Array.isArray(d.objects) && d.objects.length) return d.objects; } catch {}
+  return topStarterScene();
+}
+// Top view starts as a table: four fixed walls, nothing to fall onto.
+function topStarterScene() {
+  const w = 1600, h = 1000, t = 40, cy = WORLD.groundY - 500;
+  const wall = (id, x, y, width, height) => ({ id, type: "board", x, y, rotation: 0, width, height, material: "wood", fixed: true });
+  return [
+    wall("top_wall_n", 0, cy - h / 2, w, t), wall("top_wall_s", 0, cy + h / 2, w, t),
+    wall("top_wall_w", -w / 2, cy, t, h), wall("top_wall_e", w / 2, cy, t, h),
+  ];
+}
+// Both views share one editor, so persistence has to know which world the
+// live `state.objects` currently IS — saving the top-view table over the
+// side-view save (or vice versa) would silently destroy the other world.
+function persistWorld() {
+  if (state.view === "top") {
+    try { localStorage.setItem(TOP_KEY, JSON.stringify({ objects: state.objects })); } catch {}
+    saveState({ objects: state.sideObjects || [], completedChallenges: state.completedChallenges });
+  } else {
+    saveState(state);
+  }
 }
 
 function starterScene() {
@@ -211,7 +243,7 @@ function boot() {
   wireKeyboard(renderer);
   wireModeTabs();
 
-  window.addEventListener("beforeunload", () => saveState(state));
+  window.addEventListener("beforeunload", persistWorld);
 }
 
 function renderAll() {
@@ -351,7 +383,7 @@ function syncSelectedId() {
 let saveTimer = null;
 function scheduleSave() {
   clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => saveState(state), 300);
+  saveTimer = setTimeout(persistWorld, 300);
 }
 
 function renderPaletteUI() {
@@ -473,6 +505,7 @@ function updateTrajectoryPreview() {
 // since there's only one implementation instead of two.
 function simulateCannonTrajectory(spec, gravity, allSpecs) {
   const sim = new PhysicsSim(allSpecs.map((s) => ({ ...s })), gravity, {});
+  sim.setAirFriction(state.airFriction);
   // The preview can't know in advance which ball (radius/material) will
   // actually be caught and fired — a default 26-radius rubber ball, same as
   // the palette's own default Ball, is a reasonable stand-in. _doCannonFire
@@ -651,7 +684,7 @@ function wireTopbar(renderer) {
     if (state.playing) togglePlay(renderer);
     if (!(await confirmPopup("Clear the whole workspace?", { title: "Clear workspace", confirmLabel: "Clear", danger: true }))) return;
     pushUndoNow();
-    state.objects = starterScene();
+    state.objects = state.view === "top" ? topStarterScene() : starterScene();
     state.selectedIds = new Set();
     state.selectedId = null;
     state.activeChallengeId = null;
@@ -700,7 +733,7 @@ function wireTopbar(renderer) {
   initAuthUI();
   initClassroomUI();
   initPlansUI();
-  initPhysics3DTabs();
+  initPhysicsViewTabs();
   initCustomItemsUI(placeCustomPolygon);
   initPhysicsGraphPanel(document.getElementById("physics-graph-panel"));
   initNotebookUI(() => (state.mode === "physics" ? { objects: state.objects, gravity: state.gravity } : null));
@@ -909,6 +942,8 @@ function togglePlay(renderer) {
       },
       onEvent: (event) => handleSimEvent(event),
     });
+    sim.setAirFriction(state.airFriction);
+    sim.setSurfaceDrag(state.view === "top" ? state.surfaceFriction : 0);
     sim.setTimeScale(state.simSpeed);
     sim.start();
     if (state.grabToolActive) sim.enableGrabTool(state.grabShape);
@@ -1171,6 +1206,7 @@ const HOME_SECTIONS = [
   { mode: "economics", title: "Economics", blurb: "A real supply-and-demand market (with taxes and price controls) and a repeated Prisoner's Dilemma sandbox.", kind: "economics", hues: [140, 20] },
   { mode: "zoology", title: "Zoology", blurb: "Explore food chains and energy pyramids, then build your own food web from real predator-prey relationships.", kind: "zoology", hues: [95, 30] },
   { mode: "sound", title: "Sound", blurb: "Record your voice and watch the real waveform, or build your own tones with a live oscillator.", kind: "sound", hues: [260, 190] },
+  { mode: "war", title: "War", blurb: "Place armies, paint terrain, give orders, and watch real agent-based battles play out.", kind: "war", hues: [5, 30] },
   { mode: "sustainability", title: "Sustainability", blurb: "Run a city — route energy, manage pollution, and grow your population without wrecking either.", kind: "sustainability", hues: [150, 210] },
 ];
 
@@ -1322,6 +1358,7 @@ const SEARCH_SANDBOXES = [
   { mode: "zoology", label: "Zoology" },
   { mode: "sound", label: "Sound" },
   { mode: "sustainability", label: "Sustainability" },
+  { mode: "war", label: "War" },
 ];
 
 function searchIndex() {
@@ -1373,7 +1410,7 @@ function buildHomePage(root, onNavigate) {
     <div class="home-wrap">
       <div class="home-hero">
         <img class="home-logo" src="icons/kinetic-logo-transparent.png" width="48" height="48" alt="" aria-hidden="true" />
-        <div class="home-kicker">twelve sandboxes · one app</div>
+        <div class="home-kicker">thirteen sandboxes · one app</div>
         <h1>Kinetic</h1>
         <p class="home-slogan">Build it. Change it. See what happens.</p>
         <p class="home-tagline">Real simulations, not animations — physics, chemistry, astronomy,
@@ -1845,6 +1882,14 @@ function buildHomeThumbnail(el, section) {
         .attr("rx", 2).attr("fill", filled.has(i) ? colorA : "rgba(148,163,184,0.25)").attr("opacity", filled.has(i) ? 0.85 : 1);
       i++;
     }
+  } else if (section.kind === "war") {
+    // Two little armies facing off across the card.
+    for (let i = 0; i < 12; i++) {
+      const row = i % 4, col = Math.floor(i / 4);
+      svg.append("circle").attr("cx", w * (0.16 + col * 0.07)).attr("cy", h * (0.25 + row * 0.16)).attr("r", 4.5).attr("fill", colorA).attr("opacity", 0.85);
+      svg.append("circle").attr("cx", w * (0.84 - col * 0.07)).attr("cy", h * (0.25 + row * 0.16)).attr("r", 4.5).attr("fill", colorB).attr("opacity", 0.85);
+    }
+    svg.append("line").attr("x1", w / 2).attr("x2", w / 2).attr("y1", h * 0.12).attr("y2", h * 0.88).attr("stroke", "rgba(148,163,184,0.4)").attr("stroke-dasharray", "4 4");
   } else {
     // Particle Physics: a small frozen force-directed graph, exactly the
     // shape every one of its 8 real demos takes.
@@ -1868,36 +1913,70 @@ function buildHomeThumbnail(el, section) {
   }
 }
 
-// Physics 2D / Physics 3D is a tab switch WITHIN Physics mode, not a
-// separate top-level mode — deliberately isolated from the 2D sandbox's
-// own (much larger, more load-bearing) state machine: swapping tabs only
-// toggles sibling DOM roots and mounts/unmounts a self-contained
-// Physics3DMode instance, touching none of the 2D engine's own variables.
-function unmountPhysics3D() {
-  physics3dMode?.unmount();
-  document.getElementById("physics3d-root")?.classList.add("hidden");
-  document.getElementById("workspace-body")?.classList.remove("hidden");
-  document.getElementById("physics-toolbar")?.classList.remove("hidden");
-  document.getElementById("physics-dim-2d-btn")?.classList.add("active");
-  document.getElementById("physics-dim-3d-btn")?.classList.remove("active");
+// Side View / Top View: the same editor and engine, looking at the world
+// from two directions. Each keeps its own objects (and its own save), so
+// switching never overwrites the other; Top View just turns gravity off and
+// adds a surface-drag slider, since nothing "falls" when you look straight down.
+function switchPhysicsView(view) {
+  if (state.view === view) return;
+  if (state.playing) togglePlay(window._renderer);
+  persistWorld();
+  if (view === "top") {
+    state.sideObjects = state.objects;
+    state.sideGravity = state.gravity;
+    state.topObjects = state.topObjects || loadTopObjects();
+    state.objects = state.topObjects;
+    state.gravity = 0;
+  } else {
+    state.topObjects = state.objects;
+    state.objects = state.sideObjects || starterScene();
+    state.gravity = state.sideGravity ?? 1;
+  }
+  state.view = view;
+  state.selectedIds = new Set();
+  state.selectedId = null;
+  state.activeChallengeId = null;
+  if (view === "top") state.sideObjects = state.sideObjects || [];
+  syncViewChrome();
+  window._renderer?.centerOn(0, WORLD.groundY - (view === "top" ? 500 : 700), view === "top" ? 0.5 : 0.7);
+  renderAll();
+  renderPanelUI();
+  persistWorld();
 }
 
-function initPhysics3DTabs() {
-  const tab2d = document.getElementById("physics-dim-2d-btn");
-  const tab3d = document.getElementById("physics-dim-3d-btn");
-  const root3d = document.getElementById("physics3d-root");
-  const body2d = document.getElementById("workspace-body");
-  const toolbar2d = document.getElementById("physics-toolbar");
+function syncViewChrome() {
+  const top = state.view === "top";
+  document.getElementById("physics-dim-2d-btn")?.classList.toggle("active", !top);
+  document.getElementById("physics-dim-top-btn")?.classList.toggle("active", top);
+  document.getElementById("gravity-controls")?.classList.toggle("hidden", top);
+  document.getElementById("surface-controls")?.classList.toggle("hidden", !top);
+  document.getElementById("gravity-slider").value = state.gravity;
+  document.getElementById("gravity-val").textContent = state.gravity.toFixed(1);
+  if (sim) sim.setGravity(state.gravity);
+}
 
-  tab2d.addEventListener("click", unmountPhysics3D);
-  tab3d.addEventListener("click", () => {
-    if (!physics3dMode) physics3dMode = new Physics3DMode(root3d, {});
-    tab3d.classList.add("active");
-    tab2d.classList.remove("active");
-    toolbar2d.classList.add("hidden");
-    body2d.classList.add("hidden");
-    root3d.classList.remove("hidden");
-    physics3dMode.mount();
+function initPhysicsViewTabs() {
+  document.getElementById("physics-dim-2d-btn").addEventListener("click", () => switchPhysicsView("side"));
+  document.getElementById("physics-dim-top-btn").addEventListener("click", () => switchPhysicsView("top"));
+
+  const airSlider = document.getElementById("air-slider");
+  const airVal = document.getElementById("air-val");
+  const setAir = (v) => {
+    state.airFriction = v;
+    airSlider.value = v;
+    airVal.textContent = v.toFixed(1);
+    sim?.setAirFriction(v);
+    updateTrajectoryPreview();
+  };
+  airSlider.addEventListener("input", () => setAir(parseFloat(airSlider.value)));
+  document.getElementById("air-reset-btn").addEventListener("click", () => setAir(1));
+
+  const surfaceSlider = document.getElementById("surface-slider");
+  const surfaceVal = document.getElementById("surface-val");
+  surfaceSlider.addEventListener("input", () => {
+    state.surfaceFriction = parseFloat(surfaceSlider.value);
+    surfaceVal.textContent = state.surfaceFriction.toFixed(2);
+    sim?.setSurfaceDrag(state.surfaceFriction);
   });
 }
 
@@ -1916,7 +1995,8 @@ function wireModeTabs() {
   const zoologyBtn = document.getElementById("mode-zoology-btn");
   const soundBtn = document.getElementById("mode-sound-btn");
   const sustainabilityBtn = document.getElementById("mode-sustainability-btn");
-  const modeButtons = { physics: physicsBtn, chemistry: chemistryBtn, astronomy: astronomyBtn, history: historyBtn, cybersecurity: cybersecurityBtn, particles: particlesBtn, mathematics: mathematicsBtn, whiteboard: whiteboardBtn, economics: economicsBtn, zoology: zoologyBtn, sound: soundBtn, sustainability: sustainabilityBtn };
+  const warBtn = document.getElementById("mode-war-btn");
+  const modeButtons = { physics: physicsBtn, chemistry: chemistryBtn, astronomy: astronomyBtn, history: historyBtn, cybersecurity: cybersecurityBtn, particles: particlesBtn, mathematics: mathematicsBtn, whiteboard: whiteboardBtn, economics: economicsBtn, zoology: zoologyBtn, sound: soundBtn, sustainability: sustainabilityBtn, war: warBtn };
 
   const homeRoot = document.getElementById("home-root");
   buildHomePage(homeRoot, (mode) => setMode(mode));
@@ -1933,7 +2013,8 @@ function wireModeTabs() {
   const zoologyRoot = document.getElementById("zoology-root");
   const soundRoot = document.getElementById("sound-root");
   const sustainabilityRoot = document.getElementById("sustainability-root");
-  const roots = { home: homeRoot, physics: workspace, chemistry: chemRoot, astronomy: astronomyRoot, history: historyRoot, cybersecurity: cybersecurityRoot, particles: particlesRoot, mathematics: mathematicsRoot, whiteboard: whiteboardRoot, economics: economicsRoot, zoology: zoologyRoot, sound: soundRoot, sustainability: sustainabilityRoot };
+  const warRoot = document.getElementById("war-root");
+  const roots = { home: homeRoot, physics: workspace, chemistry: chemRoot, astronomy: astronomyRoot, history: historyRoot, cybersecurity: cybersecurityRoot, particles: particlesRoot, mathematics: mathematicsRoot, whiteboard: whiteboardRoot, economics: economicsRoot, zoology: zoologyRoot, sound: soundRoot, sustainability: sustainabilityRoot, war: warRoot };
 
   const physicsOnlyControls = [
     document.getElementById("run-controls"),
@@ -1953,7 +2034,6 @@ function wireModeTabs() {
   function setMode(mode) {
     if (state.mode === mode) return;
     if (state.mode === "physics" && state.playing) togglePlay(window._renderer);
-    if (state.mode === "physics" && mode !== "physics") unmountPhysics3D();
     state.mode = mode;
     recordRecentlyViewed(mode);
 
@@ -1969,7 +2049,7 @@ function wireModeTabs() {
     // Home is just a launcher, and Particle Physics is a gallery of
     // embedded external demos — neither is a knowledge domain with quiz
     // content the way the other modes are.
-    const NO_QUIZ_MODES = new Set(["particles", "home", "mathematics", "whiteboard", "economics", "zoology", "sound", "sustainability"]);
+    const NO_QUIZ_MODES = new Set(["particles", "home", "mathematics", "whiteboard", "economics", "zoology", "sound", "sustainability", "war"]);
     quizBtn.style.display = NO_QUIZ_MODES.has(mode) ? "none" : "";
 
     if (mode === "physics") startParticleLoop(); else stopParticleLoop();
@@ -2043,6 +2123,13 @@ function wireModeTabs() {
     } else {
       sustainabilityMode?.unmount();
     }
+
+    if (mode === "war") {
+      if (!warMode) warMode = new WarMode(warRoot, { state });
+      warMode.mount();
+    } else {
+      warMode?.unmount();
+    }
   }
 
   brandHomeBtn.addEventListener("click", () => setMode("home"));
@@ -2058,6 +2145,7 @@ function wireModeTabs() {
   zoologyBtn.addEventListener("click", () => setMode("zoology"));
   soundBtn.addEventListener("click", () => setMode("sound"));
   sustainabilityBtn.addEventListener("click", () => setMode("sustainability"));
+  warBtn.addEventListener("click", () => setMode("war"));
 
   // Each individual demo's own top bar was removed (it duplicated this
   // app's nav one level up) — this subnav is the only way left to switch
@@ -2188,6 +2276,12 @@ export function placeCustomPolygon({ vertices, name, material }) {
 function beginPaletteDrag(type, pointerEvent) {
   if (state.playing) return;
   const def = OBJECT_DEFS[type];
+  if (def.plus && !getUser()?.entitlements?.isPlus) {
+    showToast("Text is a Kinetic Plus feature");
+    if (getUser()) document.getElementById("plans-btn")?.click();
+    else document.getElementById("account-btn")?.click();
+    return;
+  }
 
   const ghost = document.createElement("div");
   ghost.style.cssText = `

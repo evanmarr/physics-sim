@@ -117,6 +117,8 @@ export class PhysicsSim {
     this.fanMeta = new Map(); // fanId -> {body, spec}
     this.magnetMeta = new Map(); // magnetId -> {body, spec}
     this.springMeta = new Map(); // springPadId -> {spec, cooldownUntil}
+    this.airMult = 1;
+    this.surfaceDrag = 0;
     this._ringRestCounters = new Map(); // bodyId -> consecutive slow-contact ticks, see _settleRingOnContact
     this._lastDelta = 16; // ms, updated each frame in start() — beforeUpdate handlers need real elapsed time
     // Simulated clock, not wall-clock — advances by the *scaled* delta each
@@ -789,7 +791,24 @@ export class PhysicsSim {
   // play.
   _clampFastBodies() {
     for (const body of Composite.allBodies(this.engine.world)) {
-      if (body.isStatic || body.isSensor) continue;
+      if (body.isStatic) continue;
+      // Air friction: every body's own drag (from its material) times the
+      // world's air multiplier. Applied lazily here, per body, so shards and
+      // wind particles spawned mid-run pick it up too.
+      if (body._airMult !== this.airMult) {
+        if (body._baseAir === undefined) body._baseAir = body.frictionAir;
+        body.frictionAir = body._baseAir * this.airMult;
+        body._airMult = this.airMult;
+      }
+      if (this.surfaceDrag > 0 && !body.plugin?.transient && !body.isSensor) {
+        const v = body.velocity;
+        if (Math.abs(v.x) + Math.abs(v.y) > 0.0005 || Math.abs(body.angularVelocity) > 0.0005) {
+          const k = 1 - this.surfaceDrag * 0.04;
+          Body.setVelocity(body, { x: v.x * k, y: v.y * k });
+          Body.setAngularVelocity(body, body.angularVelocity * k);
+        }
+      }
+      if (body.isSensor) continue;
       const speed = Vector.magnitude(body.velocity);
       if (speed > MAX_BODY_SPEED) {
         const scale = MAX_BODY_SPEED / speed;
@@ -1327,6 +1346,19 @@ export class PhysicsSim {
     this.callbacks.onEvent?.({ type: "detonate", bombId });
   }
 
+  // 1.0 = ordinary Earth air (each material's own drag, unchanged); 0 is a
+  // vacuum. Takes effect on the next tick for every body, including ones
+  // that spawn later.
+  setAirFriction(mult) {
+    this.airMult = Math.max(0, mult);
+  }
+
+  // Top view: nothing falls, so "friction" is the surface everything slides
+  // across — a per-tick fraction of velocity/spin bled off (0 = frictionless ice).
+  setSurfaceDrag(k) {
+    this.surfaceDrag = Math.max(0, k);
+  }
+
   setGravity(scale) {
     this.engine.gravity.y = scale;
   }
@@ -1581,6 +1613,16 @@ export class PhysicsSim {
   collectRenderItems() {
     const items = [];
     const now = this.simTime;
+    // Text labels have no body (see objectTypes.js) — drawn straight from
+    // their spec, so they stay put and visible during Play.
+    for (const spec of this.specs) {
+      if (spec.type !== "text") continue;
+      items.push({
+        id: spec.id, type: "text", x: spec.x, y: spec.y, rotation: spec.rotation || 0,
+        text: spec.text, fontSize: spec.fontSize, textColor: spec.textColor,
+        material: spec.material, fixed: true, transient: false, opacity: 1, vx: 0, vy: 0,
+      });
+    }
     for (const body of Composite.allBodies(this.engine.world)) {
       // A merged Ball Bearing assembly (see _buildMergedHostBody) is ONE
       // Matter body but represents several original objects — one render

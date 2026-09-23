@@ -49,7 +49,7 @@ Live Graphs, and — always, regardless of plan — How This Model Works,
 sources, and every factual explanation in the app.
 
 **Kinetic Plus** adds: unlimited saved worlds/Notebook entries, full
-Compare Runs history, advanced graph overlays + CSV export, Physics 3D,
+Compare Runs history, advanced graph overlays + CSV export, Physics Top View,
 Custom Physics Items, Physics world share codes, Advanced mode, and other
 non-essential polish. **No real payment processor is connected yet** — the
 Plans screen has a real checkout flow (plan → monthly/annual billing →
@@ -67,7 +67,7 @@ participate in a class.
 
 **Promo Plus** — a 6-digit code (entered via the small blue square in the
 Plans screen's top-right corner) grants every **non-AI** Plus feature:
-Physics 3D, Custom Items, advanced graphs, Compare Runs, world share
+Physics Top View, Custom Items, advanced graphs, Compare Runs, world share
 codes, and more. **Promo Plus never includes AI, by design** — this is
 enforced in `resolveEntitlements()` itself (`planSource === "promo_plus"`
 hard-blocks `aiEnabled` regardless of any other flag), not just a UI
@@ -79,25 +79,12 @@ architecture for a future `classroom_assignment` scoped grant) is tracked
 explicitly, so the app — and a future support conversation — can always
 answer *how* an account got its access, not just *that* it has access.
 
-## Physics 3D (Kinetic Plus)
+## Physics Top View
 
-A separate, intentionally simpler 3D sandbox — balls and boxes, real
-gravity/collisions/friction/restitution via [cannon-es](https://github.com/pmndrs/cannon-es),
-rendered with [Three.js](https://threejs.org/) (OrbitControls for
-orbit/zoom). It's a tab inside Physics mode ("Physics 2D" / "Physics
-3D"), fully isolated from the 2D engine's own state so neither can break
-the other. Free accounts see a locked preview explaining the feature;
-Physics 2D itself loses no capability.
-
-Controls deliberately mirror Physics 2D's own feel rather than a generic
-3D-editor scheme: **drag empty space to orbit, drag an object to move it**
-(along the horizontal plane it's currently sitting at — the same
-live-visual-during-drag, commit-on-release model 2D's object dragging
-uses), **scroll to zoom**, **right-click-drag (mouse) or shift+two-finger
-drag (touch) to pan**, and **Space to play/pause, R to reset** — the same
-two keys Physics 2D uses. Balls resize via radius; boxes get independent
-X/Y/Z dimensions, so a box is real shape editing (a flat slab vs. a tall
-pillar vs. a cube), not just a uniform scale slider.
+Physics has two views of the same sandbox: **Side View** (gravity, a ground)
+and **Top View** — looking straight down, so gravity is off and objects slide
+across a table with adjustable surface friction. Each view keeps its own
+world and its own save, so switching never overwrites the other.
 
 ## Custom Physics Items (Kinetic Plus)
 
@@ -147,7 +134,7 @@ constrained to its real valid range; **Advanced** is Plus-gated and shows
 the exact same variables as a plain number input instead — real
 fine-grained typed control, but still only over that one variable, never
 free-text on the formula itself. Advanced also exposes the other already-
-real Plus tooling (Physics 3D, advanced graphs) — the product rule here is
+real Plus tooling (Physics Top View, advanced graphs) — the product rule here is
 that nothing gets exposed as "Advanced" unless the underlying model
 actually supports it.
 
@@ -214,7 +201,7 @@ full equation/assumptions list.
 **No AI provider is called anywhere in this codebase.** A real "🤖 AI
 Tutor" button lives in the global top bar (`src/aiTutor.js`) — reachable
 from anywhere in the app, not nested inside any one subject mode, and
-Plus-gated the same way Physics 3D and Custom Items are (a locked
+Plus-gated the same way Custom Items are (a locked
 "See Plans" screen for a free account). It opens a real chat UI with
 message history, a disabled-while-waiting input, and a real round trip to
 `POST /api/ai-chat` — but that route never calls a real provider and
@@ -269,7 +256,7 @@ rings).
 
 No bundler — plain ES modules loaded via `<script type="module">`, plus a
 few CDN scripts (Matter.js, D3, Three.js/OrbitControls) as browser
-globals; `cannon-es` (Physics 3D) is the one dependency imported as a real
+globals; no dependency is imported as a real
 ES module straight from its CDN URL. Server-side: `server/server.js`
 (shared by both the always-on local server and `api/[...path].js`'s
 Vercel serverless entry point) and `server/db.js` (Postgres via `pg`).

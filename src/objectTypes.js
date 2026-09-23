@@ -282,6 +282,18 @@ export const OBJECT_DEFS = {
     defaultSpec: () => ({ type: "customPolygon", x: 0, y: 0, rotation: 0, vertices: regularPolygon(6, 40), material: "wood", fixed: false, color: null, customItemName: "Custom Item" }),
     fields: ["material", "fixed"],
   },
+  // Kinetic Plus text label: pure annotation. It has no collision body at
+  // all (physics.js never builds one and collectRenderItems draws it
+  // straight from the spec), so nothing can hit it, push it, or be blocked
+  // by it — and it never blocks wind, magnetism or light either.
+  text: {
+    label: "Text",
+    icon: "T",
+    category: "core",
+    plus: true,
+    defaultSpec: () => ({ type: "text", x: 0, y: 0, rotation: 0, text: "Text", fontSize: 48, textColor: "#e7e9f2", material: "metal", fixed: true }),
+    fields: ["text", "fontSize", "textColor"],
+  },
   mirror: {
     label: "Mirror",
     icon: "🪞",

@@ -35,6 +35,7 @@ export function effectiveShardLifespanMs(spec, mat) { return spec.shardLifespanO
 // live-tunable variable: { key, value, min, max, step } — the UI renders a
 // slider for it and writes spec[key] back, overriding the material preset.
 export function physicsMath(spec) {
+  if (spec.type === "text") return null; // a label has no physics
   const mat = materialOf(spec.material);
   const density = effectiveDensity(spec, mat);
   const friction = effectiveFriction(spec, mat);

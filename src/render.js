@@ -616,7 +616,7 @@ export class Renderer {
   }
 }
 
-const ROTATABLE = new Set(["board", "triangle", "cannon", "button", "springPad", "fan", "lens", "lightSource", "mirror", "portal", "customPolygon"]);
+const ROTATABLE = new Set(["board", "triangle", "cannon", "button", "springPad", "fan", "lens", "lightSource", "mirror", "portal", "customPolygon", "text"]);
 const FLEXIBLE_ENDPOINT_TYPES = new Set(["rope", "wire"]); // two independently-draggable ball-bearing ends
 
 // Cold→hot 4-stop gradient (blue → cyan → yellow → red), same family as a
@@ -642,6 +642,7 @@ function speedColor(speed) {
 function handleDistance(d) {
   if (d.type === "board" || d.type === "button" || d.type === "springPad" || d.type === "fan" || d.type === "lens" || d.type === "mirror") return d.height / 2 + 26;
   if (d.type === "lightSource") return 40;
+  if (d.type === "text") return ((d.fontSize ?? 48) * 1.2 * String(d.text ?? "").split("\n").length) / 2 + 26;
   if (d.type === "triangle") return (2 * (d.height ?? ((d.size ?? 130) * Math.sqrt(3)) / 2)) / 3 + 26;
   if (d.type === "cannon") return d.height / 2 + 26;
   if (d.type === "customPolygon") return Math.max(...(d.vertices || [{ x: 0, y: 0 }]).map((p) => Math.hypot(p.x, p.y))) + 26;
@@ -732,6 +733,12 @@ function buildShape(g, d) {
       break;
     case "customPolygon":
       g.append("polygon").attr("class", "shape");
+      break;
+    case "text":
+      // The rect is only the click/selection target; the label itself is
+      // a plain <text> so it never picks up a material fill or stroke.
+      g.append("rect").attr("class", "shape");
+      g.append("text").attr("class", "text-label").attr("text-anchor", "middle").attr("pointer-events", "none");
       break;
     case "cannon": {
       g.append("circle").attr("class", "catch-zone")
@@ -888,6 +895,21 @@ function updateShape(g, d, editable) {
     case "triangle": {
       const pts = trianglePoints(d.width ?? d.size ?? 130, d.height).map((p) => `${p.x},${p.y}`).join(" ");
       g.select(".shape").attr("points", pts);
+      break;
+    }
+    case "text": {
+      const size = d.fontSize ?? 48;
+      const lines = String(d.text ?? "").split("\n");
+      const w = Math.max(size * 0.6, Math.max(...lines.map((ln) => ln.length)) * size * 0.58) + 12;
+      const h = lines.length * size * 1.2 + 8;
+      g.select(".shape").attr("x", -w / 2).attr("y", -h / 2).attr("width", w).attr("height", h)
+        .attr("fill", "transparent").attr("fill-opacity", 0).attr("stroke", "none").attr("stroke-dasharray", null);
+      const t = g.select("text.text-label")
+        .attr("font-size", size).attr("fill", d.textColor ?? "#e7e9f2")
+        .attr("font-family", "-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif")
+        .attr("font-weight", 600).attr("y", -((lines.length - 1) * size * 1.2) / 2 + size * 0.35);
+      t.selectAll("tspan").remove();
+      lines.forEach((ln, i) => t.append("tspan").attr("x", 0).attr("dy", i === 0 ? 0 : size * 1.2).text(ln || " "));
       break;
     }
     case "customPolygon": {

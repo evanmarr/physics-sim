@@ -43,6 +43,7 @@
     <button id="mode-zoology-btn" class="mode-tab">Zoology</button>
     <button id="mode-sound-btn" class="mode-tab">Sound</button>
     <button id="mode-sustainability-btn" class="mode-tab">Sustainability</button>
+    <button id="mode-war-btn" class="mode-tab">War</button>
   </div>
   <div id="account-controls">
     <div id="search-wrap">
@@ -97,8 +98,8 @@
 
 <div id="workspace">
   <div id="physics-dim-tabs">
-    <button id="physics-dim-2d-btn" class="physics-dim-tab active">Physics 2D</button>
-    <button id="physics-dim-3d-btn" class="physics-dim-tab">Physics 3D <span class="physics-dim-plus-badge">PLUS</span></button>
+    <button id="physics-dim-2d-btn" class="physics-dim-tab active">Physics Side View</button>
+    <button id="physics-dim-top-btn" class="physics-dim-tab" title="Look straight down — gravity is off and things slide across a surface">Physics Top View</button>
   </div>
   <div id="physics-toolbar">
     <div id="run-controls">
@@ -124,6 +125,15 @@
       <label>Gravity <span id="gravity-val">1.0</span>x</label>
       <input id="gravity-slider" type="range" min="-2" max="3" step="0.1" value="1" />
       <button id="gravity-reset-btn" title="Reset gravity to 1.0x">Reset</button>
+    </div>
+    <div id="air-controls" title="Air friction. 1.0x is ordinary air on Earth; 0 is a vacuum.">
+      <label>Air <span id="air-val">1.0</span>x</label>
+      <input id="air-slider" type="range" min="0" max="10" step="0.1" value="1" />
+      <button id="air-reset-btn" title="Reset air friction to ordinary Earth air (1.0x)">Reset</button>
+    </div>
+    <div id="surface-controls" class="hidden" title="Top view: how much the surface drags on sliding objects">
+      <label>Surface friction <span id="surface-val">0.3</span></label>
+      <input id="surface-slider" type="range" min="0" max="1" step="0.05" value="0.3" />
     </div>
     <div id="speed-controls">
       <label>Speed <span id="speed-val">1.0</span>x</label>
@@ -175,7 +185,6 @@
     </aside>
   </div>
 
-  <div id="physics3d-root" class="hidden"></div>
 </div>
 
 <div id="chemistry-root" class="hidden"></div>
@@ -209,6 +218,7 @@
 <div id="zoology-root" class="hidden"></div>
 <div id="sound-root" class="hidden"></div>
 <div id="sustainability-root" class="hidden"></div>
+<div id="war-root" class="hidden"></div>
 
 <div id="challenges-modal" class="modal hidden">
   <div class="modal-box">

@@ -46,6 +46,7 @@ function buildItem(type, def, handlers) {
   const label = document.createElement("div");
   label.className = "label";
   label.textContent = def.label;
+  if (def.plus) label.innerHTML = `${def.label} <span class="plus-badge">PLUS</span>`;
 
   el.appendChild(swatch);
   el.appendChild(label);

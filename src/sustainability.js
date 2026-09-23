@@ -17,6 +17,7 @@
 // building this session, scored against itself.
 import { openSavesPanel } from "./auth.js";
 import { openModelInfo } from "./modelInfo.js";
+import { StructureTester } from "./structures.js";
 
 const SUSTAINABILITY_MODEL_INFO = {
   title: "Sustainability City Builder",
@@ -111,8 +112,35 @@ export class SustainabilityMode {
     this._build();
   }
 
-  mount() { this._renderView(); }
-  unmount() { this._tickInterval && clearInterval(this._tickInterval); this._tickInterval = null; }
+  mount() {
+    if (this.tab === "structures") { this.structures && this.structures.mount(); return; }
+    this._renderView();
+    if (!this._tickInterval) this._tickInterval = setInterval(() => this._runTick(), TICK_MS);
+  }
+  unmount() {
+    this._tickInterval && clearInterval(this._tickInterval); this._tickInterval = null;
+    this.structures && this.structures.unmount();
+  }
+
+  // Top-level sub-tabs: the existing City builder, and the Structure Tester.
+  _setTab(tab) {
+    if (tab === this.tab) return;
+    this.tab = tab;
+    const city = tab === "city";
+    for (const el of [this._cityInfoBtn, this._cityIntro, this.body]) el.style.display = city ? "" : "none";
+    this.structHost.style.display = city ? "none" : "";
+    this._tabBtns.forEach((b, id) => b.classList.toggle("active", id === tab));
+    if (city) {
+      this.structures && this.structures.unmount();
+      this._renderView();
+      if (!this._tickInterval) this._tickInterval = setInterval(() => this._runTick(), TICK_MS);
+    } else {
+      this._tickInterval && clearInterval(this._tickInterval);
+      this._tickInterval = null;
+      if (!this.structures) this.structures = new StructureTester(this.structHost, this.ctx);
+      this.structures.mount();
+    }
+  }
 
   _newCity() {
     this.grid = new Array(GRID_W * GRID_H).fill(null);
@@ -147,15 +175,35 @@ export class SustainabilityMode {
     infoBtn.addEventListener("click", () => openModelInfo(SUSTAINABILITY_MODEL_INFO));
     titleRow.appendChild(infoBtn);
     this.root.appendChild(titleRow);
+    this._cityInfoBtn = infoBtn;
+
+    this.tab = "city";
+    const tabs = div("econ-tabs");
+    tabs.style.padding = "0 20px";
+    this._tabBtns = new Map();
+    for (const [id, label] of [["city", "City"], ["structures", "Structure Tester"]]) {
+      const btn = document.createElement("button");
+      btn.className = "econ-tab" + (id === this.tab ? " active" : "");
+      btn.textContent = label;
+      btn.addEventListener("click", () => this._setTab(id));
+      this._tabBtns.set(id, btn);
+      tabs.appendChild(btn);
+    }
+    this.root.appendChild(tabs);
 
     const intro = document.createElement("p");
     intro.className = "econ-intro";
     intro.style.padding = "0 20px";
     intro.textContent = "Build a city on the grid below by picking a building and clicking a tile — click an occupied tile to bulldoze it for half its cost back. Every number in the dashboard is computed live from exactly what's placed, including real day/night solar and gusty wind output, not a hidden score. This is a simplified educational model (order-of-magnitude figures loosely based on real U.S. energy data) — a scenario to explore, not a forecast for any real city.";
     this.root.appendChild(intro);
+    this._cityIntro = intro;
 
     this.body = div("sustain-body");
     this.root.appendChild(this.body);
+    this.structHost = div("st-host");
+    this.structHost.style.display = "none";
+    this.root.appendChild(this.structHost);
+    this.structures = null;
     this._renderView();
 
     this._tickInterval = setInterval(() => this._runTick(), TICK_MS);

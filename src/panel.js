@@ -4,7 +4,7 @@ import { physicsMath } from "./physicsEdu.js";
 import { distanceUnitScale, distanceUnitSuffix, weightUnitScale, weightUnitSuffix } from "./units.js";
 import { getExperienceLevel } from "./experienceLevel.js";
 
-const ROTATABLE = new Set(["board", "triangle", "cannon", "button", "springPad", "fan", "lens", "lightSource", "mirror", "portal"]);
+const ROTATABLE = new Set(["board", "triangle", "cannon", "button", "springPad", "fan", "lens", "lightSource", "mirror", "portal", "text"]);
 
 export function renderPanel(container, spec, state, handlers) {
   container.innerHTML = "";
@@ -70,6 +70,35 @@ export function renderPanel(container, spec, state, handlers) {
 
   if (fields.includes("radius")) {
     container.appendChild(sliderField("Radius", spec.radius, 6, 90, 1, (v) => set({ radius: v }), null, distScale, distUnit));
+  }
+  if (fields.includes("text")) {
+    const wrap = document.createElement("div");
+    wrap.className = "field";
+    const l = document.createElement("label");
+    l.textContent = "Text";
+    const ta = document.createElement("textarea");
+    ta.rows = 3; ta.maxLength = 500; ta.value = spec.text ?? "";
+    ta.style.cssText = "width:100%;box-sizing:border-box;resize:vertical;";
+    ta.addEventListener("input", () => set({ text: ta.value }));
+    wrap.appendChild(l); wrap.appendChild(ta);
+    container.appendChild(wrap);
+  }
+  if (fields.includes("fontSize")) {
+    container.appendChild(sliderField("Font size", spec.fontSize ?? 48, 10, 200, 1, (v) => set({ fontSize: v })));
+  }
+  if (fields.includes("textColor")) {
+    const wrap = document.createElement("div");
+    wrap.className = "field";
+    const l = document.createElement("label");
+    l.textContent = "Color";
+    const c = document.createElement("input");
+    c.type = "color"; c.value = spec.textColor ?? "#e7e9f2";
+    c.addEventListener("input", () => set({ textColor: c.value }));
+    wrap.appendChild(l); wrap.appendChild(c);
+    container.appendChild(wrap);
+  }
+  if (spec.type === "text") {
+    container.appendChild(helpText("A label that doesn't interact with anything — nothing can hit it, and it never blocks wind, magnets or light."));
   }
   if (fields.includes("holeRatio")) {
     container.appendChild(sliderField("Center Hole", spec.holeRatio ?? 0, 0, 0.85, 0.01, (v) => set({ holeRatio: v })));

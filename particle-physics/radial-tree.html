@@ -36,7 +36,7 @@
     position:fixed; z-index:5; top:16px; left:24px; max-width:440px;
     background:var(--head-bg); backdrop-filter:blur(10px);
     border:1px solid var(--border); border-radius:14px; padding:16px 20px 18px;
-    pointer-events:none;
+    pointer-events:auto; /* was none, which also swallowed the mouse wheel — the panel couldn't scroll */
   }
   .demo-head a, .demo-head button, .demo-head input, .demo-head select, .demo-head code{pointer-events:auto;}
   .kicker{font-size:12px; letter-spacing:0.14em; text-transform:uppercase;
@@ -59,7 +59,11 @@
     border:1px solid var(--border); background:var(--bg-elev); color:var(--text); cursor:pointer;
   }
   button.restart:hover{border-color:var(--accent);}
-  .demo-head{max-height:calc(100vh - 32px); overflow-y:auto;}
+  .demo-head{max-height:calc(100vh - 32px); overflow-y:auto; overscroll-behavior:contain; -webkit-overflow-scrolling:touch;}
+  .save-row{display:flex; gap:6px; margin-top:8px;}
+  .save-row input[type=text]{flex:1; min-width:0; width:auto; padding:7px 9px; font-size:12.5px; border-radius:8px; border:1px solid var(--border); background:var(--bg-elev); color:var(--text); font-family:inherit;}
+  button.small{padding:7px 10px; font-size:12.5px; border-radius:8px; border:1px solid var(--border); background:var(--bg-elev); color:var(--text); cursor:pointer;}
+  button.small:hover{border-color:var(--accent);}
   .preset-row{margin-top:4px;}
   .preset-row select{
     width:100%; padding:7px 9px; font-size:12.5px; border-radius:8px; margin-top:4px;
@@ -86,15 +90,13 @@
 
   <div class="preset-row">
     <span class="settings-label" style="margin-top:0">Disease preset</span>
-    <select id="preset-select">
-      <option value="custom">Custom</option>
-      <option value="cold">Common cold</option>
-      <option value="flu">Seasonal flu</option>
-      <option value="covid">COVID-19 (2020 strain)</option>
-      <option value="measles">Measles</option>
-      <option value="ebola">Ebola</option>
-    </select>
+    <select id="preset-select"></select>
     <p class="preset-note" id="preset-note"></p>
+    <div class="save-row">
+      <input type="text" id="save-name" maxlength="40" placeholder="Name this disease to save it">
+      <button class="small" id="save-btn">Save</button>
+      <button class="small" id="delete-btn" title="Delete the saved disease currently selected">Delete</button>
+    </div>
   </div>
 
   <span class="settings-label">Disease</span>
@@ -162,32 +164,36 @@ let mortalityChance = 0;
 // contact-network sim, not literal clinical figures — a teaching
 // approximation, not epidemiological data.
 const PRESETS = {
-  cold: {
-    label: "Common cold",
-    infect: 0.10, recover: 70, mortality: 0.00, population: 130, contacts: 3, initial: 3,
-    note: "Very mild and short-lived — almost everyone who catches it recovers within days.",
-  },
-  flu: {
-    label: "Seasonal flu",
-    infect: 0.15, recover: 90, mortality: 0.02, population: 150, contacts: 3, initial: 3,
-    note: "More contagious than a cold with a small but real chance of death, especially in vulnerable groups.",
-  },
-  covid: {
-    label: "COVID-19 (2020 strain)",
-    infect: 0.22, recover: 150, mortality: 0.08, population: 170, contacts: 4, initial: 3,
-    note: "Spreads faster than flu, stays infectious longer, and was considerably more lethal before vaccines.",
-  },
-  measles: {
-    label: "Measles",
-    infect: 0.60, recover: 110, mortality: 0.03, population: 170, contacts: 6, initial: 2,
-    note: "One of the most contagious diseases ever recorded (R0 ~12-18) — watch how fast it tears through the network.",
-  },
-  ebola: {
-    label: "Ebola",
-    infect: 0.16, recover: 230, mortality: 0.55, population: 130, contacts: 2, initial: 1,
-    note: "Not very contagious person-to-person, but brutally lethal for anyone it does infect.",
-  },
+  cold: { label: "Common cold", infect: 0.10, recover: 70, mortality: 0.00, population: 130, contacts: 3, initial: 3, note: "Very mild and short-lived — almost everyone who catches it recovers within days." },
+  flu: { label: "Seasonal flu", infect: 0.15, recover: 90, mortality: 0.02, population: 150, contacts: 3, initial: 3, note: "More contagious than a cold with a small but real chance of death, especially in vulnerable groups." },
+  h1n1: { label: "H1N1 swine flu (2009)", infect: 0.20, recover: 90, mortality: 0.01, population: 160, contacts: 4, initial: 3, note: "A novel flu strain that spread worldwide fast but proved less deadly than feared." },
+  spanish: { label: "1918 influenza", infect: 0.24, recover: 100, mortality: 0.10, population: 180, contacts: 4, initial: 3, note: "Killed tens of millions worldwide, unusually striking healthy young adults." },
+  covid: { label: "COVID-19 (2020 strain)", infect: 0.22, recover: 150, mortality: 0.08, population: 170, contacts: 4, initial: 3, note: "Spreads faster than flu, stays infectious longer, and was considerably more lethal before vaccines." },
+  omicron: { label: "COVID-19 Omicron", infect: 0.42, recover: 90, mortality: 0.02, population: 200, contacts: 5, initial: 3, note: "Far more transmissible but, on average, milder than earlier variants." },
+  sars: { label: "SARS (2003)", infect: 0.14, recover: 160, mortality: 0.10, population: 140, contacts: 3, initial: 2, note: "Serious but hard to spread before symptoms appear, which helped it be contained." },
+  mers: { label: "MERS", infect: 0.08, recover: 170, mortality: 0.35, population: 130, contacts: 2, initial: 2, note: "Rarely passes person-to-person, but kills roughly a third of those infected." },
+  measles: { label: "Measles", infect: 0.60, recover: 110, mortality: 0.03, population: 170, contacts: 6, initial: 2, note: "One of the most contagious diseases ever recorded (R0 ~12-18) — watch how fast it tears through the network." },
+  chickenpox: { label: "Chickenpox", infect: 0.45, recover: 110, mortality: 0.00, population: 160, contacts: 5, initial: 2, note: "Highly contagious in children and rarely fatal." },
+  mumps: { label: "Mumps", infect: 0.30, recover: 110, mortality: 0.00, population: 150, contacts: 4, initial: 2, note: "Spreads through saliva and close contact; rarely fatal." },
+  rubella: { label: "Rubella", infect: 0.28, recover: 100, mortality: 0.00, population: 150, contacts: 4, initial: 2, note: "Mild for most, but dangerous during pregnancy." },
+  polio: { label: "Polio (pre-vaccine)", infect: 0.25, recover: 120, mortality: 0.05, population: 160, contacts: 4, initial: 2, note: "Most cases were mild, but a minority caused paralysis or death." },
+  smallpox: { label: "Smallpox", infect: 0.30, recover: 180, mortality: 0.30, population: 160, contacts: 4, initial: 2, note: "Eradicated in 1980 after a global vaccination campaign; killed about 3 in 10 infected." },
+  norovirus: { label: "Norovirus", infect: 0.55, recover: 40, mortality: 0.00, population: 150, contacts: 5, initial: 3, note: "The classic stomach bug: explosive spread, over within days." },
+  whooping: { label: "Whooping cough", infect: 0.40, recover: 160, mortality: 0.01, population: 150, contacts: 5, initial: 2, note: "Very contagious; dangerous mainly to infants." },
+  tb: { label: "Tuberculosis", infect: 0.05, recover: 300, mortality: 0.15, population: 140, contacts: 3, initial: 3, note: "Slow, long-lasting infection that needs prolonged close contact to spread." },
+  cholera: { label: "Cholera", infect: 0.22, recover: 60, mortality: 0.25, population: 150, contacts: 4, initial: 2, note: "Spread through contaminated water; without treatment it kills quickly." },
+  plague: { label: "Pneumonic plague", infect: 0.28, recover: 70, mortality: 0.90, population: 140, contacts: 4, initial: 1, note: "Nearly always fatal untreated, and it can pass from person to person through the air." },
+  dengue: { label: "Dengue (person-to-person proxy)", infect: 0.12, recover: 90, mortality: 0.01, population: 150, contacts: 3, initial: 3, note: "Really mosquito-borne; modeled here as a contact network for simplicity." },
+  zika: { label: "Zika (contact proxy)", infect: 0.10, recover: 80, mortality: 0.00, population: 140, contacts: 3, initial: 3, note: "Mild for most adults; the real danger is to pregnancies." },
+  ebola: { label: "Ebola", infect: 0.16, recover: 230, mortality: 0.55, population: 130, contacts: 2, initial: 1, note: "Not very contagious person-to-person, but brutally lethal for anyone it does infect." },
+  rabies: { label: "Rabies (human-to-human proxy)", infect: 0.02, recover: 300, mortality: 0.99, population: 120, contacts: 2, initial: 1, note: "Almost never spreads between people, but is nearly always fatal once symptoms appear." },
+  hiv: { label: "HIV (untreated, contact proxy)", infect: 0.04, recover: 300, mortality: 0.60, population: 150, contacts: 2, initial: 3, note: "Low per-contact spread over a very long infectious period." },
 };
+
+const CUSTOM_KEY = "kinetic-custom-diseases-v1";
+function loadCustom() { try { return JSON.parse(localStorage.getItem(CUSTOM_KEY)) || {}; } catch { return {}; } }
+function saveCustom(obj) { try { localStorage.setItem(CUSTOM_KEY, JSON.stringify(obj)); } catch {} }
+let customPresets = loadCustom();
 
 const infectSlider = document.getElementById("infect-slider");
 const infectValue = document.getElementById("infect-value");
@@ -249,8 +255,29 @@ initialSlider.addEventListener("input", () => {
 });
 initialSlider.addEventListener("change", () => buildNetwork());
 
+function findPreset(key) {
+  if (key.startsWith("my:")) return customPresets[key.slice(3)] || null;
+  return PRESETS[key] || null;
+}
+
+function rebuildPresetOptions(selectedKey) {
+  presetSelect.innerHTML = "";
+  const add = (parent, value, label) => { const o = document.createElement("option"); o.value = value; o.textContent = label; parent.appendChild(o); };
+  add(presetSelect, "custom", "Custom");
+  const mine = Object.keys(customPresets);
+  if (mine.length) {
+    const g = document.createElement("optgroup"); g.label = "My diseases";
+    mine.forEach((name) => add(g, "my:" + name, name));
+    presetSelect.appendChild(g);
+  }
+  const g2 = document.createElement("optgroup"); g2.label = "Presets";
+  Object.entries(PRESETS).forEach(([k, p]) => add(g2, k, p.label));
+  presetSelect.appendChild(g2);
+  presetSelect.value = selectedKey && [...presetSelect.options].some((o) => o.value === selectedKey) ? selectedKey : "custom";
+}
+
 function applyPreset(key) {
-  const p = PRESETS[key];
+  const p = findPreset(key);
   if (!p) { presetNote.textContent = ""; return; }
   applyingPreset = true;
   infectSlider.value = p.infect; infectChance = p.infect; infectValue.textContent = p.infect.toFixed(2);
@@ -263,6 +290,28 @@ function applyPreset(key) {
   applyingPreset = false;
   buildNetwork();
 }
+
+const saveNameInput = document.getElementById("save-name");
+document.getElementById("save-btn").addEventListener("click", () => {
+  const name = saveNameInput.value.trim();
+  if (!name) { saveNameInput.focus(); return; }
+  customPresets[name] = {
+    label: name, infect: infectChance, recover: recoverTicks, mortality: mortalityChance,
+    population: N, contacts: perNode, initial: initialInfected, note: "Your saved disease.",
+  };
+  saveCustom(customPresets);
+  saveNameInput.value = "";
+  rebuildPresetOptions("my:" + name);
+  presetNote.textContent = `Saved "${name}".`;
+});
+document.getElementById("delete-btn").addEventListener("click", () => {
+  if (!presetSelect.value.startsWith("my:")) { presetNote.textContent = "Select one of your saved diseases to delete it."; return; }
+  delete customPresets[presetSelect.value.slice(3)];
+  saveCustom(customPresets);
+  rebuildPresetOptions("custom");
+  presetNote.textContent = "Deleted.";
+});
+rebuildPresetOptions("custom");
 
 presetSelect.addEventListener("change", () => {
   if (presetSelect.value === "custom") { presetNote.textContent = ""; return; }

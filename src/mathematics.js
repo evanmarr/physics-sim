@@ -1,6 +1,7 @@
 import { compileExpression } from "./mathExpr.js";
 import { openSavesPanel } from "./auth.js";
 import { openModelInfo } from "./modelInfo.js";
+import { WordCloudTool } from "./wordcloud.js";
 import { DEWEY_MAIN_CLASSES, DEWEY_DIVISIONS, DEWEY_SECTIONS } from "./deweyData.js";
 
 const GRAPH_MODEL_INFO = {
@@ -39,6 +40,7 @@ const CHART_TYPES = [
   { id: "pie", label: "Pie Chart" },
   { id: "venn", label: "Venn Diagram" },
   { id: "dewey", label: "Dewey Decimal" },
+  { id: "wordcloud", label: "Word Cloud" },
 ];
 
 export class MathematicsMode {
@@ -88,7 +90,7 @@ export class MathematicsMode {
   }
 
   mount() { this._resize(); this._draw(); }
-  unmount() {}
+  unmount() { if (this._wordcloud) this._wordcloud.unmount(); }
 
   _build() {
     this.root.innerHTML = "";
@@ -151,6 +153,14 @@ export class MathematicsMode {
     this.deweyEl = div("math-dewey-panel hidden");
     stage.appendChild(this.deweyEl);
 
+    // Word Cloud is a self-contained tool with its own panel/controls,
+    // shown over the stage like the Dewey panel; it is mounted lazily and
+    // unmounted (listeners/timers removed) whenever another type is chosen.
+    this.wordcloudEl = div("math-wordcloud-panel hidden");
+    this.wordcloudEl.style.cssText = "position:absolute;inset:0;overflow:auto;background:var(--bg)";
+    stage.appendChild(this.wordcloudEl);
+    this._wordcloud = null;
+
     this._wireInteraction();
     window.addEventListener("resize", () => { this._resize(); this._draw(); });
     this._setChartType("function");
@@ -161,8 +171,13 @@ export class MathematicsMode {
     for (const [id, btn] of Object.entries(this._typeButtons)) btn.classList.toggle("active", id === type);
     this.gTrace.style("display", "none");
     this.coordReadout.textContent = "";
-    this.svg.node().classList.toggle("hidden", type === "dewey");
+    this.svg.node().classList.toggle("hidden", type === "dewey" || type === "wordcloud");
     this.deweyEl.classList.toggle("hidden", type !== "dewey");
+    this.wordcloudEl.classList.toggle("hidden", type !== "wordcloud");
+    if (type === "wordcloud") {
+      if (!this._wordcloud) this._wordcloud = new WordCloudTool(this.wordcloudEl, {});
+      this._wordcloud.mount();
+    } else if (this._wordcloud) this._wordcloud.unmount();
     this._buildControls();
     this._draw();
   }
@@ -170,6 +185,7 @@ export class MathematicsMode {
   _buildControls() {
     this.controlsEl.innerHTML = "";
     if (this.chartType === "function") this._buildFunctionControls();
+    else if (this.chartType === "wordcloud") { /* controls live inside the word cloud panel */ }
     else if (this.chartType === "bar" || this.chartType === "pie") this._buildDataControls();
     else if (this.chartType === "dewey") this._buildDeweyControls();
     else this._buildVennControls();
@@ -694,6 +710,7 @@ export class MathematicsMode {
     if (this.chartType === "function") this._drawFunction();
     else if (this.chartType === "bar") this._drawBar();
     else if (this.chartType === "pie") this._drawPie();
+    else if (this.chartType === "wordcloud") { /* self-rendering panel */ }
     else if (this.chartType === "dewey") { /* renders into deweyEl directly, not the SVG — see _buildDeweyControls/_renderDeweyResults */ }
     else this._drawVenn();
   }
