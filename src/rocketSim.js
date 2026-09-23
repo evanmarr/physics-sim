@@ -271,6 +271,7 @@ const ROCKET_MODEL_INFO = {
   limitations: [
     "Numerical integration is semi-implicit Euler with a small fixed timestep, not an adaptive/RK4 integrator.",
     "Drag uses one constant cross-section/drag-coefficient figure, not a real vehicle's full aerodynamic model.",
+    "Isp and thrust stay at their sea-level values at every altitude (real engines gain performance in vacuum), and the planet's own rotation is ignored, so there is no free eastward launch speed.",
     "Planets use real mass/radius; the rocket itself (stage mass/thrust/Isp) is an illustrative small-launcher figure, not any specific real vehicle's spec sheet.",
     "Companion body (Moon/Venus/Mars) positions are real current ephemeris (direction AND distance), but this sim only tracks gravity around ONE body at a time — it isn't a full N-body solar system.",
   ],

@@ -216,7 +216,7 @@ export class EconomicsMode {
     const pNoTax = m.a - m.b * qNoTax;
     const qTax = Math.max(0, (m.a - m.c - m.tax) / (m.b + m.d));
     const pBuyer = m.a - m.b * qTax; // what buyers pay
-    const pSeller = pBuyer - m.tax; // what sellers keep
+    const pSeller = qTax > 0 ? pBuyer - m.tax : m.c + m.d * qTax; // what sellers keep (tax ≥ a−c shuts the market: no trade)
 
     const qMax = Math.max(qNoTax, qTax) * 1.4 + 1;
     const pMax = Math.max(m.a, pBuyer) * 1.1 + 1;
@@ -276,7 +276,8 @@ export class EconomicsMode {
     if (m.tax > 0) {
       lines.push(`Equilibrium without tax: Q=${qNoTax.toFixed(1)}, P=${pNoTax.toFixed(1)}`);
       lines.push(`With a ${m.tax}-per-unit tax: Q=${qTax.toFixed(1)} — buyers pay ${pBuyer.toFixed(1)}, sellers keep ${pSeller.toFixed(1)} (the gap is the tax).`);
-      const dwl = 0.5 * m.tax * Math.max(0, qNoTax - qTax);
+      const wedge = pBuyer - (m.c + m.d * qTax); // equals the tax unless it's high enough to shut the market entirely
+      const dwl = 0.5 * wedge * Math.max(0, qNoTax - qTax);
       lines.push(`Deadweight loss ≈ ${dwl.toFixed(1)} — value that would've been created by trades the tax now prevents.`);
     } else {
       lines.push(`Equilibrium: Q=${qNoTax.toFixed(1)}, P=${pNoTax.toFixed(1)}`);

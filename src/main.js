@@ -1375,7 +1375,7 @@ function countLabel(count) {
   return `${count.toLocaleString()} ${count === 1 ? "person has" : "people have"} completed this`;
 }
 
-// Global search's index: all 12 sandboxes (so typing a subject name jumps
+// Global search's index: all 13 sandboxes (so typing a subject name jumps
 // straight there) plus every challenge each one defines (reusing
 // weeklyPool()'s same {sandbox, name, detail, go} shape — one list of
 // "everything you can search for," not two separately maintained ones).
@@ -1489,7 +1489,7 @@ function buildHomePage(root, onNavigate) {
 }
 
 // A real random pick across whatever's actually available right now — the
-// 12 sandboxes always count, and once the Featured/Community rails have
+// 13 sandboxes always count, and once the Featured/Community rails have
 // loaded their random pool grows to include real published sims too, so
 // this stays an honest "surprise" instead of a fixed rotation.
 let _surprisePool = [];

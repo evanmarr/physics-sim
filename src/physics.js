@@ -120,7 +120,6 @@ export class PhysicsSim {
     this.springMeta = new Map(); // springPadId -> {spec, cooldownUntil}
     this.airMult = 1;
     this.frictionMult = 1;
-    this.surfaceDrag = 0;
     this._ringRestCounters = new Map(); // bodyId -> consecutive slow-contact ticks, see _settleRingOnContact
     this._lastDelta = 16; // ms, updated each frame in start() — beforeUpdate handlers need real elapsed time
     // Simulated clock, not wall-clock — advances by the *scaled* delta each
@@ -890,14 +889,6 @@ export class PhysicsSim {
         body.frictionStatic = body._baseFricStatic * this.frictionMult;
         body._fricMult = this.frictionMult;
       }
-      if (this.surfaceDrag > 0 && !body.plugin?.transient && !body.isSensor) {
-        const v = body.velocity;
-        if (Math.abs(v.x) + Math.abs(v.y) > 0.0005 || Math.abs(body.angularVelocity) > 0.0005) {
-          const k = 1 - this.surfaceDrag * 0.04;
-          Body.setVelocity(body, { x: v.x * k, y: v.y * k });
-          Body.setAngularVelocity(body, body.angularVelocity * k);
-        }
-      }
       if (body.isSensor) continue;
       const speed = Vector.magnitude(body.velocity);
       const cap = body._sweepPrev ? SMALL_FAST_BODY_SPEED : MAX_BODY_SPEED;
@@ -1451,12 +1442,6 @@ export class PhysicsSim {
   // 1.0 = every object's own friction; a preset like "ice" scales them all down.
   setFrictionScale(mult) {
     this.frictionMult = Math.max(0, mult);
-  }
-
-  // Top view: nothing falls, so "friction" is the surface everything slides
-  // across — a per-tick fraction of velocity/spin bled off (0 = frictionless ice).
-  setSurfaceDrag(k) {
-    this.surfaceDrag = Math.max(0, k);
   }
 
   setGravity(scale) {

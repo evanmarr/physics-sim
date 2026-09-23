@@ -158,12 +158,12 @@ export function equilibriumTemperatureK(luminosity, distAu, albedo = 0.3) {
 // limits for an Earth-like planet: the inner edge is where a runaway moist
 // greenhouse becomes likely (~1.1x Earth's solar flux), the outer edge is
 // the maximum greenhouse limit before a CO2 atmosphere can no longer keep a
-// planet's surface above freezing (~0.53x Earth's solar flux). This ignores
+// planet's surface above freezing (~0.36x Earth's solar flux). This ignores
 // the target star's spectral type/temperature (a real refinement to the
 // original model) so it's most accurate for Sun-like stars and only a rough
 // guide for much hotter or cooler ones.
 export function habitableZoneAu(luminosity) {
-  return { inner: Math.sqrt(luminosity / 1.1), outer: Math.sqrt(luminosity / 0.53) };
+  return { inner: Math.sqrt(luminosity / 1.1), outer: Math.sqrt(luminosity / 0.36) };
 }
 
 // ---- Sun (geocentric apparent longitude) and Moon (geocentric), Meeus low-precision ----

@@ -233,7 +233,7 @@ const DIATOMIC = new Set(["H", "N", "O", "F", "Cl", "Br", "I"]);
 // rest of the periodic table with a simplified but broadly-applicable
 // prediction instead of a hand-verified one.
 export const REACTION_TABLE = {
-  "H-O": { formula: "H₂O", name: "Water", type: "covalent", energy: "exothermic", ratio: { H: 2, O: 1 }, structure: "H—O—H", note: "Two hydrogens share electrons with one oxygen. The reaction that powers hydrogen fuel cells (in reverse) and rocket engines (forward, explosively)." },
+  "H-O": { formula: "H₂O", name: "Water", type: "covalent", energy: "exothermic", ratio: { H: 2, O: 1 }, structure: "H—O—H", note: "Two hydrogens share electrons with one oxygen. The reaction that powers hydrogen fuel cells and rocket engines (burned explosively); splitting water back into H₂ and O₂ (electrolysis) takes that energy back in." },
   "Cl-H": { formula: "HCl", name: "Hydrogen chloride", type: "covalent", energy: "exothermic", ratio: { H: 1, Cl: 1 }, structure: "H—Cl", note: "Dissolves in water to form hydrochloric acid — the acid in your stomach." },
   "Cl-Na": { formula: "NaCl", name: "Table salt", type: "ionic", energy: "exothermic", ratio: { Na: 1, Cl: 1 }, structure: "Na⁺ Cl⁻", note: "Sodium gives up its outer electron, chlorine takes it — a violent reaction between a soft explosive metal and a toxic gas that somehow makes the salt on your fries." },
   "C-O": { formula: "CO₂", name: "Carbon dioxide", type: "covalent", energy: "exothermic", ratio: { C: 1, O: 2 }, structure: "O═C═O", note: "What you exhale, and what plants breathe in. Also what burning carbon-based fuel produces." },
@@ -280,7 +280,7 @@ export const REACTION_TABLE = {
   "O-Sn": { formula: "SnO₂", name: "Tin dioxide", type: "ionic", energy: "exothermic", ratio: { Sn: 1, O: 2 }, structure: "Sn⁴⁺ (O²⁻)₂", note: "Used as a mild abrasive in polishing compounds, and in coatings that make glass electrically conductive." },
   "O-Si": { formula: "SiO₂", name: "Silicon dioxide (quartz)", type: "covalent", energy: "exothermic", ratio: { Si: 1, O: 2 }, structure: "—O—Si(—O—)₂—, repeating network", note: "The main component of sand and quartz, and the raw material glass and computer chips are both made from." },
   "H-Si": { formula: "SiH₄", name: "Silane", type: "covalent", energy: "endothermic", ratio: { Si: 1, H: 4 }, structure: "H—Si(—H)(—H)—H", note: "The silicon analog of methane — unlike methane, it ignites spontaneously in air, which makes it useful for depositing pure silicon films in chip manufacturing." },
-  "C-Si": { formula: "SiC", name: "Silicon carbide", type: "covalent", energy: "endothermic", ratio: { Si: 1, C: 1 }, structure: "—Si—C—, repeating network", note: "Nearly as hard as diamond — used as an industrial abrasive and, more recently, in high-power electronics that run hotter than silicon alone can handle." },
+  "C-Si": { formula: "SiC", name: "Silicon carbide", type: "covalent", energy: "exothermic", ratio: { Si: 1, C: 1 }, structure: "—Si—C—, repeating network", note: "Nearly as hard as diamond — used as an industrial abrasive and, more recently, in high-power electronics that run hotter than silicon alone can handle." },
   "B-O": { formula: "B₂O₃", name: "Boron trioxide", type: "covalent", energy: "exothermic", ratio: { B: 2, O: 3 }, structure: "O═B—O—B═O (simplified)", note: "Melted with silica to make borosilicate glass — the heat-shock-resistant glass used in lab equipment and oven-safe cookware." },
   "Al-Cl": { formula: "AlCl₃", name: "Aluminum chloride", type: "covalent", energy: "exothermic", ratio: { Al: 1, Cl: 3 }, structure: "Cl—Al(—Cl)—Cl", note: "Despite forming from a metal and a nonmetal, the bonding is covalent, not ionic — a classic exception used to teach that the metal/nonmetal rule of thumb isn't absolute." },
   "Cl-Fe": { formula: "FeCl₃", name: "Iron(III) chloride", type: "ionic", energy: "exothermic", ratio: { Fe: 1, Cl: 3 }, structure: "Fe³⁺ (Cl⁻)₃", note: "Used to etch copper circuit boards — it dissolves copper metal right off the board wherever it isn't masked." },
@@ -398,7 +398,7 @@ function formatRatio(counts) {
 // this is a lookup for the nonmetals/halogens that can appear here.
 const IONIC_ROOT = {
   H: "Hydride", C: "Carbide", N: "Nitride", O: "Oxide", P: "Phosphide", S: "Sulfide", Se: "Selenide",
-  F: "Fluoride", Cl: "Chloride", Br: "Bromide", I: "Iodide", At: "Astatide", Ts: "Tenesside",
+  F: "Fluoride", Cl: "Chloride", Br: "Bromide", I: "Iodide", At: "Astatide", Ts: "Tennestide",
 };
 function ionicRoot(nonmetal) {
   return IONIC_ROOT[nonmetal.symbol] ?? `${nonmetal.name}ide`;
@@ -417,7 +417,9 @@ export function predictWaterReaction(el) {
   const reactivity = METAL_WATER_REACTIVITY[el.symbol];
   if (!reactivity) return null;
   return {
-    formula: `2${el.symbol} + 2H₂O → 2${el.symbol}OH + H₂↑`,
+    formula: el.category === "alkali" ? `2${el.symbol} + 2H₂O → 2${el.symbol}OH + H₂↑`
+      : el.symbol === "Al" ? `2Al + 6H₂O → 2Al(OH)₃ + 3H₂↑`
+      : `${el.symbol} + 2H₂O → ${el.symbol}(OH)₂ + H₂↑`,
     name: `${el.name} hydroxide + hydrogen gas`,
     type: "ionic",
     energy: "exothermic",

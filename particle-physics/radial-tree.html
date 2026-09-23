@@ -86,7 +86,7 @@
     reinfected, and <span style="color:#9499a8">gray</span> have died and no
     longer take part. Each tick, every infected node has a chance to pass it
     to each susceptible neighbor it's actually connected to (not just anyone
-    nearby) before eventually recovering — or not.</p>
+    nearby) before eventually recovering — or not. Presets are stylized: transmission and death rates are exaggerated so the differences show up in seconds, and are not real R0 or case-fatality figures (for example, real seasonal flu kills far fewer than 1% of the people it infects).</p>
 
   <div class="preset-row">
     <span class="settings-label" style="margin-top:0">Disease preset</span>
@@ -165,8 +165,8 @@ let mortalityChance = 0;
 // approximation, not epidemiological data.
 const PRESETS = {
   cold: { label: "Common cold", infect: 0.10, recover: 70, mortality: 0.00, population: 130, contacts: 3, initial: 3, note: "Very mild and short-lived — almost everyone who catches it recovers within days." },
-  flu: { label: "Seasonal flu", infect: 0.15, recover: 90, mortality: 0.02, population: 150, contacts: 3, initial: 3, note: "More contagious than a cold with a small but real chance of death, especially in vulnerable groups." },
-  h1n1: { label: "H1N1 swine flu (2009)", infect: 0.20, recover: 90, mortality: 0.01, population: 160, contacts: 4, initial: 3, note: "A novel flu strain that spread worldwide fast but proved less deadly than feared." },
+  flu: { label: "Seasonal flu", infect: 0.15, recover: 90, mortality: 0.01, population: 150, contacts: 3, initial: 3, note: "More contagious than a cold with a small but real chance of death, especially in vulnerable groups." },
+  h1n1: { label: "H1N1 swine flu (2009)", infect: 0.20, recover: 90, mortality: 0.02, population: 160, contacts: 4, initial: 3, note: "A novel flu strain that spread worldwide fast but proved less deadly than feared." },
   spanish: { label: "1918 influenza", infect: 0.24, recover: 100, mortality: 0.10, population: 180, contacts: 4, initial: 3, note: "Killed tens of millions worldwide, unusually striking healthy young adults." },
   covid: { label: "COVID-19 (2020 strain)", infect: 0.22, recover: 150, mortality: 0.08, population: 170, contacts: 4, initial: 3, note: "Spreads faster than flu, stays infectious longer, and was considerably more lethal before vaccines." },
   omicron: { label: "COVID-19 Omicron", infect: 0.42, recover: 90, mortality: 0.02, population: 200, contacts: 5, initial: 3, note: "Far more transmissible but, on average, milder than earlier variants." },

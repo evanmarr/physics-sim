@@ -53,7 +53,7 @@ export const EXTRA_EMAILS = [
   mk("Lottery Board <winner@intl-lotto-award.example>", "CONGRATULATIONS! You won $2,500,000", ["intl-lotto-award.example", "A random lottery domain. You cannot win a lottery you never entered."], [
     "Dear Lucky Winner,<br><br>", ["Your email was randomly selected as the grand prize winner", "Winning without entering is impossible. This is the setup for an advance-fee scam."],
     "<br><br>To release funds, ", ["pay a $150 processing fee via wire transfer", "Legitimate prizes never require you to pay a fee first."], ".<br><br>Claims Officer"]),
-  mk("Social Security Team <verify@instagrarn-support.example>", "Your account will be deleted - verify now", ["instagrarn-support.example", "\"rn\" is impersonating \"m\" in a brand-like name. Look-alike domains are cheap to register."], [
+  mk("Account Support <verify@instagrarn-support.example>", "Your account will be deleted - verify now", ["instagrarn-support.example", "\"rn\" is impersonating \"m\" in a brand-like name. Look-alike domains are cheap to register."], [
     "Hello,<br><br>", ["Copyright violation reported: your page will be disabled in 24 hours", "Fake policy violations with a countdown are common social-media lures."],
     "<br><br>", ["Verify your account to appeal", "Link leads to a fake login page that steals your username and password."], "<br><br>", ["Send a photo of your ID to confirm ownership", "Requests for ID documents let criminals commit identity theft."], "<br><br>Support"]),
   mk("Wallet Support <security@metamaskk-wallet.example>", "Wallet compromised: restore now", ["metamaskk-wallet.example", "A doubled letter in a wallet-style name. Fake domain."], [

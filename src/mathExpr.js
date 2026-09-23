@@ -101,7 +101,7 @@ function parse(tokens) {
     if (t.type === "id") {
       next();
       const name = t.value.toLowerCase();
-      if (peek() && peek().type === "(") {
+      if (peek() && peek().type === "(" && name !== "x" && CONSTANTS[name] === undefined) {
         next();
         const args = [parseExpr()];
         while (peek() && peek().type === ",") { next(); args.push(parseExpr()); }

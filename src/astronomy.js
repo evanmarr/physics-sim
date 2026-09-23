@@ -22,10 +22,11 @@ const ASTRONOMY_MODEL_INFO = {
   ],
   assumptions: [
     "Each body orbits the Sun (or, for moons, its host planet) independently — real two-body Kepler mechanics per orbit, not an N-body gravitational simulation, so orbits don't perturb each other.",
-    "Orbital elements are fixed at their J2000 epoch values rather than updated for their own slow real-world precession.",
+    "The eight planets use JPL mean elements with their linear drift rates (valid roughly 1800-2050, so the far ends of a wide time scrub drift off the true positions); dwarf planets use fixed elements with an approximate phase, and moons use circular orbits.",
   ],
   limitations: [
     "Distances between orbits are compressed for visibility (true-to-scale would put Neptune far off-screen) — sizes of the bodies themselves are on one consistent real-world scale.",
+    "The habitable-zone calculator shows equilibrium temperature with no greenhouse effect, so Earth reads about 255 K (-18 °C) rather than its real ~288 K average; it also ignores the star's spectrum and the planet's atmosphere.",
     "No orbital resonances, gravitational perturbation between planets, or relativistic corrections (e.g. Mercury's perihelion precession) are modeled.",
   ],
   sources: ["Kepler's laws of planetary motion", "J2000 orbital elements (NASA JPL / standard astronomical almanac values)"],
@@ -34,7 +35,7 @@ const ASTRONOMY_MODEL_INFO = {
 const HABITABILITY_MODEL_INFO = {
   title: "Habitability Calculator",
   concept: "Real Stefan-Boltzmann radiative balance, not a lookup table: a planet's equilibrium temperature is computed from actual inverse-square-law flux (how a star's brightness spreads out over distance) and how much of that light the planet reflects away (albedo) versus absorbs. The habitable-zone bounds are the same simplified Kasting et al. limits used throughout planetary science for a quick estimate.",
-  equation: "T_eq = 278.5 · L^0.25 / √d · (1−A)^0.25     HZ: d_inner = √(L/1.1), d_outer = √(L/0.53)",
+  equation: "T_eq = 278.5 · L^0.25 / √d · (1−A)^0.25     HZ: d_inner = √(L/1.1), d_outer = √(L/0.36)",
   variables: [
     { symbol: "L", meaning: "the star's luminosity relative to the Sun (L☉ = 1)" },
     { symbol: "d", meaning: "distance from the star, in AU" },

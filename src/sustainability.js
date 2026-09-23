@@ -26,7 +26,7 @@ const SUSTAINABILITY_MODEL_INFO = {
   constants: [
     { name: "Solar capacity factor", value: 0.25, unit: "of nameplate, zeroed at night" },
     { name: "Wind capacity factor", value: 0.35, unit: "of nameplate, gusts tick to tick" },
-    { name: "Coal capacity factor", value: 0.85, unit: "of nameplate (baseload, day or night)" },
+    { name: "Coal output while running", value: 0.85, unit: "of nameplate (baseload, day or night); real U.S. coal fleets averaged only ~40-50% annual capacity factor in 2023 as plants ran less and less, so this is a game simplification" },
     { name: "Coal fuel cost", value: 4, unit: "per tick, ongoing (renewables have none)" },
   ],
   assumptions: [

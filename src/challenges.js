@@ -21,7 +21,7 @@ export const CHALLENGES = [
     objective: "A magnet sits fixed nearby, but the ball resting next to it is Wood — a magnet has zero effect on wood, so nothing happens. Change the ball's material to Metal so the magnet actually pulls it in.",
     startingState: "A wood ball rests on the ground a short distance from a fixed magnet.",
     successCondition: "The ball comes to rest touching the magnet.",
-    hint: "Check each material's properties in the Physics panel — only Metal responds to a magnet's pull at all. Every other material here (Wood, Rubber, Glass, Ice) is completely magnetically inert, not just weakly affected.",
+    hint: "Check each material's properties in the Physics panel — only Metal responds to a magnet's pull at all. Every other material here (Wood, Rubber, Glass) is completely magnetically inert, not just weakly affected.",
     explanation: "A magnet exerts a real, sharply distance-dependent force (falling off close to an inverse 4th power, the same steep taper a real permanent magnet's field has), but the code only ever applies that force to bodies whose material is Metal — every other material is skipped entirely, before the force calculation even runs. That makes this decided completely by material choice, with no aiming or tuning involved.",
     source: "Magnetic attraction only acts on ferromagnetic material — a real magnet does not attract wood, rubber, or glass.",
     // Verified live: a magnet this strong at this range doesn't gently
@@ -215,7 +215,7 @@ export const CHALLENGES = [
     name: "Precision Drop",
     difficulty: "Impossible",
     concept: "Torque, tuned to a target — not just a threshold",
-    objective: "The same kind of seesaw as before, but this time landing the payload ANYWHERE past the pivot isn't enough — it has to come down inside a marked landing pad, not overshoot past it either. Choose the dropped ball's material AND its drop height together to hit the pad.",
+    objective: "Launch the payload off a seesaw by dropping a ball onto the other end. Landing it merely past the pivot isn't enough — it has to come down inside a marked landing pad, not overshoot past it either. Choose the dropped ball's material AND its drop height together to hit the pad.",
     startingState: "A balanced seesaw with a light wooden payload ball resting on one end; the other end is empty, with a landing pad marked on the ground to the left.",
     successCondition: "The payload ball comes to rest on the ground inside the landing pad (−230 ≤ x ≤ −140), not short of it and not past it.",
     hint: "A Metal ball (much denser than the default Wood) dropped from a real height over the empty end reliably lands the payload in or very near the pad — too little mass or too little height falls short (or does nothing at all, like the unmodified default), and there's real headroom above the pad before it'd overshoot, but the pad itself is the actual target, not just \"anywhere past halfway.\"",
