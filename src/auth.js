@@ -14,6 +14,7 @@ function setUser(next) { user = next; listeners.forEach((fn) => fn(user)); }
 async function api(path, options) {
   const res = await fetch(`/api${path}`, {
     method: options?.method || "GET",
+    credentials: "same-origin",
     headers: options?.body ? { "Content-Type": "application/json" } : undefined,
     body: options?.body ? JSON.stringify(options.body) : undefined,
   });
@@ -23,9 +24,20 @@ async function api(path, options) {
   return data;
 }
 
+// Only a real "not signed in" answer (401) signs the page out. A network
+// hiccup, a cold serverless start or a transient 5xx used to land here too
+// and silently drop you to the signed-out state on reload even though the
+// session cookie was perfectly valid — so anything else is retried, and
+// whatever user we already had is kept.
 export async function refreshUser() {
-  try { setUser(await api("/me")); }
-  catch { setUser(null); }
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const res = await fetch("/api/me", { credentials: "same-origin" });
+      if (res.status === 401) { setUser(null); return user; }
+      if (res.ok) { setUser(await res.json()); return user; }
+    } catch { /* network error — retry below */ }
+    await new Promise((r) => setTimeout(r, 700 * (attempt + 1)));
+  }
   return user;
 }
 
@@ -266,10 +278,11 @@ function renderAuthModal(mode) {
         <div><label class="auth-label">Last name</label><input id="auth-last-name" type="text" autocomplete="family-name" maxlength="60" /></div>
       </div>
     ` : ""}
+    <form id="auth-form" novalidate>
     <label class="auth-label">Email</label>
-    <input id="auth-email" type="email" autocomplete="email" maxlength="254" />
+    <input id="auth-email" name="email" type="email" autocomplete="${mode === "signin" ? "username" : "email"}" maxlength="254" value="${escapeHtml(localStorage.getItem("kinetic-last-email") || "")}" />
     <label class="auth-label">Password</label>
-    <input id="auth-password" type="password" autocomplete="${mode === "signin" ? "current-password" : "new-password"}" maxlength="200" />
+    <input id="auth-password" name="password" type="password" autocomplete="${mode === "signin" ? "current-password" : "new-password"}" maxlength="200" />
     ${mode === "signup" ? `
       <p class="auth-hint">At least 8 characters, with a letter and a number.</p>
       <label class="auth-label">I am a...</label>
@@ -282,15 +295,17 @@ function renderAuthModal(mode) {
       <label class="auth-checkbox"><input type="checkbox" id="auth-subscribe" checked /> Send me occasional updates (about monthly)</label>
     ` : ""}
     <div id="auth-error" class="auth-error"></div>
-    <button id="auth-submit" class="primary">${mode === "signin" ? "Sign In" : "Create Account"}</button>
-    <button id="auth-close">Cancel</button>
+    <button id="auth-submit" type="submit" class="primary">${mode === "signin" ? "Sign In" : "Create Account"}</button>
+    <button id="auth-close" type="button">Cancel</button>
+    </form>
   `;
 
   authBox.querySelectorAll(".auth-tab").forEach((tab) => {
     tab.addEventListener("click", () => renderAuthModal(tab.dataset.mode));
   });
   authBox.querySelector("#auth-close").addEventListener("click", () => authModal.classList.add("hidden"));
-  authBox.querySelector("#auth-submit").addEventListener("click", async () => {
+  authBox.querySelector("#auth-form").addEventListener("submit", async (ev) => {
+    ev.preventDefault();
     const email = authBox.querySelector("#auth-email").value;
     const password = authBox.querySelector("#auth-password").value;
     const errorEl = authBox.querySelector("#auth-error");
@@ -305,6 +320,7 @@ function renderAuthModal(mode) {
         const title = authBox.querySelector("#auth-title").value;
         pending = await signUp(email, password, authBox.querySelector("#auth-subscribe").checked, firstName, lastName, title);
       }
+      try { localStorage.setItem("kinetic-last-email", email.trim().toLowerCase()); } catch { /* private mode */ }
       if (pending.pending) renderVerifyStep(pending.token, pending.email);
       else authModal.classList.add("hidden"); // a trusted device — signIn() already completed sign-in above
     } catch (e) {

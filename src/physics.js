@@ -4,7 +4,7 @@ import { makeId, cannonCatchRadius } from "./objectTypes.js";
 import { trianglePoints } from "./render.js";
 import { WORLD } from "./world.js";
 
-const { Engine, World, Composite, Bodies, Body, Constraint, Events, Vector } = Matter;
+const { Engine, World, Composite, Bodies, Body, Constraint, Events, Vector, Query, Sleeping } = Matter;
 
 const RAD = Math.PI / 180;
 const DEG = 180 / Math.PI;
@@ -38,6 +38,7 @@ const BUTTON_COOLDOWN_MS = 700;
 const SPRING_COOLDOWN_MS = 350;
 const PIVOT_ANGULAR_DAMPING = 0.25;
 const MAX_BODY_SPEED = 75; // world units/step — see _clampFastBodies
+const SMALL_FAST_BODY_SPEED = 22; // shards and the grab pointer — small enough that a thin object can be skipped over at higher speeds
 const WIND_PARTICLE_RADIUS = 3;
 const WIND_PARTICLE_LIFESPAN_MS = 2200;
 const WIND_SPAWN_EVERY_N_TICKS = 2;
@@ -288,15 +289,18 @@ export class PhysicsSim {
       const hostBody = this.byId.get(host.id);
       if (!hostBody) continue;
       this.pivotHostBodies.push(hostBody);
-      const cos = Math.cos(-host.rotation * RAD);
-      const sin = Math.sin(-host.rotation * RAD);
-      const dx = spec.x - host.x, dy = spec.y - host.y;
-      const localX = dx * cos - dy * sin;
-      const localY = dx * sin + dy * cos;
+      // Matter reads a constraint's pointA/pointB as a WORLD-orientation
+      // offset at the moment the constraint is created (it only rotates
+      // them afterward, by however much the body turns), NOT as a point in
+      // the body's own unrotated frame. Converting into the host's local
+      // frame here (inverse-rotating by host.rotation) was only ever
+      // correct for an unrotated host; for a rotated board the anchor
+      // landed in the wrong place and the very first step violently
+      // yanked the board (a board at 90° moved ~100 units at zero gravity).
       const constraint = Constraint.create({
         pointA: { x: spec.x, y: spec.y },
         bodyB: hostBody,
-        pointB: { x: localX, y: localY },
+        pointB: { x: spec.x - hostBody.position.x, y: spec.y - hostBody.position.y },
         length: 0,
         stiffness: 1,
         damping: 0,
@@ -367,7 +371,7 @@ export class PhysicsSim {
     // the same elasticity setting — scaling damping up with density keeps
     // a metal rope's segments settling as calmly as a wood one, instead of
     // needing its own separate elasticity retuning per material.
-    const damping = Math.min(0.7, 0.35 * Math.max(1, mat.density / materialOf("wood").density));
+    const damping = Math.min(0.6, 0.3 * Math.max(1, mat.density / materialOf("wood").density));
     const angle = Math.atan2(y2 - spec.y, x2 - spec.x);
     const dir = { x: Math.cos(angle), y: Math.sin(angle) };
     // Adjacent segments overlap slightly (the *1.05 below) so there's no
@@ -378,6 +382,15 @@ export class PhysicsSim {
     // chain/rope technique) makes segments of this rope never collide with
     // each other, while still colliding normally with everything else.
     const noSelfCollideGroup = Body.nextGroup(true);
+
+    // A chain of light rigid segments carrying a heavy load is exactly where
+    // Matter's iterative constraint solver under-converges: at the default
+    // count the load kept slowly dragging the chain longer every step (a
+    // metal ball on a rubber rope crept ~25% past its rest length and never
+    // stopped moving, speed pinned near 2.4/step). More iterations per step
+    // measurably fixes that (~4x calmer at 24), and only scenes that
+    // actually contain a rope pay for it.
+    this.engine.constraintIterations = Math.max(this.engine.constraintIterations, 20);
 
     const segments = [];
     for (let i = 0; i < segCount; i++) {
@@ -403,14 +416,21 @@ export class PhysicsSim {
         // separate rectangle items is exactly the "bunch of squares" look
         // this was replaced with a smooth tube for. collectRopePaths()
         // reads these segments directly (by label) to draw that tube.
-        render: { hidden: true, thickness, material: spec.material },
+        render: { hidden: true, thickness, material: spec.material, segLen },
       };
       Composite.add(world, seg);
       segments.push(seg);
       if (i > 0) {
         Composite.add(world, Constraint.create({
-          bodyA: segments[i - 1], pointA: { x: segLen / 2, y: 0 },
-          bodyB: seg, pointB: { x: -segLen / 2, y: 0 },
+          // World-orientation offsets (Matter reads a constraint's points
+          // that way at creation, then rotates them as the body turns) —
+          // written as a fixed local (segLen/2, 0) these were only right
+          // for a horizontal rope: every vertical/diagonal rope started
+          // with its joints half a segment off, and the first step spun
+          // segments a quarter turn to compensate (the "kink" and the
+          // violent first-second whip).
+          bodyA: segments[i - 1], pointA: { x: dir.x * segLen / 2, y: dir.y * segLen / 2 },
+          bodyB: seg, pointB: { x: -dir.x * segLen / 2, y: -dir.y * segLen / 2 },
           // Matter's auto-computed rest length ignores body rotation (it
           // doesn't rotate pointA/B by the bodies' angle at creation time,
           // even though it correctly does during simulation) — for
@@ -434,11 +454,20 @@ export class PhysicsSim {
     const explicitStart = spec.attachStartId ? specById.get(spec.attachStartId) : null;
     const host = explicitStart || this._findPivotHost({ id: spec.id, x: spec.x, y: spec.y }, specById);
     const startAnchor = host ? this._hostAnchor(host, spec.x, spec.y) : null;
+    // A rope end is attached INSIDE its host, so the end segment overlaps
+    // it from the very first step; as separate solid bodies they'd shove
+    // each other apart every step (a heavy ball hanging off the tip whirled
+    // the whole rope into a sustained violent spin). Putting the host into
+    // this rope's own no-collide group means it never collides with THIS
+    // rope's segments — everything else about it collides as normal. Only
+    // when the host has no group of its own yet (a bearing host already has
+    // one that mustn't be overwritten).
+
     let anchorConfig;
     if (startAnchor) {
-      anchorConfig = { bodyA: startAnchor.body, pointA: { x: startAnchor.x, y: startAnchor.y }, bodyB: segments[0], pointB: { x: -segLen / 2, y: 0 }, length: 0, stiffness, damping };
+      anchorConfig = { bodyA: startAnchor.body, pointA: { x: startAnchor.x, y: startAnchor.y }, bodyB: segments[0], pointB: { x: -dir.x * segLen / 2, y: -dir.y * segLen / 2 }, length: 0, stiffness, damping };
     } else {
-      anchorConfig = { pointA: { x: spec.x, y: spec.y }, bodyB: segments[0], pointB: { x: -segLen / 2, y: 0 }, length: 0, stiffness, damping };
+      anchorConfig = { pointA: { x: spec.x, y: spec.y }, bodyB: segments[0], pointB: { x: -dir.x * segLen / 2, y: -dir.y * segLen / 2 }, length: 0, stiffness, damping };
     }
     Composite.add(world, Constraint.create(anchorConfig));
 
@@ -450,11 +479,21 @@ export class PhysicsSim {
     const explicitEnd = spec.attachEndId ? specById.get(spec.attachEndId) : null;
     const endHost = explicitEnd || this._findPivotHost({ id: spec.id, x: tipX, y: tipY }, specById);
     const endAnchor = endHost ? this._hostAnchor(endHost, tipX, tipY) : null;
+    // Settle the shared group now that both hosts are known. If a host
+    // already belongs to a negative group (a Ball Bearing hinge assembly —
+    // see noCollideGroupById), the segments join THAT group instead of a
+    // fresh one, since a body can only be in one group; either way the rope
+    // never collides with its own attached hosts or with itself.
+    const hostBodies = [startAnchor ? this.byId.get(host.id) : null, endAnchor ? this.byId.get(endHost.id) : null].filter(Boolean);
+    const existing = hostBodies.map((b) => b.collisionFilter.group).find((g) => g < 0);
+    const ropeGroup = existing ?? noSelfCollideGroup;
+    for (const b of hostBodies) if (!b.collisionFilter.group) b.collisionFilter.group = ropeGroup;
+    for (const seg of segments) seg.collisionFilter.group = ropeGroup;
     if (endAnchor) {
       const lastSeg = segments[segments.length - 1];
       Composite.add(world, Constraint.create({
         bodyA: endAnchor.body, pointA: { x: endAnchor.x, y: endAnchor.y },
-        bodyB: lastSeg, pointB: { x: segLen / 2, y: 0 },
+        bodyB: lastSeg, pointB: { x: dir.x * segLen / 2, y: dir.y * segLen / 2 },
         length: 0, stiffness, damping,
       }));
     }
@@ -465,9 +504,16 @@ export class PhysicsSim {
   _hostAnchor(host, px, py) {
     const body = this.byId.get(host.id);
     if (!body) return null;
-    const cos = Math.cos(-host.rotation * RAD), sin = Math.sin(-host.rotation * RAD);
-    const dx = px - host.x, dy = py - host.y;
-    return { body, x: dx * cos - dy * sin, y: dx * sin + dy * cos };
+    // Use the BODY's own position/angle, not the spec's x/y/rotation: for
+    // a host that's part of a merged compound (see _buildMergedHostBody) or
+    // a donut ball, the body's origin is its centroid, not the spec's own
+    // position — anchoring against the spec's frame put the rope's end
+    // somewhere else entirely and the constraint yanked the whole rope
+    // (and host) violently toward the intended point on the first step.
+    // World-orientation offset at creation time — see the note on the
+    // bearing pivot constraint: Matter does NOT expect this in the body's
+    // own rotated frame.
+    return { body, x: px - body.position.x, y: py - body.position.y };
   }
 
   _findPivotHost(bearing, specById, allowedTypes = PIVOTABLE_HOST_TYPES) {
@@ -774,12 +820,46 @@ export class PhysicsSim {
     // from collision events: Matter integrates position/consumes forces
     // before collision events fire each step, so a force added later is
     // effectively dropped rather than lagged. beforeUpdate runs first.
+    Events.on(this.engine, "afterUpdate", () => this._sweepGuards());
     Events.on(this.engine, "beforeUpdate", () => {
       this._applyFans();
       this._applyMagnets();
       this._dampPivots();
       this._clampFastBodies();
     });
+  }
+
+  // Glass shards and the Grab Tool's pointer body are the two things that
+  // routinely move fast, are small, and get flung at thin objects — exactly
+  // where Matter's lack of continuous collision detection shows up as
+  // "went straight through it." Before each step their position is
+  // recorded; afterwards, if the straight path they just travelled crossed
+  // the middle of any solid body (they can't have legitimately done that —
+  // it means they skipped over its far side), they're put back where they
+  // started with most of their speed killed, and the solver takes it from
+  // there like an ordinary collision. The grab tool still passes through
+  // FIXED scenery on purpose (see enableGrabTool); only things it's meant
+  // to bump into are guarded.
+  _sweepGuards() {
+    const guarded = [];
+    for (const body of Composite.allBodies(this.engine.world)) {
+      if (body._sweepPrev && !body.isStatic) guarded.push(body);
+    }
+    if (!guarded.length) return;
+    const all = Composite.allBodies(this.engine.world);
+    for (const body of guarded) {
+      const prev = body._sweepPrev;
+      const dist = Math.hypot(body.position.x - prev.x, body.position.y - prev.y);
+      if (dist < 3) continue;
+      const isGrab = body === this.grabBody;
+      const solids = all.filter((b) => b !== body && !b.isSensor && !b.plugin?.transient && b.label !== "grabTool"
+        && !(isGrab && (b.collisionFilter.category & FIXED_CATEGORY)) && !b._sweepPrev);
+      const hits = Query.ray(solids, prev, body.position, 2);
+      if (hits.length) {
+        Body.setPosition(body, { x: prev.x, y: prev.y });
+        Body.setVelocity(body, { x: body.velocity.x * 0.1, y: body.velocity.y * 0.1 });
+      }
+    }
   }
 
   // Matter has no continuous collision detection — a body that would cross
@@ -792,6 +872,7 @@ export class PhysicsSim {
   _clampFastBodies() {
     for (const body of Composite.allBodies(this.engine.world)) {
       if (body.isStatic) continue;
+      if (body === this.grabBody || body.plugin?.render?.type === "shard") body._sweepPrev = { x: body.position.x, y: body.position.y };
       // Air friction: every body's own drag (from its material) times the
       // world's air multiplier. Applied lazily here, per body, so shards and
       // wind particles spawned mid-run pick it up too.
@@ -810,8 +891,9 @@ export class PhysicsSim {
       }
       if (body.isSensor) continue;
       const speed = Vector.magnitude(body.velocity);
-      if (speed > MAX_BODY_SPEED) {
-        const scale = MAX_BODY_SPEED / speed;
+      const cap = body._sweepPrev ? SMALL_FAST_BODY_SPEED : MAX_BODY_SPEED;
+      if (speed > cap) {
+        const scale = cap / speed;
         Body.setVelocity(body, { x: body.velocity.x * scale, y: body.velocity.y * scale });
       }
     }
@@ -1208,6 +1290,10 @@ export class PhysicsSim {
       const sx = cx + (Math.random() - 0.5) * w * 0.7;
       const sy = cy + (Math.random() - 0.5) * h * 0.7;
       const size = 4 + Math.random() * 11;
+      // A shard whose spawn point lands inside some other solid object (a
+      // board the glass was resting against) starts already embedded in it
+      // and "goes through" from the first frame — just don't spawn it there.
+      if (Query.point(Composite.allBodies(world).filter((b) => b !== body && !b.isSensor && !b.plugin?.transient), { x: sx, y: sy }).length) continue;
       const shard = Bodies.polygon(sx, sy, 3, size, {
         friction: materialOf("glass").friction,
         restitution: materialOf("glass").restitution,
@@ -1361,6 +1447,19 @@ export class PhysicsSim {
 
   setGravity(scale) {
     this.engine.gravity.y = scale;
+    // Sleeping (engine-wide, see the constructor) freezes anything that's
+    // been still for a moment — and a frozen body ignores gravity entirely
+    // until something wakes it. Cranking gravity up (everything settles and
+    // sleeps on the floor) and then down or flipping it (nothing wakes them)
+    // left objects glued to the floor or ceiling. A gravity change must wake
+    // every body so it actually responds to the new value.
+    this._wakeAll();
+  }
+
+  _wakeAll() {
+    for (const body of Composite.allBodies(this.engine.world)) {
+      if (!body.isStatic && body.isSleeping) Sleeping.set(body, false);
+    }
   }
 
   // Pushes a property-panel edit straight onto the corresponding LIVE
@@ -1601,11 +1700,25 @@ export class PhysicsSim {
       if (!byRope.has(ropeId)) {
         byRope.set(ropeId, { points: [], thickness: body.plugin.render?.thickness ?? 10, material: body.plugin.render?.material });
       }
-      byRope.get(ropeId).points[+idxStr] = { x: body.position.x, y: body.position.y };
+      const g = byRope.get(ropeId);
+      g.points[+idxStr] = { x: body.position.x, y: body.position.y };
+      g.bodies = g.bodies || [];
+      g.bodies[+idxStr] = body;
     }
     const out = [];
     for (const [id, g] of byRope) {
-      out.push({ id, points: g.points.filter(Boolean), thickness: g.thickness, material: g.material });
+      const pts = g.points.filter(Boolean);
+      // Points above are segment CENTERS, so a tube drawn through them stops
+      // half a segment short of each real end (visibly detached from
+      // whatever the rope is tied to). Extend to the actual joint points.
+      const bodies = (g.bodies || []).filter(Boolean);
+      const segLen = bodies[0]?.plugin?.render?.segLen;
+      if (bodies.length && segLen) {
+        const a = bodies[0], z = bodies[bodies.length - 1];
+        pts.unshift({ x: a.position.x - Math.cos(a.angle) * segLen / 2, y: a.position.y - Math.sin(a.angle) * segLen / 2 });
+        pts.push({ x: z.position.x + Math.cos(z.angle) * segLen / 2, y: z.position.y + Math.sin(z.angle) * segLen / 2 });
+      }
+      out.push({ id, points: pts, thickness: g.thickness, material: g.material });
     }
     return out;
   }

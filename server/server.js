@@ -219,12 +219,12 @@ function appendCookie(res, cookieString) {
 
 function setSessionCookie(res, req, token, maxAgeSeconds) {
   const secure = req.socket.encrypted || req.headers["x-forwarded-proto"] === "https" ? "; Secure" : "";
-  appendCookie(res, `sid=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${maxAgeSeconds}${secure}`);
+  appendCookie(res, `sid=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${maxAgeSeconds}${secure}`);
 }
 
 function setDeviceTrustCookie(res, req, token, maxAgeSeconds) {
   const secure = req.socket.encrypted || req.headers["x-forwarded-proto"] === "https" ? "; Secure" : "";
-  appendCookie(res, `dvt=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${maxAgeSeconds}${secure}`);
+  appendCookie(res, `dvt=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${maxAgeSeconds}${secure}`);
 }
 
 // ---------- HTTP helpers ----------

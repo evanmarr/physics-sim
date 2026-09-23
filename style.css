@@ -260,23 +260,28 @@ input[type="range"] { accent-color: var(--accent); cursor: pointer; }
 .brand-logo { flex-shrink: 0; }
 #menu-wrap { position: relative; margin-left: auto; }
 #menu-btn { font-size: 20px; line-height: 1; padding: 4px 10px; }
-/* On mobile the topbar's trailing cluster (search, AI Tutor badge,
-   achievements, sign-in, this menu) is wider on its own than the whole
-   screen even after #mode-tabs shrinks to nothing — #topbar can't scroll
-   to reach the overflow (it's deliberately overflow:visible so its two
-   dropdowns don't get clipped, see above) and body itself is
-   overflow:hidden, so this menu — and everything in it, including
-   Plans — was simply pushed off the right edge with no way to reach it.
-   Pinning just this one button to a fixed viewport corner sidesteps the
-   topbar's own overflow entirely; #menu-dropdown still opens directly
-   under it as before, since this remains its nearest positioned ancestor. */
-:root[data-device="mobile"] #menu-wrap {
-  position: fixed;
-  top: 8px;
-  right: 8px;
-  z-index: 45;
-  margin-left: 0;
+/* The "..." menu (and Plans inside it) stays in the bar's normal flow like
+   every other control — on a narrow screen the bar is made to FIT instead
+   (below) rather than pinning this one button to the viewport. */
+:root[data-device="mobile"] #topbar, #topbar.compact { gap: 8px; padding: 0 8px; }
+:root[data-device="mobile"] .brand { font-size: 0; gap: 0; padding: 4px; }
+:root[data-device="mobile"] #ai-tutor-btn .plus-badge { display: none; }
+:root[data-device="mobile"] #ai-tutor-btn { padding: 4px 8px; }
+:root[data-device="mobile"] #account-controls { gap: 6px; }
+:root[data-device="mobile"] #account-email-wrap #account-email { max-width: 70px; }
+:root[data-device="mobile"] #mode-tabs { gap: 14px; }
+@media (max-width: 480px) {
+  #topbar { gap: 8px; padding: 0 8px; }
+  .brand { font-size: 0; gap: 0; padding: 4px; }
+  #ai-tutor-btn .plus-badge { display: none; }
+  #ai-tutor-btn { padding: 4px 8px; }
+  #account-controls { gap: 6px; }
+  #mode-tabs { gap: 14px; }
 }
+/* No double-tap-to-zoom anywhere: every tap target keeps normal taps, pans
+   and pinch on the canvases that want them, but a quick second tap on a
+   button, tab or object is never read as a zoom gesture. */
+html, body, button, a, input, select, textarea, label, [role="button"], .mode-tab, .palette-item, .home-card { touch-action: manipulation; }
 #menu-dropdown {
   position: absolute; top: 100%; right: 0; margin-top: 4px; z-index: 60;
   background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
@@ -304,15 +309,13 @@ input[type="range"] { accent-color: var(--accent); cursor: pointer; }
 #play-btn.playing { background: var(--danger); border-color: var(--danger); color: #2a0b0b; }
 
 #gravity-controls, #air-controls, #surface-controls { display: flex; align-items: center; gap: 8px; color: var(--text-dim); }
-#air-controls input { width: 110px; }
-#surface-controls input { width: 100px; }
-#gravity-controls input { width: 140px; }
+#gravity-controls input { }
 #gravity-val { color: var(--text); font-weight: 600; }
 #speed-controls { display: flex; align-items: center; gap: 8px; color: var(--text-dim); }
-#speed-controls input { width: 110px; }
+#speed-controls input { }
 #speed-val { color: var(--text); font-weight: 600; }
 
-#light-mode-toggle-wrap { margin-left: auto; }
+
 #units-controls { display: flex; gap: 6px; }
 #mobile-edit-controls { display: none; gap: 6px; }
 :root[data-device="mobile"] #mobile-edit-controls { display: flex; }
@@ -432,10 +435,25 @@ input[type="range"] { accent-color: var(--accent); cursor: pointer; }
   flex-direction: column;
 }
 #physics-toolbar {
-  display: flex; align-items: center; gap: 16px; flex-wrap: wrap; flex-shrink: 0;
-  padding: 8px 16px;
+  display: flex; flex-direction: column; gap: 8px; flex-shrink: 0;
+  padding: 10px 16px;
   background: var(--panel); border-bottom: 1px solid var(--border);
 }
+/* Three tidy rows instead of one wrapping pile: actions, world settings
+   (each slider in its own even card), and files/undo. */
+.tb-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; min-width: 0; }
+.tb-spacer { flex: 1 1 0; }
+.tb-actions > div { display: flex; align-items: center; gap: 8px; }
+.tb-env { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 10px; }
+.tb-env > div {
+  display: flex; align-items: center; gap: 10px; padding: 6px 10px; min-width: 0;
+  background: var(--panel-alt); border: 1px solid var(--border); border-radius: 10px;
+}
+.tb-env > div.hidden { display: none; }
+.tb-env label { font-size: 12.5px; white-space: nowrap; min-width: 88px; }
+.tb-env input[type="range"] { flex: 1 1 auto; width: auto; min-width: 60px; }
+.tb-files { padding-top: 8px; border-top: 1px solid var(--border); }
+.tb-files > div { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 #workspace-body { display: flex; flex: 1; min-height: 0; }
 
 #physics-dim-tabs { display: flex; gap: 2px; padding: 6px 16px 0; background: var(--panel); flex-shrink: 0; }

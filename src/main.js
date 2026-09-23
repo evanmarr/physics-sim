@@ -1,6 +1,7 @@
 import { Renderer, openSpeedUnitMenu, currentSpeedUnitLabel } from "./render.js";
 import { renderPalette } from "./palette.js";
 import { renderPanel, renderPhysicsMathPanel, renderMultiPanel } from "./panel.js";
+import { physicsMath } from "./physicsEdu.js";
 import { CHALLENGES, findChallenge, ChallengeTracker } from "./challenges.js";
 import { CHEMISTRY_CHALLENGES } from "./chemistryChallenges.js";
 import { HISTORY_CHALLENGES } from "./historyChallenges.js";
@@ -431,10 +432,36 @@ async function requestUnlock() {
   return true;
 }
 
+// Equations every selected object has in common — same editable variable
+// (density, friction, restitution, shatter threshold, ...), so one slider
+// here really does mean the same thing on each of them. Values can differ
+// between objects; the line shows the first one's and says so.
+function sharedMathLines(specs) {
+  const per = specs.map((s) => physicsMath(s));
+  if (per.some((lines) => !lines)) return [];
+  return per[0]
+    .filter((line) => line.edit && per.every((lines) => lines.some((l) => l.edit?.key === line.edit.key)))
+    .map((line) => {
+      const values = per.map((lines) => lines.find((l) => l.edit?.key === line.edit.key).edit.value);
+      const differs = values.some((v) => Math.abs(v - values[0]) > 1e-9);
+      return differs ? { ...line, note: `${line.note} (These objects currently have different values — shown here is the first one's; changing it sets them all to the same.)` } : line;
+    });
+}
+
 function renderMathPanelUI() {
   const panelEl = document.getElementById("physics-math-panel");
   const spec = state.objects.find((o) => o.id === state.selectedId) || null;
   panelEl.classList.toggle("hidden", !state.mathPanelOpen);
+  if (state.mathPanelOpen && state.selectedIds.size > 1) {
+    const specs = state.objects.filter((o) => state.selectedIds.has(o.id) && !o.locked);
+    renderPhysicsMathPanel(
+      panelEl, null,
+      () => { state.mathPanelOpen = false; renderMathPanelUI(); renderPanelUI(); },
+      (key, value) => { patchAllSelected(specs.map((o) => o.id), { [key]: value }); renderMathPanelUI(); },
+      { lines: sharedMathLines(specs), count: specs.length }
+    );
+    return;
+  }
   if (state.mathPanelOpen) {
     renderPhysicsMathPanel(
       panelEl, spec,

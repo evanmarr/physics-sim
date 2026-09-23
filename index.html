@@ -102,68 +102,71 @@
     <button id="physics-dim-top-btn" class="physics-dim-tab" title="Look straight down — gravity is off and things slide across a surface">Physics Top View</button>
   </div>
   <div id="physics-toolbar">
-    <div id="run-controls">
-      <button id="play-btn" title="Space">Play</button>
-      <span class="hint">space</span>
-      <button id="reset-btn" title="Reset everything back to your blueprint (stays stopped)">Reset</button>
-      <span class="hint">R</span>
-      <button id="grab-tool-btn" title="Turns your pointer into a real object you can bump other things with, while playing (G)">Grab Tool</button>
-      <select id="grab-shape-select" title="What shape the grab tool emulates">
-        <option value="ball">Ball</option>
-        <option value="square">Square</option>
-        <option value="board">Board</option>
-      </select>
-      <span class="hint">G</span>
-      <button id="reset-view-btn" title="Re-center and re-zoom the camera — doesn't touch your world">Reset View</button>
+    <div class="tb-row tb-actions">
+      <div id="run-controls">
+        <button id="play-btn" title="Space">Play</button>
+        <span class="hint">space</span>
+        <button id="reset-btn" title="Reset everything back to your blueprint (stays stopped)">Reset</button>
+        <span class="hint">R</span>
+        <button id="grab-tool-btn" title="Turns your pointer into a real object you can bump other things with, while playing (G)">Grab Tool</button>
+        <select id="grab-shape-select" title="What shape the grab tool emulates">
+          <option value="ball">Ball</option>
+          <option value="square">Square</option>
+          <option value="board">Board</option>
+        </select>
+        <span class="hint">G</span>
+        <button id="reset-view-btn" title="Re-center and re-zoom the camera — doesn't touch your world">Reset View</button>
+      </div>
+      <div id="graph-controls">
+        <button id="graph-panel-btn" title="Live graphs of the selected object's motion">Graphs</button>
+        <button id="physics-model-info-btn" title="What this simulation actually models">How This Works</button>
+      </div>
+      <div id="experience-level-picker" title="Explore: open-ended sandbox. Learn: adds explanations/equations. Advanced: raw parameters (Plus)."></div>
+      <span class="tb-spacer"></span>
+      <div id="light-mode-toggle-wrap">
+        <button id="light-mode-btn" title="Show light rays through glass/lenses">Light Mode</button>
+        <button id="field-mode-btn" title="Show every magnet's field lines">Show Field</button>
+      </div>
+      <div id="units-controls">
+        <button id="units-toggle-btn" title="Switch distance/weight units (metric/imperial)">m/kg</button>
+        <button id="speed-unit-btn" title="Change what unit a moving object's speed readout is shown in">m/s</button>
+      </div>
     </div>
-    <div id="graph-controls">
-      <button id="graph-panel-btn" title="Live graphs of the selected object's motion">Graphs</button>
-      <button id="physics-model-info-btn" title="What this simulation actually models">How This Works</button>
+    <div class="tb-row tb-env">
+      <div id="gravity-controls">
+        <label>Gravity <span id="gravity-val">1.0</span>x</label>
+        <input id="gravity-slider" type="range" min="-2" max="3" step="0.1" value="1" />
+        <button id="gravity-reset-btn" title="Reset gravity to 1.0x">Reset</button>
+      </div>
+      <div id="air-controls" title="Air friction. 1.0x is ordinary air on Earth; 0 is a vacuum.">
+        <label>Air <span id="air-val">1.0</span>x</label>
+        <input id="air-slider" type="range" min="0" max="10" step="0.1" value="1" />
+        <button id="air-reset-btn" title="Reset air friction to ordinary Earth air (1.0x)">Reset</button>
+      </div>
+      <div id="surface-controls" class="hidden" title="Top view: how much the surface drags on sliding objects">
+        <label>Surface friction <span id="surface-val">0.3</span></label>
+        <input id="surface-slider" type="range" min="0" max="1" step="0.05" value="0.3" />
+      </div>
+      <div id="speed-controls">
+        <label>Speed <span id="speed-val">1.0</span>x</label>
+        <input id="speed-slider" type="range" min="0.1" max="3" step="0.1" value="1" />
+        <button id="speed-reset-btn" title="Reset speed to 1.0x">Reset</button>
+      </div>
     </div>
-    <div id="experience-level-picker" title="Explore: open-ended sandbox. Learn: adds explanations/equations. Advanced: raw parameters (Plus)."></div>
-    <div id="gravity-controls">
-      <label>Gravity <span id="gravity-val">1.0</span>x</label>
-      <input id="gravity-slider" type="range" min="-2" max="3" step="0.1" value="1" />
-      <button id="gravity-reset-btn" title="Reset gravity to 1.0x">Reset</button>
-    </div>
-    <div id="air-controls" title="Air friction. 1.0x is ordinary air on Earth; 0 is a vacuum.">
-      <label>Air <span id="air-val">1.0</span>x</label>
-      <input id="air-slider" type="range" min="0" max="10" step="0.1" value="1" />
-      <button id="air-reset-btn" title="Reset air friction to ordinary Earth air (1.0x)">Reset</button>
-    </div>
-    <div id="surface-controls" class="hidden" title="Top view: how much the surface drags on sliding objects">
-      <label>Surface friction <span id="surface-val">0.3</span></label>
-      <input id="surface-slider" type="range" min="0" max="1" step="0.05" value="0.3" />
-    </div>
-    <div id="speed-controls">
-      <label>Speed <span id="speed-val">1.0</span>x</label>
-      <input id="speed-slider" type="range" min="0.1" max="3" step="0.1" value="1" />
-      <button id="speed-reset-btn" title="Reset speed to 1.0x">Reset</button>
-    </div>
-    <div id="light-mode-toggle-wrap">
-      <button id="light-mode-btn" title="Show light rays through glass/lenses">Light Mode</button>
-      <button id="field-mode-btn" title="Show every magnet's field lines">Show Field</button>
-    </div>
-    <div id="units-controls">
-      <button id="units-toggle-btn" title="Switch distance/weight units (metric/imperial)">m/kg</button>
-      <button id="speed-unit-btn" title="Change what unit a moving object's speed readout is shown in">m/s</button>
-    </div>
-    <div id="file-controls">
-      <button id="challenges-btn" class="primary">Physics Challenges</button>
-      <button id="my-worlds-btn">My Worlds</button>
-      <button id="world-share-btn" title="Generate a short code to share this world, or load someone else's">Share Code</button>
-      <button id="undo-btn" title="Undo (Ctrl/Cmd+Z)" disabled>↶</button>
-      <button id="redo-btn" title="Redo (Ctrl/Cmd+Shift+Z)" disabled>↷</button>
-      <button id="clear-btn">Clear</button>
-    </div>
-    <!-- No keyboard on a touchscreen, so mobile mode gets its own explicit
-         Copy/Paste buttons and a Multi-select toggle (in place of holding
-         Shift) — hidden entirely on desktop, where Ctrl/Cmd+C/V and
-         Shift+click already do this. -->
-    <div id="mobile-edit-controls">
-      <button id="mobile-copy-btn" title="Copy the selected object(s)">Copy</button>
-      <button id="mobile-paste-btn" title="Paste">Paste</button>
-      <button id="mobile-multiselect-btn" title="Toggle multi-select: tapping objects adds to the selection instead of replacing it">Multi-select</button>
+    <div class="tb-row tb-files">
+      <div id="file-controls">
+        <button id="challenges-btn" class="primary">Physics Challenges</button>
+        <button id="my-worlds-btn">My Worlds</button>
+        <button id="world-share-btn" title="Generate a short code to share this world, or load someone else's">Share Code</button>
+        <button id="undo-btn" title="Undo (Ctrl/Cmd+Z)" disabled>↶</button>
+        <button id="redo-btn" title="Redo (Ctrl/Cmd+Shift+Z)" disabled>↷</button>
+        <button id="clear-btn">Clear</button>
+      </div>
+      <div id="mobile-edit-controls">
+        <button id="mobile-copy-btn" title="Copy the selected object(s)">Copy</button>
+        <button id="mobile-paste-btn" title="Paste">Paste</button>
+        <button id="mobile-multiselect-btn" title="Toggle multi-select: tapping objects adds to the selection instead of replacing it">Multi-select</button>
+      </div>
     </div>
   </div>
 

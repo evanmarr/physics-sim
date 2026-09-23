@@ -278,13 +278,16 @@ export function renderMultiPanel(container, specs, state, handlers) {
 // `onEdit(key, value)` fires when the user drags one of the editable
 // variables (density/friction/restitution) — it writes an override onto the
 // object's spec, so the equation shown here is exactly what physics.js uses.
-export function renderPhysicsMathPanel(container, spec, onClose, onEdit) {
+export function renderPhysicsMathPanel(container, spec, onClose, onEdit, opts = {}) {
   container.innerHTML = "";
-  const mathLines = spec ? physicsMath(spec) : null;
+  // `opts.lines` is the multi-select case (main.js's sharedMathLines): the
+  // equations every selected object has in common, edited on all of them at
+  // once — there's no single `spec` to derive them from.
+  const mathLines = opts.lines ?? (spec ? physicsMath(spec) : null);
   if (!mathLines || !mathLines.length) {
     const empty = document.createElement("div");
     empty.className = "math-panel-empty";
-    empty.textContent = spec ? "No physics notes for this object." : "Select an object to see the physics behind it.";
+    empty.textContent = opts.lines ? "These objects don't share any equations." : spec ? "No physics notes for this object." : "Select an object to see the physics behind it.";
     container.appendChild(empty);
     return;
   }
@@ -292,7 +295,7 @@ export function renderPhysicsMathPanel(container, spec, onClose, onEdit) {
   const title = document.createElement("div");
   title.className = "math-panel-title";
   const label = document.createElement("span");
-  label.textContent = "Physics";
+  label.textContent = opts.count ? `Physics — shared by ${opts.count} objects` : "Physics";
   const closeBtn = document.createElement("button");
   closeBtn.className = "math-panel-close";
   closeBtn.textContent = "×";

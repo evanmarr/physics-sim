@@ -1,3 +1,4 @@
+import { EXTRA_EMAILS } from "./cyberPhishData.js";
 // Two small, genuinely interactive security simulators — not more reference
 // text, but things you actually do: type a password and watch a real
 // crack-time estimate change, or hunt for the actual red flags in a
@@ -127,7 +128,7 @@ function buildPasswordSimulator() {
 
 // ---------- Phishing email spotter ----------
 
-const EMAILS = [
+const BASE_EMAILS = [
   {
     from: "IT-Support@paypa1-secure.com",
     subject: "Urgent: Your account will be suspended in 24 hours",
@@ -152,6 +153,8 @@ const EMAILS = [
   },
 ];
 
+const EMAILS = [...BASE_EMAILS, ...EXTRA_EMAILS];
+
 function buildPhishingSimulator() {
   const card = div("cyber-sim-card");
   const h = document.createElement("h2");
@@ -175,7 +178,32 @@ function buildPhishingSimulator() {
   newBtn.textContent = "Try another email";
   card.appendChild(newBtn);
 
+  const verdictRow = div("cyber-sim-hint");
+  const phishBtn = document.createElement("button");
+  phishBtn.className = "cyber-sim-btn";
+  phishBtn.textContent = "This is phishing";
+  const legitBtn = document.createElement("button");
+  legitBtn.className = "cyber-sim-btn";
+  legitBtn.textContent = "This looks legitimate";
+  verdictRow.append(phishBtn, legitBtn);
+  card.insertBefore(verdictRow, newBtn);
+  const verdictEl = div("cyber-sim-hint");
+  card.insertBefore(verdictEl, newBtn);
+
   let email, found;
+
+  function answer(sayLegit) {
+    const isLegit = !!email.legit;
+    const right = sayLegit === isLegit;
+    const why = email.clues.map((c) => "- " + c.text + ": " + c.reason).join("\n");
+    verdictEl.style.whiteSpace = "pre-wrap";
+    verdictEl.textContent = (right ? "Correct! " : "Not quite. ") +
+      (isLegit ? "This email is legitimate. Why it checks out:\n" : "This email is phishing. Red flags:\n") + why;
+    email.clues.forEach((c, i) => { found.add(i); });
+    render();
+  }
+  phishBtn.addEventListener("click", () => answer(false));
+  legitBtn.addEventListener("click", () => answer(true));
 
   function mark(text, escapedIndex) {
     return `<span class="phish-clue" data-idx="${escapedIndex}">${text}</span>`;
@@ -184,6 +212,7 @@ function buildPhishingSimulator() {
   function load() {
     email = EMAILS[Math.floor(Math.random() * EMAILS.length)];
     found = new Set();
+    verdictEl.textContent = "";
     render();
   }
 
@@ -191,7 +220,7 @@ function buildPhishingSimulator() {
   // in the From line, not the body, so it's marked up separately here but
   // still counts toward the same found-them-all score as the body clues.
   function render() {
-    scoreEl.textContent = `Found ${found.size} of ${email.clues.length} red flags`;
+    scoreEl.textContent = `Found ${found.size} of ${email.clues.length} ${email.legit ? "details worth checking" : "red flags"}`;
     const domainClue = email.clues[0];
     const fromHtml = email.from.replace(domainClue.text, mark(domainClue.text, 0));
     let idx = 1;
@@ -199,6 +228,7 @@ function buildPhishingSimulator() {
     emailBox.innerHTML = `
       <div class="phish-field"><strong>From:</strong> ${fromHtml}</div>
       <div class="phish-field"><strong>Subject:</strong> ${email.subject}</div>
+      ${email.headers ? `<div class="phish-field"><strong>Headers:</strong> ${email.headers}</div>` : ""}
       <div class="phish-body">${bodyHtml}</div>
     `;
     emailBox.querySelectorAll(".phish-clue").forEach((el) => {
