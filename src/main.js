@@ -60,12 +60,7 @@ const state = {
   playing: false,
   gravity: 1,
   airFriction: 1, // multiplier on every object's air drag; 1.0 = ordinary Earth air
-  view: "side", // "side" (gravity, ground) or "top" (looking straight down: no gravity, surface drag)
-  surfaceFriction: 0.3,
   frictionScale: 1, // global multiplier on every object's friction (Real-World presets like Ice)
-  sideObjects: null,
-  topObjects: null,
-  sideGravity: 1,
   completedChallenges: new Set(),
   activeChallengeId: null,
   mathPanelOpen: true,
@@ -131,30 +126,8 @@ function dropRemovedTypes(objects) {
   return objects.filter((spec) => !REMOVED_TYPES.has(spec.type));
 }
 
-const TOP_KEY = "kinetic-topview-v1";
-function loadTopObjects() {
-  try { const d = JSON.parse(localStorage.getItem(TOP_KEY)); if (d && Array.isArray(d.objects) && d.objects.length) return d.objects; } catch {}
-  return topStarterScene();
-}
-// Top view starts as a table: four fixed walls, nothing to fall onto.
-function topStarterScene() {
-  const w = 1600, h = 1000, t = 40, cy = WORLD.groundY - 500;
-  const wall = (id, x, y, width, height) => ({ id, type: "board", x, y, rotation: 0, width, height, material: "wood", fixed: true });
-  return [
-    wall("top_wall_n", 0, cy - h / 2, w, t), wall("top_wall_s", 0, cy + h / 2, w, t),
-    wall("top_wall_w", -w / 2, cy, t, h), wall("top_wall_e", w / 2, cy, t, h),
-  ];
-}
-// Both views share one editor, so persistence has to know which world the
-// live `state.objects` currently IS — saving the top-view table over the
-// side-view save (or vice versa) would silently destroy the other world.
 function persistWorld() {
-  if (state.view === "top") {
-    try { localStorage.setItem(TOP_KEY, JSON.stringify({ objects: state.objects })); } catch {}
-    saveState({ objects: state.sideObjects || [], completedChallenges: state.completedChallenges });
-  } else {
-    saveState(state);
-  }
+  saveState(state);
 }
 
 function starterScene() {
@@ -721,7 +694,7 @@ function wireTopbar(renderer) {
     if (state.playing) togglePlay(renderer);
     if (!(await confirmPopup("Clear the whole workspace?", { title: "Clear workspace", confirmLabel: "Clear", danger: true }))) return;
     pushUndoNow();
-    state.objects = state.view === "top" ? topStarterScene() : starterScene();
+    state.objects = starterScene();
     state.selectedIds = new Set();
     state.selectedId = null;
     state.activeChallengeId = null;
@@ -781,7 +754,7 @@ function wireTopbar(renderer) {
   initParamSweepUI({
     getSpecs: () => state.objects,
     getSelectedId: () => state.selectedId,
-    getEnv: () => ({ gravity: state.gravity, airFriction: state.airFriction, frictionScale: state.frictionScale, surfaceDrag: state.view === "top" ? state.surfaceFriction : 0 }),
+    getEnv: () => ({ gravity: state.gravity, airFriction: state.airFriction, frictionScale: state.frictionScale }),
     openPlans: () => document.getElementById(getUser() ? "plans-btn" : "account-btn")?.click(),
   });
   registerVariationApplier(applyAssignmentVariation);
@@ -1004,7 +977,6 @@ function togglePlay(renderer) {
     });
     sim.setAirFriction(state.airFriction);
     sim.setFrictionScale(state.frictionScale);
-    sim.setSurfaceDrag(state.view === "top" ? state.surfaceFriction : 0);
     sim.setTimeScale(state.simSpeed);
     sim.start();
     if (state.grabToolActive) sim.enableGrabTool(state.grabShape);
@@ -1975,51 +1947,7 @@ function buildHomeThumbnail(el, section) {
   }
 }
 
-// Side View / Top View: the same editor and engine, looking at the world
-// from two directions. Each keeps its own objects (and its own save), so
-// switching never overwrites the other; Top View just turns gravity off and
-// adds a surface-drag slider, since nothing "falls" when you look straight down.
-function switchPhysicsView(view) {
-  if (state.view === view) return;
-  if (state.playing) togglePlay(window._renderer);
-  persistWorld();
-  if (view === "top") {
-    state.sideObjects = state.objects;
-    state.sideGravity = state.gravity;
-    state.topObjects = state.topObjects || loadTopObjects();
-    state.objects = state.topObjects;
-    state.gravity = 0;
-  } else {
-    state.topObjects = state.objects;
-    state.objects = state.sideObjects || starterScene();
-    state.gravity = state.sideGravity ?? 1;
-  }
-  state.view = view;
-  state.selectedIds = new Set();
-  state.selectedId = null;
-  state.activeChallengeId = null;
-  if (view === "top") state.sideObjects = state.sideObjects || [];
-  syncViewChrome();
-  window._renderer?.centerOn(0, WORLD.groundY - (view === "top" ? 500 : 700), view === "top" ? 0.5 : 0.7);
-  renderAll();
-  renderPanelUI();
-  persistWorld();
-}
-
-function syncViewChrome() {
-  const top = state.view === "top";
-  document.getElementById("physics-dim-2d-btn")?.classList.toggle("active", !top);
-  document.getElementById("physics-dim-top-btn")?.classList.toggle("active", top);
-  document.getElementById("gravity-controls")?.classList.toggle("hidden", top);
-  document.getElementById("surface-controls")?.classList.toggle("hidden", !top);
-  document.getElementById("gravity-slider").value = state.gravity;
-  document.getElementById("gravity-val").textContent = state.gravity.toFixed(1);
-  if (sim) sim.setGravity(state.gravity);
-}
-
 function initPhysicsViewTabs() {
-  document.getElementById("physics-dim-2d-btn").addEventListener("click", () => switchPhysicsView("side"));
-  document.getElementById("physics-dim-top-btn").addEventListener("click", () => switchPhysicsView("top"));
 
   const airSlider = document.getElementById("air-slider");
   const airVal = document.getElementById("air-val");
@@ -2034,13 +1962,6 @@ function initPhysicsViewTabs() {
   airSlider.addEventListener("input", () => setAir(parseFloat(airSlider.value)));
   document.getElementById("air-reset-btn").addEventListener("click", () => setAir(1));
 
-  const surfaceSlider = document.getElementById("surface-slider");
-  const surfaceVal = document.getElementById("surface-val");
-  surfaceSlider.addEventListener("input", () => {
-    state.surfaceFriction = parseFloat(surfaceSlider.value);
-    surfaceVal.textContent = state.surfaceFriction.toFixed(2);
-    sim?.setSurfaceDrag(state.surfaceFriction);
-  });
 }
 
 // ---- Environment: real-world presets + assignment values ----
@@ -2050,25 +1971,16 @@ const fmtEnv = (v) => (Math.abs(v * 10 - Math.round(v * 10)) < 1e-9 ? v.toFixed(
 // the live sim and the preset picker never disagree.
 function setEnvironment(env) {
   if (env.gravity != null) {
-    if (state.view === "top") state.sideGravity = env.gravity; // top view has no gravity; remembered for when you go back
-    else {
-      state.gravity = env.gravity;
-      document.getElementById("gravity-slider").value = env.gravity;
-      document.getElementById("gravity-val").textContent = fmtEnv(env.gravity);
-      sim?.setGravity(env.gravity);
-    }
+    state.gravity = env.gravity;
+    document.getElementById("gravity-slider").value = env.gravity;
+    document.getElementById("gravity-val").textContent = fmtEnv(env.gravity);
+    sim?.setGravity(env.gravity);
   }
   if (env.airFriction != null) {
     state.airFriction = env.airFriction;
     document.getElementById("air-slider").value = env.airFriction;
     document.getElementById("air-val").textContent = fmtEnv(env.airFriction);
     sim?.setAirFriction(env.airFriction);
-  }
-  if (env.surfaceFriction != null) {
-    state.surfaceFriction = env.surfaceFriction;
-    document.getElementById("surface-slider").value = env.surfaceFriction;
-    document.getElementById("surface-val").textContent = env.surfaceFriction.toFixed(2);
-    if (state.view === "top") sim?.setSurfaceDrag(env.surfaceFriction);
   }
   if (env.frictionScale != null) {
     state.frictionScale = env.frictionScale;
@@ -2081,7 +1993,7 @@ function setEnvironment(env) {
 function syncPresetPicker() {
   const select = document.getElementById("preset-select");
   if (!select) return;
-  const match = matchPreset({ gravity: state.view === "top" ? state.sideGravity : state.gravity, airFriction: state.airFriction, frictionScale: state.frictionScale });
+  const match = matchPreset({ gravity: state.gravity, airFriction: state.airFriction, frictionScale: state.frictionScale });
   select.value = match ? match.id : "custom";
 }
 
@@ -2109,7 +2021,6 @@ function initPresetPicker() {
 const SCALABLE_POWER_TYPES = new Set(["cannon", "bomb", "fan", "springPad", "magnet"]);
 function applyAssignmentVariation(values, title) {
   window._setMode?.("physics");
-  if (state.view === "top") switchPhysicsView("side");
   if (state.playing) togglePlay(window._renderer);
   pushUndoNow();
   const env = {};

@@ -1,6 +1,5 @@
 // Real-world environment presets for the Physics sandbox. Each preset sets
-// the three environment knobs the sandbox already has (gravity, air, surface
-// friction) plus a global friction multiplier, from published constants.
+// the environment knobs the sandbox already has (gravity, air) plus a global friction multiplier, from published constants.
 //
 // How the real numbers map onto the sim: the sandbox's 1.0x gravity IS
 // "Earth". Every other world is scaled by the true ratio g_world / g_earth
@@ -13,7 +12,7 @@ export const EARTH_AIR_DENSITY = 1.225; // kg/m³, ISA sea level, 15 °C
 
 // The toolbar's own slider limits (index.html). Values beyond them are
 // clamped, and the preset says so.
-export const LIMITS = { gravity: [-2, 3], air: [0, 10], surface: [0, 1] };
+export const LIMITS = { gravity: [-2, 3], air: [0, 10] };
 
 const clamp = (v, [lo, hi]) => Math.min(hi, Math.max(lo, v));
 const round = (v, d = 3) => Number(v.toFixed(d));
@@ -27,7 +26,6 @@ function make(def) {
     settings: {
       gravity: round(clamp(gravityRatio, LIMITS.gravity), 3),
       airFriction: round(clamp(airRatio, LIMITS.air), 3),
-      surfaceFriction: def.surfaceFriction ?? 0.3,
       frictionScale: def.frictionScale ?? 1,
     },
     clamped: {
@@ -93,11 +91,10 @@ export const PRESETS = [
   }),
   make({
     id: "ice", label: "Low friction (ice)", g: 9.80665, airDensity: 1.225,
-    surfaceFriction: 0.03, frictionScale: 0.1,
+    frictionScale: 0.1,
     facts: ["Kinetic friction of ice on ice / steel on ice ≈ 0.03", "Earth gravity and air"],
     assumptions: [
-      "Every object's friction is scaled by 0.1 (an approximation of ice-like surfaces, not a per-material measurement).",
-      "Top View surface friction is set to the real ≈0.03.",
+      "Every object's friction is scaled by 0.1, an approximation of ice-like surfaces (real ice-on-ice ≈ 0.03), not a per-material measurement.",
     ],
     source: "Engineering Toolbox friction coefficients; Persson (2000)",
   }),

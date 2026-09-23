@@ -42,7 +42,6 @@ const PLAN_COPY = {
     name: "Kinetic Plus",
     features: [
       "Everything in Free, plus:",
-      "Physics Top View",
       "Custom Physics Items (build your own shapes)",
       "Unlimited saved worlds & Notebook history",
       "Advanced graphs, export, full Compare Runs",

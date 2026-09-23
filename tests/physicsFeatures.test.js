@@ -20,10 +20,9 @@ test("presets: air ratios and vacuum", () => {
 });
 test("presets: every setting lies inside the toolbar's slider limits", () => {
   for (const p of PRESETS) {
-    const { gravity, airFriction, surfaceFriction } = p.settings;
+    const { gravity, airFriction } = p.settings;
     assert.ok(gravity >= LIMITS.gravity[0] && gravity <= LIMITS.gravity[1], p.id + " gravity");
     assert.ok(airFriction >= LIMITS.air[0] && airFriction <= LIMITS.air[1], p.id + " air");
-    assert.ok(surfaceFriction >= 0 && surfaceFriction <= 1, p.id + " surface");
   }
 });
 test("presets: underwater is flagged as clamped and lists the buoyancy caveat", () => {

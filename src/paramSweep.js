@@ -14,7 +14,7 @@ const SAMPLE_EVERY = 2;
 // specs: the world's blueprint. Returns one row per value:
 // { value, metrics, trace }. The same clone/apply/step path runs every
 // value, so runs differ only by the variable being swept.
-export async function runSweep({ specs, gravity, airFriction, frictionScale = 1, surfaceDrag = 0, variable, varyId, trackId, values, durationS, onProgress, shouldCancel }) {
+export async function runSweep({ specs, gravity, airFriction, frictionScale = 1, variable, varyId, trackId, values, durationS, onProgress, shouldCancel }) {
   const v = getVariable(variable);
   const rows = [];
   for (let i = 0; i < values.length; i++) {
@@ -28,7 +28,7 @@ export async function runSweep({ specs, gravity, airFriction, frictionScale = 1,
       const target = clones.find((s) => s.id === varyId);
       if (target) target[v.key] = value;
     }
-    const trace = simulateOne(clones, g, air, frictionScale, surfaceDrag, trackId, durationS);
+    const trace = simulateOne(clones, g, air, frictionScale, trackId, durationS);
     rows.push({ value, metrics: computeMetrics(trace), trace });
     onProgress?.(i + 1, values.length);
     // Yield to the browser between runs so the progress bar can paint
@@ -37,11 +37,10 @@ export async function runSweep({ specs, gravity, airFriction, frictionScale = 1,
   return rows;
 }
 
-function simulateOne(specs, gravity, airFriction, frictionScale, surfaceDrag, trackId, durationS) {
+function simulateOne(specs, gravity, airFriction, frictionScale, trackId, durationS) {
   const sim = new PhysicsSim(specs, gravity, {});
   sim.setAirFriction(airFriction);
   sim.setFrictionScale(frictionScale);
-  sim.setSurfaceDrag(surfaceDrag);
   const trace = [];
   const steps = Math.round((durationS * 1000) / STEP_MS);
   try {
