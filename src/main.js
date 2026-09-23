@@ -771,6 +771,7 @@ function wireTopbar(renderer) {
   initClassroomUI();
   initPlansUI();
   initPhysicsViewTabs();
+  wireAppsModal();
   initPresetPicker();
   initMeasureTools({
     getRenderer: () => window._renderer,
@@ -893,6 +894,14 @@ function wireFeedback() {
     close();
     showToast("Thanks — feedback sent.");
   });
+}
+
+function wireAppsModal() {
+  const modal = document.getElementById("apps-modal");
+  const open = () => modal.classList.remove("hidden");
+  document.getElementById("apps-menu-btn").addEventListener("click", open);
+  document.getElementById("apps-footer-btn").addEventListener("click", open);
+  document.getElementById("apps-close").addEventListener("click", () => modal.classList.add("hidden"));
 }
 
 function wireMenu() {

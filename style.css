@@ -2056,3 +2056,11 @@ html, body, button, a, input, select, textarea, label, [role="button"], .mode-ta
 .assignment-variation-form { margin-top: 8px; font-size: 12.5px; }
 .variation-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 3px 0; }
 .variation-row > label { min-width: 150px; }
+
+/* ---- Other apps ---- */
+#site-footer { position: fixed; left: 50%; bottom: 6px; transform: translateX(-50%); z-index: 40; }
+#apps-footer-btn { font-size: 12px; padding: 4px 14px; border-radius: 999px; background: var(--panel); border: 1px solid var(--border); box-shadow: 0 2px 8px rgba(0,0,0,.15); opacity: .92; }
+.app-card { display: flex; flex-direction: column; gap: 4px; padding: 12px 14px; margin: 10px 0; border: 1px solid var(--border); border-radius: 10px; background: var(--panel-alt); color: var(--text); text-decoration: none; font-size: 13px; }
+.app-card:hover { border-color: var(--accent); }
+.app-card span { color: var(--text-dim); }
+.app-card .app-here { font-size: 10px; margin-left: 6px; padding: 1px 6px; border-radius: 999px; border: 1px solid var(--border); font-weight: 600; }

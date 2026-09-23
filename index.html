@@ -78,6 +78,7 @@
       <button id="quiz-btn">Quiz</button>
       <button id="tutorial-btn">Tutorial</button>
       <button id="about-btn">About</button>
+      <button id="apps-menu-btn">Check out our other apps!</button>
       <button id="classroom-btn">Classroom</button>
       <button id="notebook-btn">Notebook</button>
       <button id="plans-btn">Plans</button>
@@ -251,6 +252,20 @@
   <div class="modal-box" id="saves-modal-box"></div>
 </div>
 
+<div id="apps-modal" class="modal hidden">
+  <div class="modal-box classroom-box" id="apps-modal-box">
+    <h2>Our apps</h2>
+    <a class="app-card" href="/" target="_blank" rel="noopener" id="apps-kinetic">
+      <strong>Kinetic <span class="app-here">you're here</span></strong>
+      <span>Physics, chemistry, astronomy, history and more — an interactive science sandbox.</span>
+    </a>
+    <a class="app-card" href="https://kinetic-game.vercel.app" target="_blank" rel="noopener">
+      <strong>Emberhollow</strong>
+      <span>A retro text adventure. kinetic-game.vercel.app</span>
+    </a>
+    <button id="apps-close">Close</button>
+  </div>
+</div>
 <div id="sweep-modal" class="modal hidden">
   <div class="modal-box classroom-box sweep-box" id="sweep-modal-box"></div>
 </div>
@@ -347,6 +362,7 @@
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
+<footer id="site-footer"><button id="apps-footer-btn">Check out our other apps!</button></footer>
 <script type="module" src="src/main.js"></script>
 </body>
 </html>
