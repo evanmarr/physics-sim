@@ -196,3 +196,31 @@ test("variation: values stay inside each variable's legal range even at the edge
   assert.ok(Math.abs(lo - 0.9) < 1e-9 && Math.abs(hi - 1.1) < 1e-9);
   assert.ok(describeValues({ gravity: 1.05 })[0].includes("Gravity"));
 });
+
+// ---------- food web ----------
+import { ORGANISMS } from "../src/zoologyData.js";
+import { feedingLinks, longestChain, mostConnected, removalEffect, predatorsOf, preyOf } from "../src/foodWebMath.js";
+test("food web: links only appear when both ends are picked", () => {
+  const links = feedingLinks(ORGANISMS, ["fox", "rabbit", "grass"]).filter((l) => l.kind === "food");
+  assert.deepEqual(links.map((l) => `${l.source}>${l.target}`).sort(), ["fox>rabbit", "rabbit>grass"]);
+  assert.equal(feedingLinks(ORGANISMS, ["fox"]).length, 0);
+});
+test("food web: chain length and most connected", () => {
+  assert.equal(longestChain(ORGANISMS, ["grass", "rabbit", "fox", "wolf"]), 4);
+  assert.equal(longestChain(ORGANISMS, ["fox"]), 1);
+  assert.equal(mostConnected(ORGANISMS, ["grass", "rabbit", "fox"]).id, "rabbit");
+});
+test("food web: removing prey starves specialists and cascades", () => {
+  const e = removalEffect(ORGANISMS, ["grass", "grasshopper", "frog", "snake"], "grass");
+  assert.deepEqual(e.starved.sort(), ["frog", "grasshopper", "snake"]);
+  const e2 = removalEffect(ORGANISMS, ["grass", "mouse", "rabbit", "fox"], "rabbit");
+  assert.deepEqual(e2.stressed.map((s) => s.id), ["fox"]);
+  assert.deepEqual(e2.starved, []);
+});
+test("food web: losing all predators lets prey boom; data is consistent", () => {
+  assert.deepEqual(removalEffect(ORGANISMS, ["grass", "rabbit", "fox"], "fox").boom, ["rabbit"]);
+  const ids = new Set(ORGANISMS.map((o) => o.id));
+  for (const o of ORGANISMS) { assert.ok(o.fact && o.note, o.id); for (const e of o.eats) assert.ok(ids.has(e), `${o.id} eats unknown ${e}`); }
+  assert.ok(predatorsOf(ORGANISMS, "mouse").includes("owl"));
+  assert.ok(!preyOf(ORGANISMS, "grass").includes("sun"));
+});
