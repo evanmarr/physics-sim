@@ -359,6 +359,7 @@ function setRoute(g, a, pts, add) {
 }
 export function orderMove(g, armies, pts, add = false) {
   if (!armies.length || !pts.length) return;
+  for (const a of armies) a.mergeTarget = null; // a fresh order cancels any pending merge
   const dest = pts[pts.length - 1];
   const cx = armies.reduce((s, a) => s + a.x, 0) / armies.length, cy = armies.reduce((s, a) => s + a.y, 0) / armies.length;
   for (const a of armies) {
@@ -382,7 +383,7 @@ export function setStance(g, armies, stance) {
   }
 }
 export function cancelOrders(g, armies) {
-  for (const a of armies) { a.route = []; a.path = []; a.legActive = false; a.chasing = false; a.aiGoal = null; if (a.stance === "retreat" && !a.routed) a.stance = "hold"; }
+  for (const a of armies) { a.mergeTarget = null; a.route = []; a.path = []; a.legActive = false; a.chasing = false; a.aiGoal = null; if (a.stance === "retreat" && !a.routed) a.stance = "hold"; }
 }
 
 export function splitArmy(g, a, frac = 0.5) {
@@ -1100,6 +1101,26 @@ export class WarMode {
     }
     return best;
   }
+  _pickOther(p, ex) {
+    let best = null, bd = 1e9;
+    for (const a of this.game.armies) {
+      if (a.team !== 0 || a === ex) continue;
+      const d = dist(a.x, a.y, p.x, p.y);
+      if (d < a.dr + 8 && d < bd) { bd = d; best = a; }
+    }
+    return best;
+  }
+  // Dragging one of your armies onto another merges them: at once if they
+  // already touch, otherwise the dragged army marches over and merges on arrival.
+  _mergeInto(a, b) {
+    const g = this.game;
+    if (!b || a === b || a.team !== b.team) return false;
+    if (dist(a.x, a.y, b.x, b.y) < (armyRadius(a.n) + armyRadius(b.n)) * 0.9 && mergeArmies(g, b, a)) { this.sel.clear(); this.sel.add(b.id); return true; }
+    if (g.phase !== "battle") return false;
+    orderMove(g, [a], [{ x: b.x, y: b.y }], false);
+    a.mergeTarget = b; a.mergeRetry = 0;
+    return true;
+  }
   _pdown(e) {
     if (e.button === 2) return;
     const g = this.game, p = this._world(e);
@@ -1141,6 +1162,7 @@ export class WarMode {
       t.sx = p.x; t.sy = p.y;
     } else if (t.kind === "route") {
       if (dist(p.x, p.y, t.sx, t.sy) > 14) { t.moved = true; clearTimeout(this.lp); }
+      t.mergeHover = t.moved ? this._pickOther(p, t.a) : null;
       if (t.moved && dist(p.x, p.y, t.last.x, t.last.y) > 45) { t.pts.push({ x: p.x, y: p.y }); t.last = { x: p.x, y: p.y }; }
       t.cur = p;
     } else if (t.kind === "box") { t.x = p.x; t.y = p.y; }
@@ -1149,8 +1171,15 @@ export class WarMode {
     clearTimeout(this.lp);
     const t = this.ptr; this.ptr = null; if (!t) return;
     const g = this.game, p = this._world(e);
+    if (t.kind === "drag") {
+      const o = this._pickOther({ x: t.a.x, y: t.a.y }, t.a);
+      if (o && dist(o.x, o.y, t.a.x, t.a.y) < (armyRadius(o.n) + armyRadius(t.a.n)) * 0.9 && mergeArmies(g, o, t.a)) { this.sel.clear(); this.sel.add(o.id); }
+      return;
+    }
     if (t.kind === "route") {
       if (t.long) return;
+      const target = t.moved ? this._pickOther(p, t.a) : null;
+      if (target && this._mergeInto(t.a, target)) return;
       if (t.moved) {
         const pts = t.pts.slice(); if (!pts.length || dist(pts[pts.length - 1].x, pts[pts.length - 1].y, p.x, p.y) > 12) pts.push({ x: p.x, y: p.y });
         orderMove(g, this._selArmies(), pts, t.shift || e.shiftKey);
@@ -1183,6 +1212,17 @@ export class WarMode {
       let n = 0;
       while (this.acc >= SIM_DT && n < 16) { stepGame(g, SIM_DT); this.acc -= SIM_DT; n++; if (g.phase !== "battle") break; }
       if (n >= 16) this.acc = 0;
+    }
+    if (g.phase === "battle") for (const a of g.armies) {
+      const b = a.mergeTarget; if (!b) continue;
+      if (!g.armies.includes(b) || a.team !== b.team) { a.mergeTarget = null; continue; }
+      if (dist(a.x, a.y, b.x, b.y) < (armyRadius(a.n) + armyRadius(b.n)) * 0.9) {
+        a.mergeTarget = null;
+        if (mergeArmies(g, b, a)) { if (this.sel.has(a.id)) { this.sel.delete(a.id); this.sel.add(b.id); } }
+        break;
+      }
+      a.mergeRetry = (a.mergeRetry || 0) + dt;
+      if (a.mergeRetry > 0.6 && !a.engaged) { a.mergeRetry = 0; orderMove(g, [a], [{ x: b.x, y: b.y }], false); a.mergeTarget = b; }
     }
     for (const id of [...this.sel]) if (!g.armies.some((a) => a.id === id)) this.sel.delete(id);
     if (g.phase === "over" && !this.banner.classList.contains("show")) this._showBanner();
@@ -1342,6 +1382,9 @@ export class WarMode {
       c.strokeStyle = "rgba(255,255,255,0.95)"; c.beginPath(); c.moveTo(pts[0].x, pts[0].y); for (let i = 1; i < pts.length; i++) c.lineTo(pts[i].x, pts[i].y); c.stroke();
       const e = pts[pts.length - 1], p = pts[pts.length - 2], ang = Math.atan2(e.y - p.y, e.x - p.x);
       c.setLineDash([]); c.fillStyle = "#fff"; c.beginPath(); c.moveTo(e.x + Math.cos(ang) * 12, e.y + Math.sin(ang) * 12); c.lineTo(e.x + Math.cos(ang + 2.5) * 11, e.y + Math.sin(ang + 2.5) * 11); c.lineTo(e.x + Math.cos(ang - 2.5) * 11, e.y + Math.sin(ang - 2.5) * 11); c.fill(); c.setLineDash([2, 9]);
+    }
+    if (this.ptr && this.ptr.kind === "route" && this.ptr.mergeHover) {
+      const h = this.ptr.mergeHover; c.setLineDash([]); c.lineWidth = 4; c.strokeStyle = "#7CFC9A"; c.beginPath(); c.arc(h.x, h.y, h.dr + 10, 0, 6.283); c.stroke(); c.setLineDash([2, 9]);
     }
     // route being drawn
     if (this.ptr && this.ptr.kind === "route" && this.ptr.moved) {
