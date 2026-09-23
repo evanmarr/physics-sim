@@ -119,6 +119,8 @@
       </div>
       <div id="graph-controls">
         <button id="graph-panel-btn" title="Live graphs of the selected object's motion">Graphs</button>
+        <button id="measure-btn" title="Ruler, protractor, stopwatch, velocity and force arrows, trajectory trace">Measure</button>
+        <button id="sweep-btn" title="Run your world across a range of values for one variable and compare the results">Sweep <span class="plus-badge">PLUS</span></button>
         <button id="physics-model-info-btn" title="What this simulation actually models">How This Works</button>
       </div>
       <div id="experience-level-picker" title="Explore: open-ended sandbox. Learn: adds explanations/equations. Advanced: raw parameters (Plus)."></div>
@@ -133,6 +135,11 @@
       </div>
     </div>
     <div class="tb-row tb-env">
+      <div id="preset-controls" title="Real-world environment: sets gravity, air and friction from published values">
+        <label for="preset-select">World</label>
+        <select id="preset-select"></select>
+        <button id="preset-info-btn" title="Show the constants, sources and assumptions behind this preset">ⓘ</button>
+      </div>
       <div id="gravity-controls">
         <label>Gravity <span id="gravity-val">1.0</span>x</label>
         <input id="gravity-slider" type="range" min="-2" max="3" step="0.1" value="1" />
@@ -153,6 +160,7 @@
         <button id="speed-reset-btn" title="Reset speed to 1.0x">Reset</button>
       </div>
     </div>
+    <div class="tb-row tb-measure hidden" id="measure-row"></div>
     <div class="tb-row tb-files">
       <div id="file-controls">
         <button id="challenges-btn" class="primary">Physics Challenges</button>
@@ -243,6 +251,9 @@
   <div class="modal-box" id="saves-modal-box"></div>
 </div>
 
+<div id="sweep-modal" class="modal hidden">
+  <div class="modal-box classroom-box sweep-box" id="sweep-modal-box"></div>
+</div>
 <div id="classroom-modal" class="modal hidden">
   <div class="modal-box classroom-box" id="classroom-modal-box"></div>
 </div>

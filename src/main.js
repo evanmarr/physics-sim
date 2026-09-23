@@ -1,7 +1,12 @@
 import { Renderer, openSpeedUnitMenu, currentSpeedUnitLabel } from "./render.js";
 import { renderPalette } from "./palette.js";
 import { renderPanel, renderPhysicsMathPanel, renderMultiPanel } from "./panel.js";
-import { physicsMath } from "./physicsEdu.js";
+import { physicsMath, effectiveDensity } from "./physicsEdu.js";
+import { PRESETS, getPreset, matchPreset, presetInfo } from "./physicsPresets.js";
+import { initMeasureTools, measureOnFrame, measureOnReset, measureRefresh } from "./measureTools.js";
+import { simMass } from "./measureMath.js";
+import { initParamSweepUI } from "./paramSweep.js";
+import { registerVariationApplier } from "./classroom.js";
 import { CHALLENGES, findChallenge, ChallengeTracker } from "./challenges.js";
 import { CHEMISTRY_CHALLENGES } from "./chemistryChallenges.js";
 import { HISTORY_CHALLENGES } from "./historyChallenges.js";
@@ -57,6 +62,7 @@ const state = {
   airFriction: 1, // multiplier on every object's air drag; 1.0 = ordinary Earth air
   view: "side", // "side" (gravity, ground) or "top" (looking straight down: no gravity, surface drag)
   surfaceFriction: 0.3,
+  frictionScale: 1, // global multiplier on every object's friction (Real-World presets like Ice)
   sideObjects: null,
   topObjects: null,
   sideGravity: 1,
@@ -379,6 +385,7 @@ function updateUndoButton() {
 // know how to show.
 function syncSelectedId() {
   state.selectedId = state.selectedIds.size === 1 ? [...state.selectedIds][0] : null;
+  measureRefresh();
 }
 
 let saveTimer = null;
@@ -533,6 +540,7 @@ function updateTrajectoryPreview() {
 function simulateCannonTrajectory(spec, gravity, allSpecs) {
   const sim = new PhysicsSim(allSpecs.map((s) => ({ ...s })), gravity, {});
   sim.setAirFriction(state.airFriction);
+  sim.setFrictionScale(state.frictionScale);
   // The preview can't know in advance which ball (radius/material) will
   // actually be caught and fired — a default 26-radius rubber ball, same as
   // the palette's own default Ball, is a reasonable stand-in. _doCannonFire
@@ -681,6 +689,7 @@ function wireTopbar(renderer) {
     gravityVal.textContent = state.gravity.toFixed(1);
     if (sim) sim.setGravity(state.gravity);
     updateTrajectoryPreview();
+    syncPresetPicker();
   });
 
   const speedSlider = document.getElementById("speed-slider");
@@ -705,6 +714,7 @@ function wireTopbar(renderer) {
     gravityVal.textContent = "1.0";
     if (sim) sim.setGravity(state.gravity);
     updateTrajectoryPreview();
+    syncPresetPicker();
   });
 
   document.getElementById("clear-btn").addEventListener("click", async () => {
@@ -761,6 +771,19 @@ function wireTopbar(renderer) {
   initClassroomUI();
   initPlansUI();
   initPhysicsViewTabs();
+  initPresetPicker();
+  initMeasureTools({
+    getRenderer: () => window._renderer,
+    getSelectedId: () => state.selectedId,
+    getMass: (id) => { const sp = state.objects.find((o) => o.id === id); return sp ? massEstimate(sp) * 1e-3 : null; },
+  });
+  initParamSweepUI({
+    getSpecs: () => state.objects,
+    getSelectedId: () => state.selectedId,
+    getEnv: () => ({ gravity: state.gravity, airFriction: state.airFriction, frictionScale: state.frictionScale, surfaceDrag: state.view === "top" ? state.surfaceFriction : 0 }),
+    openPlans: () => document.getElementById(getUser() ? "plans-btn" : "account-btn")?.click(),
+  });
+  registerVariationApplier(applyAssignmentVariation);
   initCustomItemsUI(placeCustomPolygon);
   initPhysicsGraphPanel(document.getElementById("physics-graph-panel"));
   initNotebookUI(() => (state.mode === "physics" ? { objects: state.objects, gravity: state.gravity } : null));
@@ -962,6 +985,7 @@ function togglePlay(renderer) {
           if (item) pushGraphSample(sim.simTime, item, spec ? massEstimate(spec) : null);
         }
         checkChallengeFrame(items);
+        measureOnFrame(items, sim.simTime);
         if (state.lightMode) updateLightRays(items);
         if (state.showMagneticField) updateMagneticField(items);
         window._renderer.renderParticles(sim.collectParticleItems());
@@ -970,6 +994,7 @@ function togglePlay(renderer) {
       onEvent: (event) => handleSimEvent(event),
     });
     sim.setAirFriction(state.airFriction);
+    sim.setFrictionScale(state.frictionScale);
     sim.setSurfaceDrag(state.view === "top" ? state.surfaceFriction : 0);
     sim.setTimeScale(state.simSpeed);
     sim.start();
@@ -990,6 +1015,7 @@ function resetPhysics(renderer) {
   sim = null;
   state.playing = false;
   resetGraphPanel();
+  measureOnReset();
   const playBtn = document.getElementById("play-btn");
   playBtn.textContent = "Play";
   playBtn.classList.remove("playing");
@@ -1070,7 +1096,7 @@ const PHYSICS_MODEL_INFO = {
 // does weigh more here), but not a calibrated real-world kilogram figure,
 // which is why that series is labeled "relative units," not Joules.
 function massEstimate(spec) {
-  const density = materialOf(spec.material).density;
+  const density = effectiveDensity(spec, materialOf(spec.material));
   const area = spec.radius ? Math.PI * spec.radius * spec.radius : (spec.width || 40) * (spec.height || 40);
   return density * area;
 }
@@ -1994,6 +2020,7 @@ function initPhysicsViewTabs() {
     airVal.textContent = v.toFixed(1);
     sim?.setAirFriction(v);
     updateTrajectoryPreview();
+    syncPresetPicker();
   };
   airSlider.addEventListener("input", () => setAir(parseFloat(airSlider.value)));
   document.getElementById("air-reset-btn").addEventListener("click", () => setAir(1));
@@ -2005,6 +2032,97 @@ function initPhysicsViewTabs() {
     surfaceVal.textContent = state.surfaceFriction.toFixed(2);
     sim?.setSurfaceDrag(state.surfaceFriction);
   });
+}
+
+// ---- Environment: real-world presets + assignment values ----
+const fmtEnv = (v) => (Math.abs(v * 10 - Math.round(v * 10)) < 1e-9 ? v.toFixed(1) : v.toFixed(2));
+
+// One place that changes gravity / air / surface / friction, so the sliders,
+// the live sim and the preset picker never disagree.
+function setEnvironment(env) {
+  if (env.gravity != null) {
+    if (state.view === "top") state.sideGravity = env.gravity; // top view has no gravity; remembered for when you go back
+    else {
+      state.gravity = env.gravity;
+      document.getElementById("gravity-slider").value = env.gravity;
+      document.getElementById("gravity-val").textContent = fmtEnv(env.gravity);
+      sim?.setGravity(env.gravity);
+    }
+  }
+  if (env.airFriction != null) {
+    state.airFriction = env.airFriction;
+    document.getElementById("air-slider").value = env.airFriction;
+    document.getElementById("air-val").textContent = fmtEnv(env.airFriction);
+    sim?.setAirFriction(env.airFriction);
+  }
+  if (env.surfaceFriction != null) {
+    state.surfaceFriction = env.surfaceFriction;
+    document.getElementById("surface-slider").value = env.surfaceFriction;
+    document.getElementById("surface-val").textContent = env.surfaceFriction.toFixed(2);
+    if (state.view === "top") sim?.setSurfaceDrag(env.surfaceFriction);
+  }
+  if (env.frictionScale != null) {
+    state.frictionScale = env.frictionScale;
+    sim?.setFrictionScale(env.frictionScale);
+  }
+  updateTrajectoryPreview();
+  syncPresetPicker();
+}
+
+function syncPresetPicker() {
+  const select = document.getElementById("preset-select");
+  if (!select) return;
+  const match = matchPreset({ gravity: state.view === "top" ? state.sideGravity : state.gravity, airFriction: state.airFriction, frictionScale: state.frictionScale });
+  select.value = match ? match.id : "custom";
+}
+
+function initPresetPicker() {
+  const select = document.getElementById("preset-select");
+  if (!select) return;
+  select.innerHTML = `<option value="custom" disabled>Custom</option>` + PRESETS.map((p) => `<option value="${p.id}">${p.label}</option>`).join("");
+  select.addEventListener("change", () => {
+    const preset = getPreset(select.value);
+    if (!preset) return;
+    markUndo();
+    setEnvironment(preset.settings);
+    showToast(`${preset.label}: ${preset.facts[0]}`);
+  });
+  document.getElementById("preset-info-btn").addEventListener("click", () => {
+    const preset = getPreset(select.value) || getPreset("earth");
+    openModelInfo(presetInfo(preset));
+  });
+  syncPresetPicker();
+}
+
+// A teacher's randomized assignment: loads this student's own numbers into
+// the sandbox. Idempotent — mass/power scale from the object's ORIGINAL value
+// (remembered on first apply), so applying twice never compounds.
+const SCALABLE_POWER_TYPES = new Set(["cannon", "bomb", "fan", "springPad", "magnet"]);
+function applyAssignmentVariation(values, title) {
+  window._setMode?.("physics");
+  if (state.view === "top") switchPhysicsView("side");
+  if (state.playing) togglePlay(window._renderer);
+  pushUndoNow();
+  const env = {};
+  if (values.gravity != null) env.gravity = values.gravity;
+  if (values.airFriction != null) env.airFriction = values.airFriction;
+  if (values.frictionScale != null) env.frictionScale = values.frictionScale;
+  setEnvironment(env);
+  for (const spec of state.objects) {
+    if (spec.fixed || spec.type === "text" || spec.type === "rope" || spec.type === "wire") continue;
+    if (values.massScale != null) {
+      spec.varBaseDensity = spec.varBaseDensity ?? effectiveDensity(spec, materialOf(spec.material));
+      spec.densityOverride = Number((spec.varBaseDensity * values.massScale).toFixed(3));
+    }
+    if (values.launchPower != null && SCALABLE_POWER_TYPES.has(spec.type) && spec.power != null) {
+      spec.varBasePower = spec.varBasePower ?? spec.power;
+      spec.power = Math.round(spec.varBasePower * values.launchPower * 10) / 10;
+    }
+  }
+  renderAll();
+  renderPanelUI();
+  scheduleSave();
+  showToast(`Applied your values${title ? ` for "${title}"` : ""}`);
 }
 
 function wireModeTabs() {

@@ -25,6 +25,7 @@ import { unsubscribeToken } from "./unsubscribe.js";
 import { sendEmail } from "./newsletter/mailer.js";
 import { wrapEmailHtml } from "./emailTemplate.js";
 import * as db from "./db.js";
+import { sanitizeVariation } from "../src/assignmentVariation.js";
 import { resolveEntitlements, publicEntitlements, PLAN_SOURCES } from "./entitlements.js";
 import { AI_MONTHLY_COST_CAP_USD, currentPeriodKey } from "./aiConfig.js";
 import { PLAN_PRICING, PAYMENT_PROCESSOR, annualSavingsPct } from "./checkoutConfig.js";
@@ -386,7 +387,7 @@ async function deleteClassroom(email, code) {
 
 const MAX_INSTRUCTIONS_LEN = 2000;
 
-async function createAssignment(email, { classroomCode, title, instructions, dueAt }) {
+async function createAssignment(email, { classroomCode, title, instructions, dueAt, variation }) {
   const classroom = await db.getClassroom(String(classroomCode || "").toUpperCase());
   if (!classroom) return { error: "That class code doesn't match any classroom." };
   if (classroom.teacher_email !== email) return { error: "You're not the teacher of that classroom." };
@@ -395,8 +396,9 @@ async function createAssignment(email, { classroomCode, title, instructions, due
   const dueAtNum = dueAt ? Number(dueAt) : null;
   const id = crypto.randomUUID();
   const createdAt = Date.now();
-  await db.insertAssignment(id, classroom.code, email, clampedTitle, clampedInstructions, dueAtNum, createdAt);
-  return { assignment: { id, classroomCode: classroom.code, title: clampedTitle, instructions: clampedInstructions, dueAt: dueAtNum, createdAt, completedBy: [] } };
+  const cleanVariation = sanitizeVariation(variation);
+  await db.insertAssignment(id, classroom.code, email, clampedTitle, clampedInstructions, dueAtNum, createdAt, cleanVariation);
+  return { assignment: { id, classroomCode: classroom.code, title: clampedTitle, instructions: clampedInstructions, dueAt: dueAtNum, createdAt, completedBy: [], variation: cleanVariation } };
 }
 
 async function deleteAssignment(email, id) {
@@ -430,7 +432,7 @@ async function assignmentsFor(email) {
     const assignments = await db.assignmentsForClassroom(c.code);
     joinedOut.push({
       classroomCode: c.code, classroomName: c.name,
-      assignments: assignments.map((a) => ({ id: a.id, title: a.title, instructions: a.instructions, dueAt: a.dueAt, createdAt: a.createdAt, completed: a.completedBy.includes(email) })),
+      assignments: assignments.map((a) => ({ id: a.id, title: a.title, instructions: a.instructions, dueAt: a.dueAt, createdAt: a.createdAt, completed: a.completedBy.includes(email), variation: a.variation || null })),
     });
   }
   return { teaching: teachingOut, joined: joinedOut };

@@ -12,6 +12,12 @@
 // Dashboard's classroom sharing.
 import { getUser, fetchClassrooms, createClassroom, joinClassroom, leaveClassroom, deleteClassroom, fetchAssignments, createAssignment, deleteAssignment, setAssignmentComplete, escapeHtml } from "./auth.js";
 import { confirmPopup, alertPopup } from "./popup.js";
+import { VARIATION_VARS, getVariationVar, sanitizeVariation, valuesFor, rangeOf, describeValues } from "./assignmentVariation.js";
+
+// main.js registers how to actually apply a student's values to the sandbox
+// (it owns the physics state); this file only computes and displays them.
+let variationApplier = null;
+export function registerVariationApplier(fn) { variationApplier = fn; }
 
 let modal, box;
 
@@ -77,6 +83,7 @@ async function render() {
               <div class="assignment-row-title">${escapeHtml(a.title)}</div>
               <div class="assignment-row-meta">${a.completedBy.length} of ${c.students.length} completed${dueLabel(a.dueAt)}</div>
               ${a.instructions ? `<div class="assignment-row-instructions">${escapeHtml(a.instructions)}</div>` : ""}
+              ${a.variation ? teacherVariationHtml(a, c.students) : ""}
             </div>
             <button class="assignment-delete" data-id="${a.id}" title="Delete this assignment">Delete</button>
           </div>
@@ -85,6 +92,16 @@ async function render() {
           <input class="assignment-title-input" type="text" maxlength="60" placeholder="Assignment title (e.g. Complete the Ramp Challenge)" />
           <input class="assignment-instructions-input" type="text" maxlength="500" placeholder="Instructions (optional)" />
           <input class="assignment-due-input" type="date" title="Due date (optional)" />
+          <details class="assignment-variation-form">
+            <summary>Randomize values per student</summary>
+            <p class="saves-hint">Each student gets their own slightly different numbers (same idea, different answer). Tick what should vary, its middle value, and ± percent.</p>
+            ${VARIATION_VARS.map((v) => `
+              <div class="variation-row" data-var="${v.id}">
+                <label><input type="checkbox" class="variation-on" /> ${v.label}</label>
+                <span>around <input type="number" class="variation-base" step="any" value="${v.base}" style="width:64px" /> ${v.unit}</span>
+                <span>±<input type="number" class="variation-pct" min="1" max="50" value="10" style="width:52px" />%</span>
+              </div>`).join("")}
+          </details>
           <button class="assignment-create-btn primary" data-code="${c.code}">Add assignment</button>
         </div>
       </div>
@@ -118,6 +135,7 @@ async function render() {
                 ${a.instructions ? `<div class="assignment-row-instructions">${escapeHtml(a.instructions)}</div>` : ""}
               </div>
             </label>
+            ${a.variation ? studentVariationHtml(a) : ""}
           </div>
         `).join("") : `<p class="panel-empty">No assignments yet for this classroom.</p>`}
       </div>
@@ -181,9 +199,18 @@ async function render() {
       const title = titleInput.value.trim();
       if (!title) { titleInput.focus(); return; }
       const dueAt = dueInput.value ? new Date(dueInput.value + "T23:59:59").getTime() : null;
-      const result = await createAssignment(btn.dataset.code, title, instructionsInput.value.trim(), dueAt);
+      const variation = readVariationForm(list);
+      const result = await createAssignment(btn.dataset.code, title, instructionsInput.value.trim(), dueAt, variation);
       if (result.error) { await alertPopup(result.error, { title: "Couldn't add assignment" }); return; }
       render();
+    });
+  });
+
+  box.querySelectorAll(".variation-apply").forEach((b) => {
+    b.addEventListener("click", () => {
+      if (!variationApplier) return;
+      variationApplier(JSON.parse(b.dataset.values), b.dataset.title);
+      modal.classList.add("hidden");
     });
   });
 
@@ -203,4 +230,37 @@ async function render() {
       render();
     });
   });
+}
+
+function readVariationForm(list) {
+  const params = [];
+  list.querySelectorAll(".variation-row").forEach((row) => {
+    if (!row.querySelector(".variation-on").checked) return;
+    params.push({ id: row.dataset.var, base: parseFloat(row.querySelector(".variation-base").value), pct: parseFloat(row.querySelector(".variation-pct").value) });
+  });
+  return sanitizeVariation({ params });
+}
+
+// Teacher: what varies, plus every student's own numbers (recomputed with
+// the same seeded function the student's browser uses) for grading.
+function teacherVariationHtml(a, students) {
+  const summary = a.variation.params.map((p) => {
+    const def = getVariationVar(p.id), [lo, hi] = rangeOf(p);
+    return `${escapeHtml(def.label)} ${lo.toFixed(2)}–${hi.toFixed(2)}`;
+  }).join(" · ");
+  return `<div class="assignment-variation">
+    <div class="assignment-row-meta">Randomized: ${summary}</div>
+    <details><summary>Each student's values</summary>
+      ${students.length ? students.map((email) => `<div class="assignment-row-meta">${escapeHtml(email)}: ${describeValues(valuesFor(a.variation, a.id, email)).map(escapeHtml).join(", ")}</div>`).join("") : `<div class="assignment-row-meta">No students yet.</div>`}
+    </details></div>`;
+}
+
+// Student: their own values for this assignment, and a button to load them.
+function studentVariationHtml(a) {
+  const email = getUser()?.email;
+  const values = valuesFor(a.variation, a.id, email);
+  return `<div class="assignment-variation">
+    <div class="assignment-row-meta">Your values: ${describeValues(values).map(escapeHtml).join(", ")}</div>
+    <button class="variation-apply" data-title="${escapeHtml(a.title)}" data-values="${escapeHtml(JSON.stringify(values))}">Apply my values to the sandbox</button>
+  </div>`;
 }

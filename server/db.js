@@ -81,6 +81,9 @@ export function ensureSchema() {
       created_at BIGINT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS assignments_classroom_idx ON assignments(classroom_code);
+    -- Optional per-student randomization (see src/assignmentVariation.js):
+    -- which values vary and by how much. Null = everyone gets the same setup.
+    ALTER TABLE assignments ADD COLUMN IF NOT EXISTS variation JSONB;
     -- A student marking an assignment done — deliberately just a
     -- completion flag, not a submitted file: assignments here point at
     -- something to go do in the app (a Physics Challenge, a mode to
@@ -837,11 +840,11 @@ export async function deleteClassroomRow(code) {
 
 // ---------- assignments ----------
 
-export async function insertAssignment(id, classroomCode, teacherEmail, title, instructions, dueAt, createdAt) {
+export async function insertAssignment(id, classroomCode, teacherEmail, title, instructions, dueAt, createdAt, variation = null) {
   await query(
-    `INSERT INTO assignments (id, classroom_code, teacher_email, title, instructions, due_at, created_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-    [id, classroomCode, teacherEmail, title, instructions, dueAt, createdAt]
+    `INSERT INTO assignments (id, classroom_code, teacher_email, title, instructions, due_at, created_at, variation)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+    [id, classroomCode, teacherEmail, title, instructions, dueAt, createdAt, variation ? JSON.stringify(variation) : null]
   );
 }
 
@@ -855,7 +858,7 @@ export async function getAssignment(id) {
 // plus who, and there's no separate per-assignment roster endpoint.
 export async function assignmentsForClassroom(code) {
   const rows = await query(
-    `SELECT a.id, a.title, a.instructions, a.due_at, a.created_at,
+    `SELECT a.id, a.title, a.instructions, a.due_at, a.created_at, a.variation,
             coalesce(array_agg(ac.student_email) FILTER (WHERE ac.student_email IS NOT NULL), '{}') AS completed_by
      FROM assignments a
      LEFT JOIN assignment_completions ac ON ac.assignment_id = a.id
@@ -867,7 +870,7 @@ export async function assignmentsForClassroom(code) {
   return rows.map((r) => ({
     id: r.id, title: r.title, instructions: r.instructions,
     dueAt: r.due_at == null ? null : Number(r.due_at), createdAt: Number(r.created_at),
-    completedBy: r.completed_by,
+    completedBy: r.completed_by, variation: r.variation || null,
   }));
 }
 

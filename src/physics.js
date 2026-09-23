@@ -119,6 +119,7 @@ export class PhysicsSim {
     this.magnetMeta = new Map(); // magnetId -> {body, spec}
     this.springMeta = new Map(); // springPadId -> {spec, cooldownUntil}
     this.airMult = 1;
+    this.frictionMult = 1;
     this.surfaceDrag = 0;
     this._ringRestCounters = new Map(); // bodyId -> consecutive slow-contact ticks, see _settleRingOnContact
     this._lastDelta = 16; // ms, updated each frame in start() — beforeUpdate handlers need real elapsed time
@@ -881,6 +882,14 @@ export class PhysicsSim {
         body.frictionAir = body._baseAir * this.airMult;
         body._airMult = this.airMult;
       }
+      // Global friction multiplier (Real-World presets like "ice"): scales
+      // each body's own friction, lazily like air above so late spawns match.
+      if (body._fricMult !== this.frictionMult) {
+        if (body._baseFric === undefined) { body._baseFric = body.friction; body._baseFricStatic = body.frictionStatic; }
+        body.friction = body._baseFric * this.frictionMult;
+        body.frictionStatic = body._baseFricStatic * this.frictionMult;
+        body._fricMult = this.frictionMult;
+      }
       if (this.surfaceDrag > 0 && !body.plugin?.transient && !body.isSensor) {
         const v = body.velocity;
         if (Math.abs(v.x) + Math.abs(v.y) > 0.0005 || Math.abs(body.angularVelocity) > 0.0005) {
@@ -1437,6 +1446,11 @@ export class PhysicsSim {
   // that spawn later.
   setAirFriction(mult) {
     this.airMult = Math.max(0, mult);
+  }
+
+  // 1.0 = every object's own friction; a preset like "ice" scales them all down.
+  setFrictionScale(mult) {
+    this.frictionMult = Math.max(0, mult);
   }
 
   // Top view: nothing falls, so "friction" is the surface everything slides

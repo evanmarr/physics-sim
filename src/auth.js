@@ -174,8 +174,8 @@ export const deleteClassroom = (code) => api(`/classrooms?code=${encodeURICompon
 
 // ---------- assignments ----------
 export const fetchAssignments = () => api("/assignments"); // { teaching: [...], joined: [...] }
-export const createAssignment = (classroomCode, title, instructions, dueAt) =>
-  api("/assignments", { method: "POST", body: { classroomCode, title, instructions, dueAt } }).catch((e) => ({ error: e.message }));
+export const createAssignment = (classroomCode, title, instructions, dueAt, variation = null) =>
+  api("/assignments", { method: "POST", body: { classroomCode, title, instructions, dueAt, variation } }).catch((e) => ({ error: e.message }));
 export const deleteAssignment = (id) => api(`/assignments?id=${encodeURIComponent(id)}`, { method: "DELETE" }).catch((e) => ({ error: e.message }));
 export const setAssignmentComplete = (id, completed) =>
   api("/assignment-complete", { method: "POST", body: { id, completed } }).catch((e) => ({ error: e.message }));
