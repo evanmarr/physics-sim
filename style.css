@@ -2132,3 +2132,14 @@ html, body, button, a, input, select, textarea, label, [role="button"], .mode-ta
 .notif-list { padding-bottom: 2px; }
 .astro-mode-tabs + * { margin-top: 12px; }
 .wb-toolbar { margin-bottom: 8px; }
+.astro-mode-tabs { margin-bottom: 12px; }
+.sound-hint { margin: 8px 0; }
+.sound-hint + .sound-piano-scroll { margin-top: 8px; }
+.variation-row { padding: 8px 0; border-bottom: 1px solid var(--border); gap: 6px 14px; }
+.variation-row > label { display: flex; flex-direction: row; align-items: center; justify-content: flex-start; text-align: left; gap: 8px; flex: 1 1 100%; font-weight: 600; }
+.variation-row > label input { width: auto; margin: 0; }
+.variation-row > span { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text-dim); }
+.assignment-variation-form > summary { cursor: pointer; padding: 6px 0; }
+.variation-row > label input[type="checkbox"] { width: 16px !important; height: 16px; flex: none; }
+.variation-row input[type="number"] { width: 70px !important; }
+.variation-row input { min-width: 0 !important; flex: none !important; }
