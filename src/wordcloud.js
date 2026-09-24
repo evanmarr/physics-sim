@@ -372,7 +372,7 @@ export class WordCloudTool {
     const g = this.canvas.getContext("2d");
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
     this._paint(g, W, H, words);
-    this._status(words.length ? `${all.length} unique words, showing ${this.placed.length} of ${words.length} requested${note}` : "No words to show. Add some text or loosen the filters.", !words.length && false);
+    this._status(words.length ? `${all.length} unique words, showing ${this.placed.length} of ${words.length} requested${this._fontScale < 0.99 ? " (text auto-shrunk to fit them all)" : ""}${note}` : "No words to show. Add some text or loosen the filters.", !words.length && false);
   }
 
   _paint(g, W, H, words) {
@@ -389,7 +389,16 @@ export class WordCloudTool {
     const cache = new Map();
     const measure = (word, size) => { g.font = `${weight}${size}px ${fam}`; return g.measureText(word).width; };
     void cache;
-    this.placed = layoutWords(words, W, H, { seed: s.seed, measure, minFont: s.minFont, maxFont: Math.max(s.maxFont, s.minFont), scale: s.scale, orientation: s.orient, spiral: s.spiral });
+    // Words that don't fit are dropped by the layout, so shrink every font a
+    // little and retry until every requested word is placed (or text gets unreadably small).
+    let k = 1;
+    for (let attempt = 0; attempt < 14; attempt++) {
+      const minF = Math.max(5, s.minFont * k), maxF = Math.max(minF, s.maxFont * k);
+      this.placed = layoutWords(words, W, H, { seed: s.seed, measure, minFont: minF, maxFont: maxF, scale: s.scale, orientation: s.orient, spiral: s.spiral });
+      if (this.placed.length >= words.length || minF <= 5) break;
+      k *= 0.85;
+    }
+    this._fontScale = k;
     g.textAlign = "center"; g.textBaseline = "middle";
     this.placed.forEach((p, i) => {
       g.save(); g.translate(p.x, p.y); if (p.rot) g.rotate(-Math.PI / 2);

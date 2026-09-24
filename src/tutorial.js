@@ -245,7 +245,7 @@ function positionSpotlight(step) {
 
   const target = step.resolve ? step.resolve() : step.target ? document.querySelector(step.target) : null;
   if (target) {
-    if (!step.noScroll) target.scrollIntoView({ block: "center", behavior: "smooth" });
+    if (!step.noScroll) target.scrollIntoView({ block: "center", behavior: "auto" }); // instant: a smooth scroll is still moving when the spotlight measures the target
     const rect = target.getBoundingClientRect();
     spotEl.style.display = "block";
     spotEl.style.left = `${rect.left - 6}px`;
@@ -273,6 +273,8 @@ function showStep(i, isReposition = false) {
   // sliver of the right one. Re-measuring a couple of frames later corrects
   // that without needing to guess how long any given rebuild takes.
   requestAnimationFrame(() => requestAnimationFrame(() => { if (running && stepIndex === i) positionSpotlight(step); }));
+  // Panels that finish laying out late (e.g. the atom viewer after an element is picked) get one more pass
+  for (const ms of [300, 900]) setTimeout(() => { if (running && stepIndex === i) positionSpotlight(step); }, ms);
 
   tooltipEl.innerHTML = "";
   const progress = document.createElement("div");

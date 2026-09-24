@@ -1396,9 +1396,9 @@ html, body, button, a, input, select, textarea, label, [role="button"], .mode-ta
 .chem-result-card.chem-result-none .chem-result-name { color: var(--text-dim); }
 
 @media (max-width: 1100px) {
-  #chemistry-root { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); overflow-y: auto; grid-template-rows: auto auto minmax(0, 1fr); }
-  .chem-periodic { grid-column: 1 / -1; overflow: visible; }
-  .chem-panel { overflow: visible; }
+  #chemistry-root { display: flex; flex-wrap: wrap; align-content: flex-start; overflow-y: auto; overflow-x: hidden; padding-bottom: 120px; }
+  .chem-header, .chem-panel.chem-periodic { flex: 1 1 100%; }
+  .chem-panel { flex: 1 1 320px; overflow: visible; min-height: 0; }
 }
 @media (max-width: 760px) {
   #chemistry-root { display: flex; flex-direction: column; overflow-y: auto; overflow-x: hidden; padding: 10px 10px 16px; gap: 10px; }
