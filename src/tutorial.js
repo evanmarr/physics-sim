@@ -17,6 +17,9 @@ const STEPS = [
   {
     text: "Click the ball you just placed to open its property panel on the right.",
     target: ".world-object",
+    // The first .world-object is the ground board, far below the view — point at the newest movable object (the ball just dragged in) instead.
+    resolve: () => [...document.querySelectorAll(".world-object:not(.fixed)")].pop() || null,
+    noScroll: true,
     advance: { type: "click", selector: ".world-object" },
   },
   {
@@ -240,9 +243,9 @@ function positionSpotlight(step) {
   const targetsMenu = step.target && menuDropdown?.querySelector(step.target);
   if (menuDropdown) menuDropdown.classList.toggle("hidden", !targetsMenu);
 
-  const target = step.target ? document.querySelector(step.target) : null;
+  const target = step.resolve ? step.resolve() : step.target ? document.querySelector(step.target) : null;
   if (target) {
-    target.scrollIntoView({ block: "center", behavior: "smooth" });
+    if (!step.noScroll) target.scrollIntoView({ block: "center", behavior: "smooth" });
     const rect = target.getBoundingClientRect();
     spotEl.style.display = "block";
     spotEl.style.left = `${rect.left - 6}px`;

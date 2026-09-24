@@ -38,6 +38,9 @@ export class ChemistryMode {
   _build() {
     this.root.innerHTML = "";
 
+    const head = div("chem-header");
+    head.innerHTML = `<h2 class="chem-title">Chemistry</h2><span class="chem-subtitle">Explore the elements, then mix them on the bench.</span>`;
+    this.root.appendChild(head);
     this.periodicPanel = div("chem-panel chem-periodic");
     this.centerPanel = div("chem-panel chem-center");
     this.mixPanel = div("chem-panel chem-mix");
@@ -120,7 +123,7 @@ export class ChemistryMode {
 
   _buildMixPanel() {
     const titleRow = div("chem-panel-title");
-    titleRow.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:8px";
+    titleRow.classList.add("chem-panel-title-row");
     const title = document.createElement("span");
     title.textContent = "Mixing Bench";
     titleRow.appendChild(title);
@@ -148,26 +151,28 @@ export class ChemistryMode {
     slotBtnRow.appendChild(this.addSlotBtn);
     slotBtnRow.appendChild(this.removeSlotBtn);
     this.mixPanel.appendChild(slotBtnRow);
+    const actions = div("chem-actions");
+    this.mixPanel.appendChild(actions);
 
     const waterBtn = document.createElement("button");
     waterBtn.className = "chem-water-btn";
     waterBtn.textContent = "Add Water (H₂O)";
     waterBtn.title = "See how a metal reacts when dropped in water";
     waterBtn.addEventListener("click", () => this._addToMix(WATER_SYMBOL));
-    this.mixPanel.appendChild(waterBtn);
+    actions.appendChild(waterBtn);
 
     const reactBtn = document.createElement("button");
     reactBtn.className = "primary chem-react-btn";
     reactBtn.textContent = "React!";
     reactBtn.addEventListener("click", () => this._react());
-    this.mixPanel.appendChild(reactBtn);
+    actions.appendChild(reactBtn);
 
     this.resultEl = div("chem-result");
     this.mixPanel.appendChild(this.resultEl);
 
     const chalBtn = document.createElement("button");
     chalBtn.textContent = "Chemistry Challenges";
-    chalBtn.style.marginTop = "14px";
+    chalBtn.className = "chem-chal-btn";
     chalBtn.addEventListener("click", () => this._openChallenges());
     this.mixPanel.appendChild(chalBtn);
 
@@ -243,9 +248,11 @@ export class ChemistryMode {
           if (this.inspectingIndex === i) this.inspectingIndex = null;
           this._renderSlots();
         },
-        onTemp: (tempK) => {
+        onTemp: (tempK, live) => {
           entry.tempK = tempK;
-          this._renderSlots();
+          // While dragging (live) the slot updates itself in place; rebuilding
+          // the DOM here would destroy the slider mid-drag.
+          if (!live) this._renderSlots();
           // Live animation: if this is the slot currently shown in the
           // viewer, re-drive it on every tick of the drag, not just when
           // you release the slider — that's the whole point of watching
@@ -423,12 +430,14 @@ function mixSlot(entry, { onClear, onTemp, onTempCommit, onInspect }) {
     const phase = phaseAt(el, entry.tempK);
     slot.style.borderColor = CATEGORY_COLORS[el.category];
     slot.innerHTML = `<span class="chem-slot-sym">${el.symbol}</span><span class="chem-slot-name">${el.name} · ${phase}</span>`;
+    const nameEl = slot.querySelector(".chem-slot-name");
     slot.title = "Click to see this substance's particles move";
     slot.addEventListener("click", () => onInspect?.());
 
     const [mp, bp] = meltingBoiling(el);
     const phaseRow = div("chem-slot-phase-row");
     const PHASE_TARGET_K = { solid: Math.max(0, mp - 50), liquid: Math.round((mp + bp) / 2), gas: bp + 50 };
+    const phaseBtns = {};
     for (const p of ["solid", "liquid", "gas"]) {
       const btn = document.createElement("button");
       btn.className = "chem-phase-btn" + (phase === p ? " active" : "");
@@ -438,6 +447,7 @@ function mixSlot(entry, { onClear, onTemp, onTempCommit, onInspect }) {
         onTemp(PHASE_TARGET_K[p]);
         onTempCommit?.();
       });
+      phaseBtns[p] = btn;
       phaseRow.appendChild(btn);
     }
     slot.appendChild(phaseRow);
@@ -455,7 +465,11 @@ function mixSlot(entry, { onClear, onTemp, onTempCommit, onInspect }) {
     tempInput.addEventListener("input", (e) => {
       e.stopPropagation();
       tempLabel.textContent = `${tempInput.value} K`;
-      onTemp(parseInt(tempInput.value, 10));
+      const k = parseInt(tempInput.value, 10);
+      const ph = phaseAt(el, k);
+      nameEl.textContent = `${el.name} · ${ph}`;
+      for (const p in phaseBtns) phaseBtns[p].classList.toggle("active", p === ph);
+      onTemp(k, true);
     });
     // "change" fires once, when the slider is released — unlike "input"
     // (which fires continuously while dragging), this is the right moment

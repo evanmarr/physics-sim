@@ -1008,22 +1008,33 @@ export class WarMode {
     c.innerHTML = "";
     if (g.phase === "deploy") {
       c.appendChild(el("h3", null, "Deployment"));
+      // Sliders update in place: rebuilding the panel on every 'input' event
+      // destroyed the slider under the pointer mid-drag, so it couldn't be dragged.
+      const sliders = [];
       const mkSlider = (label, key, min, max, step, fmt) => {
         const r = el("div", "war-row"); const inp = el("input"); inp.type = "range"; inp.min = min; inp.max = max; inp.step = step; inp.value = this.recruit[key];
         const v = el("span", "war-val", fmt(this.recruit[key]));
-        inp.oninput = () => { this.recruit[key] = +inp.value; if (this.recruit.arc + this.recruit.cav > 100) { if (key === "arc") this.recruit.cav = 100 - this.recruit.arc; else this.recruit.arc = 100 - this.recruit.cav; } this._renderPhase(); };
+        sliders.push({ inp, v, key, fmt });
+        inp.oninput = () => { this.recruit[key] = +inp.value; if (this.recruit.arc + this.recruit.cav > 100) { if (key === "arc") this.recruit.cav = 100 - this.recruit.arc; else this.recruit.arc = 100 - this.recruit.cav; } syncDeploy(); };
         r.append(el("label", null, label), inp, v); return r;
       };
       c.append(mkSlider("Troops", "n", 20, 300, 10, (v) => v), mkSlider("Archers %", "arc", 0, 100, 5, (v) => v), mkSlider("Cavalry %", "cav", 0, 100, 5, (v) => v));
-      const comp = normComp(this.recruit.arc / 100, this.recruit.cav / 100), cost = Math.round(armyCost(this.recruit.n, comp));
-      c.appendChild(el("div", "war-dim", `Infantry ${Math.round(comp.inf * 100)}%  |  cost ${cost} pts  |  budget left ${Math.round(g.budget[0])}`));
+      const info = el("div", "war-dim", ""); c.appendChild(info);
+      let place = null;
+      const syncDeploy = () => {
+        for (const sl of sliders) { if (document.activeElement !== sl.inp) sl.inp.value = this.recruit[sl.key]; sl.v.textContent = sl.fmt(this.recruit[sl.key]); }
+        const comp = normComp(this.recruit.arc / 100, this.recruit.cav / 100), cost = Math.round(armyCost(this.recruit.n, comp));
+        info.textContent = `Infantry ${Math.round(comp.inf * 100)}%  |  cost ${cost} pts  |  budget left ${Math.round(g.budget[0])}`;
+        if (place) place.disabled = cost > g.budget[0];
+      };
+      syncDeploy();
       const r = el("div", "war-row");
-      const place = el("button", "war-btn" + (this.placing ? " on" : ""), this.placing ? "Click deployment zone..." : "Place army");
-      place.disabled = cost > g.budget[0]; place.onclick = () => { this.placing = !this.placing; this._renderPhase(); };
+      place = el("button", "war-btn" + (this.placing ? " on" : ""), this.placing ? "Click deployment zone..." : "Place army");
+      place.onclick = () => { this.placing = !this.placing; this._renderPhase(); };
       const auto = el("button", "war-btn", "Auto deploy"); auto.onclick = () => { for (const a of g.armies.filter((x) => x.team === 0).slice()) removeArmyRefund(g, a); autoDeploy(g, 0); this._renderPhase(); };
       const start = el("button", "war-btn primary", "Start battle"); start.disabled = !g.armies.some((a) => a.team === 0);
       start.onclick = () => { startBattle(g); this.placing = false; this._renderPhase(); };
-      r.append(place, auto, start); c.appendChild(r);
+      r.append(place, auto, start); c.appendChild(r); syncDeploy();
       c.appendChild(el("div", "war-dim", "Drag your armies inside the blue zone to reposition them. Unspent points become reinforcement reserve."));
     } else {
       c.appendChild(el("h3", null, "Battle"));

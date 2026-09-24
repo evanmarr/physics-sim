@@ -186,6 +186,9 @@ export function ensureSchema() {
     -- column in its CREATE TABLE above never touches a database that
     -- already has the table — same story as saved_items.lock_code_hash.
     ALTER TABLE community_sims ADD COLUMN IF NOT EXISTS lock_code_hash TEXT;
+    -- Which saved item a published sim was made from, so overwriting or deleting
+    -- that save can update or unpublish the public copy too.
+    ALTER TABLE community_sims ADD COLUMN IF NOT EXISTS source_item_id TEXT;
     CREATE TABLE IF NOT EXISTS sim_favorites (
       user_email TEXT NOT NULL REFERENCES users(email) ON DELETE CASCADE,
       sim_id TEXT NOT NULL REFERENCES community_sims(id) ON DELETE CASCADE,
@@ -447,11 +450,11 @@ export async function deleteSavedItem(email, kind, id) {
 
 // ---------- community sims ----------
 
-export async function insertCommunitySim(id, ownerEmail, creatorName, kind, name, description, subject, data, snapshot, createdAt, lockCodeHash) {
+export async function insertCommunitySim(id, ownerEmail, creatorName, kind, name, description, subject, data, snapshot, createdAt, lockCodeHash, sourceItemId = null) {
   await query(
-    `INSERT INTO community_sims (id, owner_email, creator_name, kind, name, description, subject, data, snapshot, created_at, lock_code_hash)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
-    [id, ownerEmail, creatorName, kind, name, description, subject, JSON.stringify(data), snapshot || null, createdAt, lockCodeHash || null]
+    `INSERT INTO community_sims (id, owner_email, creator_name, kind, name, description, subject, data, snapshot, created_at, lock_code_hash, source_item_id)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+    [id, ownerEmail, creatorName, kind, name, description, subject, JSON.stringify(data), snapshot || null, createdAt, lockCodeHash || null, sourceItemId || null]
   );
 }
 
@@ -510,6 +513,34 @@ export async function getLockHash(kind, id) {
 export async function unpublishCommunitySim(id, ownerEmail) {
   const rows = await query("UPDATE community_sims SET unpublished = true WHERE id = $1 AND owner_email = $2 RETURNING id", [id, ownerEmail]);
   return rows.length > 0;
+}
+
+// A saved item was overwritten: refresh its still-published public copies.
+// Copies published before source_item_id existed are matched by owner+kind+old name.
+export async function syncPublishedFromItem(email, kind, itemId, oldName, newName, data, snapshot) {
+  const rows = await query(
+    `UPDATE community_sims SET name = $5, data = $6, snapshot = $7
+     WHERE owner_email = $1 AND kind = $2 AND unpublished = false
+       AND (source_item_id = $3 OR (source_item_id IS NULL AND name = $4)) RETURNING id`,
+    [email, kind, itemId, oldName, newName, JSON.stringify(data), snapshot || null]
+  );
+  return rows.length;
+}
+
+// A saved item was deleted: take its public copies down.
+export async function unpublishBySourceItem(email, kind, itemId, name) {
+  const rows = await query(
+    `UPDATE community_sims SET unpublished = true
+     WHERE owner_email = $1 AND kind = $2 AND unpublished = false
+       AND (source_item_id = $3 OR (source_item_id IS NULL AND name = $4)) RETURNING id`,
+    [email, kind, itemId, name]
+  );
+  return rows.length;
+}
+
+export async function getSavedItemName(email, kind, id) {
+  const rows = await query("SELECT name FROM saved_items WHERE id = $1 AND email = $2 AND kind = $3", [id, email, kind]);
+  return rows[0]?.name ?? null;
 }
 
 export async function setCommunitySimFeatured(id, featured) {

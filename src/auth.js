@@ -99,8 +99,8 @@ export const fetchCommunitySims = (kind) => api(`/community-sims${kind ? `?kind=
 export const fetchCommunitySimById = (id) => api(`/community-sims?id=${encodeURIComponent(id)}`).then((d) => d.sim);
 export const fetchFeaturedSims = () => api("/community-sims-featured").then((d) => d.sims);
 export const fetchMyFavoriteIds = () => api("/community-sims?mine=1").then((d) => d.favoriteIds).catch(() => []);
-export const publishCommunitySim = (kind, name, description, subject, data, snapshot, lockCode) =>
-  api("/community-sims", { method: "POST", body: { kind, name, description, subject, data, snapshot, lockCode } }).catch((e) => ({ error: e.message }));
+export const publishCommunitySim = (kind, name, description, subject, data, snapshot, lockCode, sourceItemId) =>
+  api("/community-sims", { method: "POST", body: { kind, name, description, subject, data, snapshot, lockCode, sourceItemId } }).catch((e) => ({ error: e.message }));
 export const remixCommunitySim = (id) => api(`/community-sim-remix?id=${encodeURIComponent(id)}`, { method: "POST" }).catch((e) => ({ error: e.message }));
 export const toggleFavoriteSim = (id) => api(`/community-sim-favorite?id=${encodeURIComponent(id)}`, { method: "POST" }).catch((e) => ({ error: e.message }));
 export const reportSim = (id) => api(`/community-sim-report?id=${encodeURIComponent(id)}`, { method: "POST" }).catch((e) => ({ error: e.message }));
@@ -512,13 +512,13 @@ export async function openSavesPanel({ kind, title, itemNoun, serialize, apply, 
     }));
     box.querySelectorAll(".saves-overwrite").forEach((btn) => btn.addEventListener("click", async () => {
       const item = items.find((it) => it.id === btn.dataset.id);
-      if (!(await confirmPopup(`Overwrite "${item.name}" with the current one?`, { confirmLabel: "Overwrite" }))) return;
+      if (!(await confirmPopup(`Overwrite "${item.name}" with the current one? If you've published it to Community Sims, the published copy updates too.`, { confirmLabel: "Overwrite" }))) return;
       const result = await updateSavedItem(kind, item.id, item.name, serialize(), getSnapshot?.());
       if (result?.error) { await alertPopup(result.error, { title: "Couldn't overwrite" }); return; }
       render();
     }));
     box.querySelectorAll(".saves-delete").forEach((btn) => btn.addEventListener("click", async () => {
-      if (!(await confirmPopup("Delete this save? This can't be undone.", { title: "Delete save", confirmLabel: "Delete", danger: true }))) return;
+      if (!(await confirmPopup("Delete this save? This can't be undone. If it's published to Community Sims, that published copy is taken down too.", { title: "Delete save", confirmLabel: "Delete", danger: true }))) return;
       const result = await deleteSavedItem(kind, btn.dataset.id);
       if (result?.error) { await alertPopup(result.error, { title: "Couldn't delete" }); return; }
       render();
@@ -547,7 +547,7 @@ export async function openSavesPanel({ kind, title, itemNoun, serialize, apply, 
         }
       }
 
-      const result = await publishCommunitySim(kind, item.name, description, "", item.data, item.snapshot, lockCode);
+      const result = await publishCommunitySim(kind, item.name, description, "", item.data, item.snapshot, lockCode, item.id);
       if (result.error) { await alertPopup(result.error, { title: "Couldn't publish" }); return; }
       await alertPopup(`Published "${item.name}" to Community Sims.`, { title: "Published" });
     }));

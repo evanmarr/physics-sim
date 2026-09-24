@@ -179,6 +179,7 @@ function injectStyles() {
 .wc-stage canvas{display:block}
 .wc-tip{position:fixed;pointer-events:none;background:var(--panel);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:3px 8px;font-size:12px;z-index:10000;display:none}
 .wc-status{font-size:12px;color:var(--text-dim)}
+.wc-stale{box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 35%,transparent)}
 .wc-status.wc-err{color:var(--danger)}
 .wc-tbl{width:100%;font-size:12px;border-collapse:collapse}
 .wc-tbl td{padding:2px 4px;border-bottom:1px solid var(--border)}
@@ -223,6 +224,14 @@ export class WordCloudTool {
     if (this.tip) this.tip.style.display = "none";
   }
 
+  // Settings no longer redraw on every tweak — change as many as you like,
+  // then press Generate. (Resizing the window still redraws what you have.)
+  _dirty() {
+    this._stale = true;
+    if (this.genBtn) this.genBtn.classList.add("wc-stale");
+    if (this.status) { this.status.textContent = "Settings changed — press Generate to rebuild the cloud."; this.status.classList.remove("wc-err"); }
+  }
+
   _schedule(delay = 120) {
     clearTimeout(this._t);
     this._t = setTimeout(() => this.render(), delay);
@@ -241,7 +250,7 @@ export class WordCloudTool {
     const el = document.createElement("input");
     el.type = "range"; el.min = min; el.max = max; el.step = step; el.value = this.s[key];
     this._ctl(parent, label, el, () => el.value);
-    this._on(el, "input", () => { this.s[key] = +el.value; if (key === "minFont" && this.s.minFont > this.s.maxFont) this.s.maxFont = this.s.minFont; this._schedule(60); });
+    this._on(el, "input", () => { this.s[key] = +el.value; if (key === "minFont" && this.s.minFont > this.s.maxFont) this.s.maxFont = this.s.minFont; this._dirty(); });
     return el;
   }
   _select(parent, label, key, opts) {
@@ -249,13 +258,13 @@ export class WordCloudTool {
     for (const [v, t] of opts) { const o = document.createElement("option"); o.value = v; o.textContent = t; el.appendChild(o); }
     el.value = this.s[key];
     this._ctl(parent, label, el);
-    this._on(el, "change", () => { this.s[key] = el.value; this._schedule(0); });
+    this._on(el, "change", () => { this.s[key] = el.value; this._dirty(); });
   }
   _check(parent, label, key) {
     const el = document.createElement("input"); el.type = "checkbox"; el.checked = this.s[key];
     const row = mk("div", "wc-row"); const l = mk("label", null, label); l.style.flexDirection = "row-reverse"; l.style.justifyContent = "flex-end";
     l.appendChild(el); row.appendChild(l); parent.appendChild(row);
-    this._on(el, "change", () => { this.s[key] = el.checked; this._schedule(0); });
+    this._on(el, "change", () => { this.s[key] = el.checked; this._dirty(); });
   }
 
   _build() {
@@ -267,21 +276,21 @@ export class WordCloudTool {
     this.ta.placeholder = "Paste or type text here...";
     this.ta.value = this.s.text;
     left.appendChild(this.ta);
-    this._on(this.ta, "input", () => { this.s.text = this.ta.value; this._schedule(300); });
+    this._on(this.ta, "input", () => { this.s.text = this.ta.value; this._dirty(); });
 
     const srow = mk("div", "wc-row");
     const sample = document.createElement("select");
     const o0 = document.createElement("option"); o0.value = ""; o0.textContent = "Load a sample..."; sample.appendChild(o0);
     for (const k of Object.keys(SAMPLES)) { const o = document.createElement("option"); o.value = k; o.textContent = k; sample.appendChild(o); }
     srow.appendChild(sample); left.appendChild(srow);
-    this._on(sample, "change", () => { if (sample.value) { this.ta.value = this.s.text = SAMPLES[sample.value]; sample.value = ""; this._schedule(0); } });
+    this._on(sample, "change", () => { if (sample.value) { this.ta.value = this.s.text = SAMPLES[sample.value]; sample.value = ""; this._dirty(); } });
 
     const file = document.createElement("input"); file.type = "file"; file.accept = ".txt,text/plain";
     left.appendChild(file);
     this._on(file, "change", () => {
       const f = file.files && file.files[0]; if (!f) return;
       const rd = new FileReader();
-      rd.onload = () => { this.ta.value = this.s.text = String(rd.result || ""); this._schedule(0); };
+      rd.onload = () => { this.ta.value = this.s.text = String(rd.result || ""); this._dirty(); };
       rd.onerror = () => this._status("Could not read that file.", true);
       rd.readAsText(f);
     });
@@ -292,15 +301,17 @@ export class WordCloudTool {
     this._check(left, "Include numbers", "nums");
     this.extra = document.createElement("input"); this.extra.type = "text"; this.extra.placeholder = "extra stop words (comma or space separated)";
     this.extra.value = this.s.extraStop; left.appendChild(this.extra);
-    this._on(this.extra, "input", () => { this.s.extraStop = this.extra.value; this._schedule(300); });
+    this._on(this.extra, "input", () => { this.s.extraStop = this.extra.value; this._dirty(); });
     this._range(left, "Min word length", "minLen", 1, 12);
     this._range(left, "Max words", "maxWords", 10, 300);
     this._range(left, "Min frequency", "minFreq", 1, 20);
 
     // main
     const bar = mk("div", "wc-row");
+    this.genBtn = mk("button", "primary", "Generate");
+    this._on(this.genBtn, "click", () => this.render());
     const shuffle = mk("button", null, "Shuffle"); const png = mk("button", null, "Download PNG"); const copy = mk("button", null, "Copy Frequencies");
-    bar.append(shuffle, png, copy); main.appendChild(bar);
+    bar.append(this.genBtn, shuffle, png, copy); main.appendChild(bar);
     this._on(shuffle, "click", () => { this.s.seed = (this.s.seed * 1664525 + 1013904223) >>> 0; this.render(); });
     this._on(png, "click", () => this._download());
     this._on(copy, "click", () => this._copy());
@@ -341,6 +352,7 @@ export class WordCloudTool {
 
   render() {
     if (!this.canvas) return;
+    this._stale = false; this.genBtn?.classList.remove("wc-stale");
     const s = this.s;
     let text = s.text || "";
     let note = "";

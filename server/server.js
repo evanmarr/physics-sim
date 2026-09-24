@@ -299,15 +299,24 @@ async function createItem(email, kind, max, name, data, snapshot) {
 async function updateItem(email, kind, id, name, data, snapshot) {
   const updatedAt = Date.now();
   const clampedName = clampName(name);
+  const oldName = await db.getSavedItemName(email, kind, id);
   const ok = await db.updateSavedItem(email, kind, id, clampedName, data, updatedAt, snapshot);
   if (!ok) return { error: "Not found" };
-  return { item: { id, name: clampedName, data, updatedAt } };
+  // Keep any published copy of this world / math item in step with the save
+  const publishedKind = kind === "worlds" || kind === "mathItems" ? kind === "mathItems" ? "math-items" : "worlds" : null;
+  let publishedUpdated = 0;
+  if (publishedKind) publishedUpdated = await db.syncPublishedFromItem(email, publishedKind, id, oldName, clampedName, data, snapshot).catch(() => 0);
+  return { item: { id, name: clampedName, data, updatedAt }, publishedUpdated };
 }
 
 async function deleteItem(email, kind, id) {
+  const oldName = await db.getSavedItemName(email, kind, id);
   const ok = await db.deleteSavedItem(email, kind, id);
   if (!ok) return { error: "Not found" };
-  return { ok: true };
+  const publishedKind = kind === "worlds" ? "worlds" : kind === "mathItems" ? "math-items" : null;
+  let unpublished = 0;
+  if (publishedKind) unpublished = await db.unpublishBySourceItem(email, publishedKind, id, oldName).catch(() => 0);
+  return { ok: true, unpublished };
 }
 
 // ---------- classrooms ----------
@@ -503,7 +512,7 @@ async function creatorDisplayName(email) {
   return [user?.first_name, user?.last_name].filter(Boolean).join(" ") || email.split("@")[0];
 }
 
-async function publishCommunitySim(email, { kind, name, description, subject, data, snapshot, lockCode }) {
+async function publishCommunitySim(email, { kind, name, description, subject, data, snapshot, lockCode, sourceItemId }) {
   if (kind !== "worlds" && kind !== "math-items") return { error: "Can only publish Physics worlds or Mathematics items." };
   if (JSON.stringify(data ?? {}).length > MAX_COMMUNITY_SIM_BYTES) return { error: "That item is too large to publish." };
   if (lockCode && !/^\d{6}$/.test(String(lockCode))) return { error: "The unlock code must be exactly 6 digits." };
@@ -516,7 +525,7 @@ async function publishCommunitySim(email, { kind, name, description, subject, da
     createdAt: Date.now(),
   };
   const lockCodeHash = lockCode ? hashLockCode(lockCode) : null;
-  await db.insertCommunitySim(sim.id, sim.ownerEmail, sim.creatorName, sim.kind, sim.name, sim.description, sim.subject, sim.data, sim.snapshot, sim.createdAt, lockCodeHash);
+  await db.insertCommunitySim(sim.id, sim.ownerEmail, sim.creatorName, sim.kind, sim.name, sim.description, sim.subject, sim.data, sim.snapshot, sim.createdAt, lockCodeHash, typeof sourceItemId === "string" ? sourceItemId.slice(0, 80) : null);
   // Every publish here is a brand-new community_sims row (never an edit —
   // editing your own private saved world never touches this table), so
   // this is exactly "a creator you subscribed to publishes a NEW public
@@ -1160,7 +1169,7 @@ export async function handleApi(req, res, url) {
       const id = url.searchParams.get("id");
       const body = await readJsonBody(req);
       const result = await updateItem(email, collectionKey, id, body.name, body.data, body.snapshot);
-      return sendJson(res, result.error ? 404 : 200, result.error ? result : { item: result.item });
+      return sendJson(res, result.error ? 404 : 200, result.error ? result : { item: result.item, publishedUpdated: result.publishedUpdated });
     }
     if (req.method === "DELETE") {
       const id = url.searchParams.get("id");
