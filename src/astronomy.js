@@ -35,13 +35,13 @@ const ASTRONOMY_MODEL_INFO = {
 const HABITABILITY_MODEL_INFO = {
   title: "Habitability Calculator",
   concept: "Real Stefan-Boltzmann radiative balance, not a lookup table: a planet's equilibrium temperature is computed from actual inverse-square-law flux (how a star's brightness spreads out over distance) and how much of that light the planet reflects away (albedo) versus absorbs. The habitable-zone bounds are the same simplified Kasting et al. limits used throughout planetary science for a quick estimate.",
-  equation: "T_eq = 278.5 · L^0.25 / √d · (1−A)^0.25     HZ: d_inner = √(L/1.1), d_outer = √(L/0.36)",
+  equation: "T_eq = 278.3 · L^0.25 / √d · (1−A)^0.25     HZ: d_inner = √(L/1.1), d_outer = √(L/0.36)",
   variables: [
     { symbol: "L", meaning: "the star's luminosity relative to the Sun (L☉ = 1)" },
     { symbol: "d", meaning: "distance from the star, in AU" },
     { symbol: "A", meaning: "Bond albedo — the fraction of incoming light the planet reflects straight back to space (0 = pitch black, absorbs all of it; 1 = perfect mirror, absorbs none)" },
   ],
-  constants: [{ name: "278.5 K", value: "Earth's own real zero-albedo equilibrium temperature at 1 AU, derived from the actual solar constant (1361 W/m²)" }],
+  constants: [{ name: "278.3 K", value: "Earth's own real zero-albedo equilibrium temperature at 1 AU, derived from the actual solar constant (1361 W/m²)" }],
   assumptions: ["The planet is treated as a simple blackbody-ish sphere in radiative equilibrium — no atmosphere, no greenhouse effect beyond what albedo alone captures.", "The habitable-zone formula ignores the star's spectral type/temperature, so it's most accurate for Sun-like stars."],
   limitations: ["A real greenhouse effect (like Venus's runaway one, or Earth's own mild one) can push actual surface temperature well above this equilibrium estimate — this is 'temperature with no atmosphere trapping extra heat,' not a forecast of actual surface conditions.", "\"Habitable\" here means liquid-water-permitting at the surface under Earth-like albedo — it says nothing about atmosphere composition, tidal locking, magnetic field, or any of the other real factors that decide actual habitability."],
   sources: ["Stefan-Boltzmann law", "Kasting, Whitmire & Reynolds (1993), \"Habitable Zones around Main Sequence Stars\""],
@@ -1016,8 +1016,8 @@ function buildChallengeModal(ctx, getDate, setDate) {
         <div class="chem-result-formula" style="font-size:16px">${result.date.toDateString()}</div>
         <div class="chem-result-note">
           Predicted new moon around ${result.date.toUTCString()}, ${Math.abs(result.moonLatitude).toFixed(2)}° from the ecliptic
-          (closer to 0° means a stronger chance of an actual eclipse — real solar eclipses happen when this is roughly under 1.5°).
-          ${result.likely ? "This one lines up closely — a real eclipse is likely somewhere on Earth around this date." : "This is the closest alignment found, but it's not a particularly tight one — a partial eclipse at best, if any, is more likely than total."}
+          (closer to 0° means a stronger chance of an actual eclipse — solar eclipses happen when this is roughly under 1.5°). This is the first new moon from your date that lines up closely enough; if none does within 18 months, it shows the closest alignment instead..
+          ${result.likely ? "This one lines up closely — a real eclipse is likely somewhere on Earth around this date." : "No tight alignment turned up in the search window; this is the closest, and it's not a particularly tight one — a partial eclipse at best, if any, is more likely than total."}
           <br><br><em>Estimated with a simplified (Meeus low-precision) lunar model, accurate to roughly a day — not a to-the-minute NASA-grade prediction.</em>
         </div>
         <button class="primary" id="astro-jump-btn">Jump the calendar to this date</button>

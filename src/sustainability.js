@@ -24,14 +24,16 @@ const SUSTAINABILITY_MODEL_INFO = {
   concept: "Every dashboard number is computed live from exactly what's placed on the grid this tick — including real day/night solar and gusty wind output — not a hidden or precomputed score.",
   equation: "Score = (brownout this tick? 5 : 30) + 0.3·(renewable share, 0-100) + max(0, 25 − 0.5·pollutionLevel) + 15·(population / housing capacity), clamped to 0-100",
   constants: [
-    { name: "Solar capacity factor", value: 0.25, unit: "of nameplate, zeroed at night" },
+    { name: "Solar capacity factor", value: 0.25, unit: "of nameplate on average over a day; zero at night, peaking near 0.8 at midday" },
     { name: "Wind capacity factor", value: 0.35, unit: "of nameplate, gusts tick to tick" },
-    { name: "Coal output while running", value: 0.85, unit: "of nameplate (baseload, day or night); real U.S. coal fleets averaged only ~40-50% annual capacity factor in 2023 as plants ran less and less, so this is a game simplification" },
+    { name: "Coal output while running", value: 0.85, unit: "of nameplate (baseload, day or night); real U.S. coal fleets averaged only about 40-50% annual capacity factor in recent years because plants run less than full-time, so this is a game simplification" },
     { name: "Coal fuel cost", value: 4, unit: "per tick, ongoing (renewables have none)" },
   ],
   assumptions: [
-    "One tick = one real-time step of this session, not a calendar unit — a full day/night cycle is 24 ticks.",
-    "A building's energy/pollution/income figures are fixed per building, not affected by adjacency or city size.",
+    "One tick is treated as one simulated hour (24 ticks = one day/night cycle, shown as \"hour N/24\"). Building figures are power in MW, so one tick of 1 MW is 1 MWh; battery capacity is in MWh. Building sizes are stylized blocks, not real facilities.",
+    "Emissions are a relative index (coal 16 vs. solar/wind 0), not real tons. Real lifecycle medians (IPCC AR5) are roughly: coal ~820, gas ~490, utility solar PV ~48, onshore wind ~11 g CO₂e per kWh — so solar and wind are low, not literally zero.",
+    "Money is game money ($k), not real capital or fuel costs. Batteries charge and discharge with no round-trip loss (real ones lose ~10-20%).",
+    "A building's power/emissions/income figures are fixed per building, not affected by adjacency or city size.",
   ],
   limitations: [
     "Figures are simplified, order-of-magnitude numbers loosely based on real U.S. EIA generation/capacity-factor and residential/commercial energy-use data — not a real facility's spec sheet or a forecast for any real city.",
@@ -45,7 +47,7 @@ const TICK_MS = 2000;
 const DAY_LENGTH_TICKS = 24; // one full day/night cycle, for solar's real intermittency
 
 const BUILDINGS = [
-  { id: "residential", name: "Residential", icon: "🏠", cost: 50, energyUse: 5, pollution: 1, population: 20, income: 2, unit: "MWh/yr, tons CO₂e/yr" },
+  { id: "residential", name: "Residential", icon: "🏠", cost: 50, energyUse: 5, pollution: 1, population: 20, income: 2, },
   { id: "commercial", name: "Commercial", icon: "🏬", cost: 80, energyUse: 8, pollution: 2, population: 0, income: 6 },
   { id: "industrial", name: "Industrial", icon: "🏭", cost: 120, energyUse: 15, pollution: 9, population: 0, income: 11 },
   {
@@ -223,11 +225,12 @@ export class SustainabilityMode {
       if (!b) continue;
       const def = BUILDING_BY_ID[b];
       if (!def.energyProduce) continue;
-      if (def.intermittent === "solar") delivered += def.energyProduce * def.capacityFactor * daylight * 2;
+      if (def.intermittent === "solar") delivered += def.energyProduce * def.capacityFactor * daylight * Math.PI; // mean of the daylight curve is 1/π, so this averages out to the stated capacity factor (peak ≈ 0.79 of nameplate)
       else if (def.intermittent === "wind") delivered += def.energyProduce * def.capacityFactor * this.windFactor * 1.6;
       else delivered += def.energyProduce * (def.capacityFactor ?? 1);
     }
 
+    this.lastDelivered = delivered;
     let shortfall = cap.energyUse - delivered;
     if (shortfall > 0 && this.batteryStored > 0) {
       const drawn = Math.min(shortfall, this.batteryStored);
@@ -317,12 +320,12 @@ export class SustainabilityMode {
       chip.className = "sustain-chip" + (this.armed === b.id ? " active" : "");
       chip.innerHTML = `<span>${b.icon}</span><span>${b.name}</span><span class="sustain-chip-cost">$${b.cost}k</span>`;
       chip.title = [
-        b.energyProduce ? `Nameplate ${b.energyProduce} MWh/yr${b.capacityFactor ? ` (~${Math.round(b.capacityFactor * 100)}% capacity factor)` : ""}` : (b.energyUse ? `Uses ${b.energyUse} MWh/yr` : null),
+        b.energyProduce ? `Nameplate ${b.energyProduce} MW${b.capacityFactor ? ` (~${Math.round(b.capacityFactor * 100)}% capacity factor)` : ""}` : (b.energyUse ? `Uses ${b.energyUse} MW` : null),
         b.intermittent === "solar" ? "Zero output at night — real solar intermittency" : null,
         b.intermittent === "wind" ? "Output gusts up and down with a live wind factor" : null,
         b.fuelCostPerTick ? `Fuel cost: $${b.fuelCostPerTick}k/tick, ongoing` : null,
         b.storageCapacity ? `Stores up to ${b.storageCapacity} MWh of surplus for later` : null,
-        `Pollution: ${b.pollution >= 0 ? "+" : ""}${b.pollution} tons CO₂e/yr`,
+        `Emissions index: ${b.pollution >= 0 ? "+" : ""}${b.pollution} (game units, not real tons)`,
         b.population ? `Houses ${b.population} people` : null,
         b.income ? `Income: +$${b.income}k/tick` : null,
       ].filter(Boolean).join(" · ");
@@ -413,12 +416,12 @@ export class SustainabilityMode {
         ${this.pollutionLevel > 40 ? "<div class=\"sustain-stat-note\">Smog is bad enough that people are actually leaving.</div>" : (!this.lastBrownout && s.population < s.populationCapacity ? "<div class=\"sustain-stat-note\">Moving in gradually toward capacity.</div>" : "")}
       </div>
       <div class="sustain-stat ${this.lastBrownout ? "sustain-stat-bad" : ""}">
-        <span>Energy (this tick)</span><strong>${s.energyUse} MWh/yr used, ${isNight ? "night" : `hour ${hour}/${DAY_LENGTH_TICKS}`}</strong>
+        <span>Energy (this tick)</span><strong>${s.energyUse} MW demand, ${(this.lastDelivered ?? 0).toFixed(1)} MW generated, ${isNight ? "night" : `hour ${hour}/${DAY_LENGTH_TICKS}`}</strong>
         ${this.lastBrownout ? "<div class=\"sustain-stat-note\">Brownout — solar/wind output and battery reserves couldn't cover demand this tick. Growth has stalled and commercial/industrial income is halved.</div>" : "<div class=\"sustain-stat-note\">Demand covered — including by battery discharge, if any was needed.</div>"}
       </div>
       <div class="sustain-stat"><span>Battery reserve</span><strong>${this.batteryStored.toFixed(1)} / ${s.storageCapacity} MWh</strong></div>
       <div class="sustain-stat"><span>Renewable share (nameplate)</span><strong>${s.renewableShare}%</strong></div>
-      <div class="sustain-stat ${s.pollution > 20 ? "sustain-stat-bad" : ""}"><span>Pollution (accumulated)</span><strong>${s.pollution} tons CO₂e</strong></div>
+      <div class="sustain-stat ${s.pollution > 20 ? "sustain-stat-bad" : ""}"><span>Pollution (accumulated)</span><strong>${s.pollution} index points</strong></div>
       <div class="sustain-stat"><span>Sustainability score</span><strong>${s.score} / 100</strong></div>
       <div class="sustain-stat-note">Score = 30 pts for meeting THIS tick's energy demand (5 if not) + up to 30 for renewable nameplate share + up to 25 for low accumulated pollution + up to 15 for filled housing capacity. A live snapshot of this run, not a forecast — see the intro above.</div>
       <div class="sustain-stat-note">Figures are simplified, order-of-magnitude estimates loosely based on real U.S. generation capacity-factor and typical energy-use data (EIA-style, circa 2023-2024) — illustrative for comparing tradeoffs, not exact facility specs or a real emissions/cost prediction.</div>
@@ -430,7 +433,6 @@ export class SustainabilityMode {
       kind: "cities",
       title: "My Cities",
       itemNoun: "city",
-      max: 3,
       serialize: () => ({ grid: this.grid, budget: this.budget, population: this.population, pollutionLevel: this.pollutionLevel, tick: this.tick, batteryStored: this.batteryStored }),
       apply: (data) => this.applySavedData(data),
     });

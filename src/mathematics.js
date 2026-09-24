@@ -608,10 +608,7 @@ export class MathematicsMode {
     if (data.nextRowId) this.nextRowId = data.nextRowId;
     if (data.venn) this.venn = migrateVennData(data.venn);
     for (const [id, btn] of Object.entries(this._typeButtons)) btn.classList.toggle("active", id === this.chartType);
-    this.svg.node().classList.toggle("hidden", this.chartType === "dewey");
-    this.deweyEl.classList.toggle("hidden", this.chartType !== "dewey");
-    this._buildControls();
-    this._draw();
+    this._setChartType(this.chartType);
   }
 
   _updateErrors() {
@@ -668,6 +665,10 @@ export class MathematicsMode {
       const px = e.clientX - rect.left, py = e.clientY - rect.top;
       const wx = this._wx(px), wy = this._wy(py);
       const factor = Math.pow(1.0015, e.deltaY);
+      // Keep both spans within a sane range so extreme zoom can't reach
+      // float-precision limits (which would stall the gridline loops).
+      const xSpan = (this.view.xMax - this.view.xMin) * factor, ySpan = (this.view.yMax - this.view.yMin) * factor;
+      if (xSpan < 1e-6 || ySpan < 1e-6 || xSpan > 1e7 || ySpan > 1e7) return;
       this.view = {
         xMin: wx + (this.view.xMin - wx) * factor, xMax: wx + (this.view.xMax - wx) * factor,
         yMin: wy + (this.view.yMin - wy) * factor, yMax: wy + (this.view.yMax - wy) * factor,

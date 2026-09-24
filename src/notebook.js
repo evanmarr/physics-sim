@@ -117,7 +117,7 @@ function openEditor(items, existing, prefillData) {
     <label>Title</label>
     <input id="nb-name" type="text" maxlength="80" value="${escapeHtml(name)}" placeholder="What are you testing?" />
     <label>Module</label>
-    <select id="nb-module">${MODULES.map((m) => `<option ${m === entry.module ? "selected" : ""}>${m}</option>`).join("")}</select>
+    <select id="nb-module">${(MODULES.includes(entry.module) || !entry.module ? MODULES : [...MODULES, entry.module]).map((m) => `<option ${m === entry.module ? "selected" : ""}>${escapeHtml(m)}</option>`).join("")}</select>
     <label>Prediction — what do you think will happen?</label>
     <textarea id="nb-prediction" rows="2">${escapeHtml(entry.prediction || "")}</textarea>
     <label>Variables changed</label>
@@ -125,13 +125,13 @@ function openEditor(items, existing, prefillData) {
     <div style="display:flex;gap:8px;margin:6px 0">
       <button id="nb-capture-initial">Capture current world as Initial State</button>
     </div>
-    <div id="nb-initial-preview">${entry.initialState ? `<img src="${entry.initialState.snapshot}" style="width:100%;border-radius:6px;border:1px solid var(--border)" />` : '<p class="saves-hint">No initial state captured yet.</p>'}</div>
+    <div id="nb-initial-preview">${entry.initialState ? `<img src="${escapeHtml(entry.initialState.snapshot)}" style="width:100%;border-radius:6px;border:1px solid var(--border)" />` : '<p class="saves-hint">No initial state captured yet.</p>'}</div>
     <label>Observation — what actually happened?</label>
     <textarea id="nb-observation" rows="2">${escapeHtml(entry.observation || "")}</textarea>
     <div style="display:flex;gap:8px;margin:6px 0">
       <button id="nb-capture-final">Capture current world as Final State</button>
     </div>
-    <div id="nb-final-preview">${entry.finalState ? `<img src="${entry.finalState.snapshot}" style="width:100%;border-radius:6px;border:1px solid var(--border)" />` : '<p class="saves-hint">No final state captured yet.</p>'}</div>
+    <div id="nb-final-preview">${entry.finalState ? `<img src="${escapeHtml(entry.finalState.snapshot)}" style="width:100%;border-radius:6px;border:1px solid var(--border)" />` : '<p class="saves-hint">No final state captured yet.</p>'}</div>
     <label>Explanation / conclusion</label>
     <textarea id="nb-conclusion" rows="3">${escapeHtml(entry.conclusion || "")}</textarea>
     <div style="display:flex;gap:8px;margin-top:10px">
@@ -146,7 +146,7 @@ function openEditor(items, existing, prefillData) {
     const snapshot = generateSnapshot(state.objects);
     entry[which] = { objects: state.objects, gravity: state.gravity, snapshot, capturedAt: Date.now() };
     document.getElementById(which === "initialState" ? "nb-initial-preview" : "nb-final-preview").innerHTML =
-      `<img src="${snapshot}" style="width:100%;border-radius:6px;border:1px solid var(--border)" />`;
+      `<img src="${escapeHtml(snapshot)}" style="width:100%;border-radius:6px;border:1px solid var(--border)" />`;
   };
   box.querySelector("#nb-capture-initial").addEventListener("click", () => captureState("initialState"));
   box.querySelector("#nb-capture-final").addEventListener("click", () => captureState("finalState"));
@@ -194,8 +194,8 @@ function renderCompare(a, b) {
     </table>
     ${(a.data.finalState || b.data.finalState) ? `
       <div style="display:flex;gap:10px;margin-top:10px">
-        ${a.data.finalState ? `<div><div class="saves-hint">${escapeHtml(a.name)} final state</div><img src="${a.data.finalState.snapshot}" style="width:100%;border-radius:6px" /><div class="saves-hint">${a.data.finalState.objects.length} objects</div></div>` : ""}
-        ${b.data.finalState ? `<div><div class="saves-hint">${escapeHtml(b.name)} final state</div><img src="${b.data.finalState.snapshot}" style="width:100%;border-radius:6px" /><div class="saves-hint">${b.data.finalState.objects.length} objects</div></div>` : ""}
+        ${a.data.finalState ? `<div><div class="saves-hint">${escapeHtml(a.name)} final state</div><img src="${escapeHtml(a.data.finalState.snapshot)}" style="width:100%;border-radius:6px" /><div class="saves-hint">${a.data.finalState.objects.length} objects</div></div>` : ""}
+        ${b.data.finalState ? `<div><div class="saves-hint">${escapeHtml(b.name)} final state</div><img src="${escapeHtml(b.data.finalState.snapshot)}" style="width:100%;border-radius:6px" /><div class="saves-hint">${b.data.finalState.objects.length} objects</div></div>` : ""}
       </div>
     ` : ""}
     <button id="nb-back" style="margin-top:12px">Back</button>

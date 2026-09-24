@@ -1062,11 +1062,12 @@ const PHYSICS_MODEL_INFO = {
   ],
   assumptions: [
     "Gravity is a constant downward acceleration, adjustable as a multiplier (default 1.0x) rather than varying with height.",
-    "Collisions are resolved by Matter.js's iterative constraint solver (10 position, 8 velocity, 6 constraint iterations per step).",
+    "Collisions are resolved by Matter.js's iterative solver (about 10 position and 8 velocity passes per step, more for joints and ropes).",
+    "Air is a simple drag that slows every body a little in proportion to its speed, scaled by the Air slider. There is no buoyancy.",
   ],
   limitations: [
     "Two-dimensional only — no motion or rotation out of the plane.",
-    "Uses a fixed, discrete timestep (semi-implicit Euler integration), not a continuous/analytic solution — fast-moving thin objects can occasionally tunnel through each other in one frame.",
+    "Uses a fixed, discrete timestep (Verlet-style integration), not a continuous/analytic solution — fast-moving thin objects can occasionally tunnel through each other in one frame.",
     "Material presets (wood/metal/rubber/glass) are illustrative relative values chosen to feel right, not measured samples of a specific real material.",
   ],
   sources: ["Newtonian mechanics (F = ma, momentum, restitution)", "Matter.js — the actual physics engine this sandbox runs on"],
@@ -1448,7 +1449,7 @@ function buildHomePage(root, onNavigate) {
         <h1>Kinetic</h1>
         <p class="home-slogan">Build it. Change it. See what happens.</p>
         <p class="home-tagline">Real simulations, not animations — physics, chemistry, astronomy,
-          mathematics, economics, zoology, sound, a city to run sustainably, a whiteboard for your own
+          mathematics, economics, zoology, sound, a city to run sustainably, a war strategy game, a whiteboard for your own
           ideas, and the history and security behind them all. Pick a section to start.</p>
         <div class="home-hero-ctas">
           <button class="home-cta home-cta-primary" id="home-cta-create">Create</button>

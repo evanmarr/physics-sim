@@ -62,10 +62,15 @@ function buildPasswordSimulator() {
   const stats = div("cyber-sim-stats");
   card.appendChild(stats);
 
-  const GUESSES_PER_SEC = 1e10; // a realistic offline fast-hash cracking rig, not an online login form's rate limit
+  const GUESSES_PER_SEC = 1e10; // an offline attack on a fast hash (like unsalted SHA-256 or MD5); a slow hash such as bcrypt or Argon2 makes each guess thousands of times costlier
 
+  // Attackers try the most common passwords first, so these fall in an instant
+  // no matter how the charset math looks.
+  const COMMON = ["password", "123456", "12345678", "qwerty", "abc123", "letmein", "welcome", "iloveyou", "admin", "monkey", "dragon", "football", "111111", "123456789", "password1", "qwerty123"];
   function estimate(pw) {
     if (!pw) return null;
+    const base = pw.toLowerCase().replace(/[^a-z0-9]+$/, "");
+    if (COMMON.includes(base)) return { bits: 5, seconds: 0, charset: 0, common: true };
     let charset = 0;
     if (/[a-z]/.test(pw)) charset += 26;
     if (/[A-Z]/.test(pw)) charset += 26;
@@ -117,6 +122,7 @@ function buildPasswordSimulator() {
     meterFill.style.background = color;
     stats.innerHTML = `
       <div><strong style="color:${color}">${label}</strong> — ${Math.round(bits)} bits of entropy</div>
+      ${result.common ? `<div class="cyber-sim-hint">This is on every attacker's list of most-common passwords, so it falls in moments whatever the math says.</div>` : ""}
       <div class="cyber-sim-hint">Estimated crack time at ${GUESSES_PER_SEC.toLocaleString()} guesses/sec (a realistic offline attack rig): <strong>${humanTime(seconds)}</strong></div>
     `;
   }
@@ -239,7 +245,7 @@ function buildPhishingSimulator() {
         found.add(i);
         el.classList.add("found");
         el.title = email.clues[i].reason;
-        scoreEl.textContent = `Found ${found.size} of ${email.clues.length} red flags`;
+        scoreEl.textContent = `Found ${found.size} of ${email.clues.length} ${email.legit ? "details worth checking" : "red flags"}`;
         if (found.size === email.clues.length) {
           scoreEl.textContent += " — nice catch, that's all of them!";
         }
@@ -265,11 +271,17 @@ async function sha256Hex(text) {
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+// Percent of the 256 output BITS that differ (a random pair differs in ~50%).
+// Comparing hex digits instead would read ~94%, since a digit only has to
+// differ in any one of its 4 bits.
 function hexDiffPercent(a, b) {
   if (!a || !b || a.length !== b.length) return null;
   let diff = 0;
-  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) diff++;
-  return Math.round((diff / a.length) * 100);
+  for (let i = 0; i < a.length; i++) {
+    let x = parseInt(a[i], 16) ^ parseInt(b[i], 16);
+    while (x) { diff += x & 1; x >>= 1; }
+  }
+  return Math.round((diff / (a.length * 4)) * 100);
 }
 
 function buildHashSimulator() {
@@ -281,7 +293,7 @@ function buildHashSimulator() {
 
   const p = document.createElement("p");
   p.className = "cyber-sim-desc";
-  p.textContent = "This computes a real SHA-256 hash (the same algorithm behind Bitcoin, TLS certificates, and most password storage) using your browser's own crypto engine — nothing faked. Type something, then change just one character and watch how much of the hash changes. That's the \"avalanche effect\": a good hash makes a tiny input change unpredictable and total, so a hash is great for proving a file wasn't tampered with, but useless for telling you how it was changed.";
+  p.textContent = "This computes a real SHA-256 hash (the same algorithm family behind Bitcoin and TLS certificates; note that passwords should be stored with a deliberately slow hash like bcrypt, scrypt or Argon2, not plain SHA-256) using your browser's own crypto engine — nothing faked. Type something, then change just one character and watch how much of the hash changes. That's the \"avalanche effect\": a good hash makes a tiny input change unpredictable and total, so a hash is great for proving a file wasn't tampered with, but useless for telling you how it was changed.";
   card.appendChild(p);
 
   const input = document.createElement("input");
@@ -316,7 +328,7 @@ function buildHashSimulator() {
     if (diffPct === null) {
       stats.innerHTML = `<div class="cyber-sim-hint">256 bits of output, all-or-nothing — no partial credit for a "close" guess.</div>`;
     } else {
-      stats.innerHTML = `<div class="cyber-sim-hint">Changed <strong>${diffPct}%</strong> of the hash's hex digits from one keystroke ago — for a good hash, that number hovers around 50% no matter how small the edit was.</div>`;
+      stats.innerHTML = `<div class="cyber-sim-hint">Changed <strong>${diffPct}%</strong> of the hash's bits from one keystroke ago — for a good hash, that number hovers around 50% no matter how small the edit was.</div>`;
     }
     lastHash = hash;
     lastText = text;
@@ -420,7 +432,7 @@ function build2FASimulator() {
 // something to test the rules against.
 const PROTOCOLS = ["TCP", "UDP"];
 const SAMPLE_IPS = ["203.0.113.7", "198.51.100.42", "192.0.2.15", "10.0.0.5", "185.220.101.3"];
-const KNOWN_BAD_IP = "185.220.101.3"; // a real Tor exit-node range used in security teaching examples
+const KNOWN_BAD_IP = "185.220.101.3"; // an address in a range used by Tor exit relays; here just a stand-in for "an unwanted source"
 
 function randomPacket() {
   return {
@@ -433,7 +445,8 @@ function randomPacket() {
 function evaluateRules(rules, packet) {
   for (const rule of rules) {
     const portMatch = !rule.port || Number(rule.port) === packet.port;
-    const ipMatch = !rule.ip || packet.ip.startsWith(rule.ip);
+    // Match whole octets, so "192.0.2.1" doesn't also catch 192.0.2.15.
+    const ipMatch = !rule.ip || packet.ip === rule.ip || packet.ip.startsWith(rule.ip.replace(/\.?$/, "."));
     const protoMatch = !rule.protocol || rule.protocol === packet.protocol;
     if (portMatch && ipMatch && protoMatch) return rule;
   }
@@ -449,7 +462,7 @@ function buildFirewallSimulator() {
 
   const p = document.createElement("p");
   p.className = "cyber-sim-desc";
-  p.textContent = "Simulated packets arrive on the left; your rules are checked top to bottom and the first one that matches wins (exactly how a real firewall like iptables evaluates its rule chain) — if nothing matches, the packet is dropped by default. Reorder matters: a broad ALLOW above a specific BLOCK will let the traffic the BLOCK was supposed to stop right through.";
+  p.textContent = "Simulated packets arrive on the left; your rules are checked top to bottom and the first one that matches wins (exactly how a real firewall like iptables evaluates its rule chain) — if nothing matches, this firewall drops the packet (a well-configured firewall is default-deny; some, like iptables, ship default-allow until you change the policy). Order matters: a broad ALLOW above a specific BLOCK will let the traffic the BLOCK was supposed to stop right through.";
   card.appendChild(p);
 
   const rulesList = div("cyber-fw-rules");
@@ -473,7 +486,7 @@ function buildFirewallSimulator() {
   const feed = div("cyber-fw-feed");
   card.appendChild(feed);
 
-  // A sane starting rule set — block a known-malicious source outright,
+  // A sane starting rule set — block one unwanted source outright,
   // allow the two normal web ports, drop everything else by falling
   // through to the implicit default-deny.
   const rules = [

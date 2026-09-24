@@ -20,7 +20,7 @@ export const CHALLENGES = [
     concept: "Magnetism only acts on ferrous metal",
     objective: "A magnet sits fixed nearby, but the ball resting next to it is Wood — a magnet has zero effect on wood, so nothing happens. Change the ball's material to Metal so the magnet actually pulls it in.",
     startingState: "A wood ball rests on the ground a short distance from a fixed magnet.",
-    successCondition: "The ball comes to rest touching the magnet.",
+    successCondition: "The ball ends up touching (or swinging right beside) the magnet.",
     hint: "Check each material's properties in the Physics panel — only Metal responds to a magnet's pull at all. Every other material here (Wood, Rubber, Glass) is completely magnetically inert, not just weakly affected.",
     explanation: "A magnet exerts a real, sharply distance-dependent force (falling off close to an inverse 4th power, the same steep taper a real permanent magnet's field has), but the code only ever applies that force to bodies whose material is Metal — every other material is skipped entirely, before the force calculation even runs. That makes this decided completely by material choice, with no aiming or tuning involved.",
     source: "Magnetic attraction only acts on ferromagnetic material — a real magnet does not attract wood, rubber, or glass.",
@@ -57,7 +57,7 @@ export const CHALLENGES = [
     startingState: "A ball rests on a spring pad set to a low power, with two target lines marked above it: a lower line it must clear and an upper line it must not.",
     successCondition: "The ball's peak height (once it starts falling back) lands between the two marked lines (750 ≤ apex y ≤ 900) — not short, not over.",
     hint: "A spring sets the ball's launch speed the instant it's touched — check the spring pad's own Power property. Peak height scales with the SQUARE of launch speed, so the window between clearing the lower line and overshooting the upper one is narrower than it looks; try around 20-21.",
-    explanation: "The original version of this only asked for a minimum height, so any power above threshold worked forever — turning the dial up further never hurt. Bounding the peak between two lines turns it into a real target: the same square-law sensitivity that makes a small power increase buy a lot of extra height also means overshooting the top line takes only slightly more power than clearing the bottom one.",
+    explanation: "Asking only for a minimum height would let any power above the threshold win — turning the dial up further would never hurt. Bounding the peak between two lines makes it a real target: because height grows with the square of launch speed, a small power increase buys a lot of extra height, so overshooting the top line takes only slightly more power than clearing the bottom one.",
     source: "Kinematics of vertical launch: peak height h = v²/(2g) — height grows with the square of launch speed, so a narrow height window maps to a narrow power window.",
     // Verified live (headless PhysicsSim run against this exact build()):
     // power 19-22 lands the apex inside [750,900]; 18 and below stays short
@@ -134,8 +134,8 @@ export const CHALLENGES = [
     startingState: "A cannon faces a tall, freestanding domino; a separate ball sits just beyond it, out of the cannon's own line of fire.",
     successCondition: "The goal ball (not the fired one) ends up a real distance from where it started (x ≥ 250).",
     hint: "A tall, thin object like this domino topples easily — the real question is whether it's still carrying enough momentum by the time it falls all the way over to meaningfully push what's beyond it. The default power barely tips it over in place; try well above 30.",
-    explanation: "Momentum transfers through a collision, but never perfectly — some is always lost to the collision itself. Button Chain used a discrete, all-or-nothing trigger; this is the opposite: a continuous, lossy handoff of momentum through a solid object, where 'enough' has to survive two transfers (cannon → domino, domino → goal ball) instead of one.",
-    source: "Conservation of momentum through an inelastic collision chain — each transfer keeps most, but not all, of the incoming momentum.",
+    explanation: "Total momentum is conserved in a collision, but it gets shared out between the objects, and some kinetic energy is lost as heat and sound (the bounce is never perfect). Button Chain used a discrete, all-or-nothing trigger; this is the opposite: a continuous handoff through a solid object, where 'enough' has to survive two transfers (cannon ball → domino, domino → goal ball) instead of one.",
+    source: "Conservation of momentum through a chain of inelastic collisions — momentum is passed along and shared, while some kinetic energy is lost at each impact.",
     cannonId: "chal_ll_cannon",
     goalCheck: (items) => {
       const goal = items.find((it) => it.id === "chal_ll_goalball");
@@ -161,7 +161,7 @@ export const CHALLENGES = [
     successCondition: "The fired ball comes to rest on the pit floor between the two walls (220 ≤ x ≤ 400), not stuck short and not sailed over both.",
     hint: "The near wall is short; the far wall is much taller. A steeper launch angle clears the near wall using less power, but that same steepness sends it over the far one too if the power is also high — angle and power both have to be chosen together, not tuned one at a time. Try around launchRotation -25° with power 30.",
     explanation: "Threading a shot between a minimum-height requirement (clear the short wall) and a maximum-range requirement (don't clear the tall one) means the valid (angle, power) combination is a small region, not a line — one of these alone is easy to satisfy, but satisfying both at once takes real, deliberate reasoning about the whole arc, not just watching one shot and nudging a single number.",
-    source: "Projectile motion: both range and peak height depend on launch angle and speed together (R = v²sin(2θ)/g).",
+    source: "Projectile motion: both range and peak height depend on launch angle and speed together (level-ground range R = v²sin(2θ)/g, ignoring air drag).",
     cannonId: "chal_tb_cannon",
     goalCheck: (items, tracker) => {
       if (!tracker.trackedBallId) return false;
@@ -219,7 +219,7 @@ export const CHALLENGES = [
     startingState: "A balanced seesaw with a light wooden payload ball resting on one end; the other end is empty, with a landing pad marked on the ground to the left.",
     successCondition: "The payload ball comes to rest on the ground inside the landing pad (−230 ≤ x ≤ −140), not short of it and not past it.",
     hint: "A Metal ball (much denser than the default Wood) dropped from a real height over the empty end reliably lands the payload in or very near the pad — too little mass or too little height falls short (or does nothing at all, like the unmodified default), and there's real headroom above the pad before it'd overshoot, but the pad itself is the actual target, not just \"anywhere past halfway.\"",
-    explanation: "Lever Launch only asked whether torque beat a threshold at all. This asks for a specific landing spot — the payload's range depends on both the impact torque (mass × drop height) AND how the seesaw's own geometry converts that into a launch, so hitting a defined window means treating the combination as one tunable system rather than just cranking one variable up.",
+    explanation: "Lever Launch only asked whether torque beat a threshold at all. This asks for a specific landing spot — the payload's range depends on both how hard the ball hits (its mass and drop height set its momentum and energy) AND how the seesaw's own geometry converts that into a launch, so hitting a defined window means treating the combination as one tunable system (a heavier or higher-dropped ball hits harder) rather than just cranking one variable up.",
     source: "Torque τ = F·r combined with the payload's own resulting projectile arc.",
     // Verified live: a Metal ball dropped from y=800 directly above the
     // empty end (x=-130) reliably sends the payload to x≈-168 (confirmed

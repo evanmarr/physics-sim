@@ -980,7 +980,7 @@ export class WarMode {
     this.listBox = el("div", "war-list"); this.listCard.appendChild(this.listBox);
     // hint
     const hint = el("div", "war-card war-dim");
-    hint.innerHTML = "Click an army to select; drag a box to select several. Click the map to move; drag from an army to draw a route; Shift adds waypoints. Click a selected army (or long-press) to split. S split, M merge, A/H/R stance, Space pause, Esc cancel. Stand on control points to capture them for reinforcements. Capture or destroy the enemy HQ to win.";
+    hint.innerHTML = "Click an army to select; drag a box to select several. Click the map to move; drag from an army to draw a route; Shift adds waypoints. Click a selected army (or long-press) to split; drag one army onto another to merge them. S split, M merge, A/H/R stance, Space pause, Esc cancel. Stand on control points to capture them for reinforcements. Destroy the enemy HQ or wipe out their armies to win; if time runs out, the stronger side wins.";
     this.side.append(c1, this.phaseCard, this.selCard, this.listCard, hint);
 
     // pointer input

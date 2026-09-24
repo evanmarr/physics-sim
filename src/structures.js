@@ -353,7 +353,7 @@ const STRUCTURE_MODEL_INFO = {
     { name: "Water density rho_w", value: 1000, unit: "kg/m³" },
     { name: "Pressure coefficient windward / leeward (incl. internal pressure)", value: "1.0 / 0.7", unit: "× gust factor 1.4; roof suction 0.9" },
     { name: "Peak ground accel (approx.)", value: "0.03·10^(0.33·(M−4))", unit: "g, capped at 2" },
-    { name: "Wood / Steel / Concrete density", value: "500 / 1500 / 2400", unit: "kg/m³ (stylized)" },
+    { name: "Wood / Steel / Concrete density", value: "500 / 1500 / 2400", unit: "kg/m³ (stylized effective values for a 1 m cell; real solid steel is ~7850 kg/m³, but real steel structures are mostly open frames)" },
     { name: "Joint break stretch: Wood / Steel / Concrete / Brick / Glass", value: "0.17 / 0.34 / 0.22 / 0.12 / 0.07", unit: "px of joint stretch (stylized)" },
     { name: "Saffir-Simpson Cat 1-5 speeds used", value: "38 / 46 / 54 / 64 / 78", unit: "m/s" },
   ],
@@ -365,7 +365,7 @@ const STRUCTURE_MODEL_INFO = {
   limitations: [
     "Material strengths, densities and costs are STYLIZED TEACHING VALUES, not engineering data. Do not use them to judge a real building.",
     "No plasticity, fatigue, soil-structure interaction, torsion, 3D effects, resonance tuning or code-based load factors.",
-    "The earthquake is a simple sinusoid plus noise, not a recorded ground motion; the magnitude-to-PGA map is a rough illustration.",
+    "The earthquake is a simple sinusoid plus noise, not a recorded ground motion; the magnitude-to-PGA map is a rough illustration (real PGA also depends strongly on distance from the fault, depth and soil, which this ignores).",
     "Flood and tsunami are simplified drag-plus-buoyancy loads; debris is a few small blocks.",
   ],
   sources: [

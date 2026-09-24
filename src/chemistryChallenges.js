@@ -19,7 +19,7 @@ export const CHEMISTRY_CHALLENGES = [
     id: "make_salt",
     name: "Make Table Salt",
     concept: "Ionic bonding & stoichiometry",
-    description: "Combine a soft, explosive alkali metal with a toxic yellow-green gas, one-to-one, to make something you'd happily put on fries.",
+    description: "Combine a soft, highly reactive alkali metal with a toxic yellow-green gas, one-to-one, to make something you'd happily put on fries.",
     reward: 30,
     check: (lastResult) => distinctIs(lastResult, "Na", "Cl") && lastResult.result.matched === true,
   },
@@ -39,7 +39,7 @@ export const CHEMISTRY_CHALLENGES = [
     id: "find_inert",
     name: "Prove a Noble Gas is Inert",
     concept: "Full electron shells = no reactivity",
-    description: "React any noble gas (helium, neon, argon...) with anything else and confirm you get \"No reaction.\"",
+    description: "React a noble gas (helium, neon, argon...) with almost anything and confirm you get \"No reaction.\" (Xenon with fluorine is a famous exception, so avoid that one.)",
     reward: 25,
     check: (lastResult) => {
       if (!lastResult || lastResult.hasWater || lastResult.distinct.length !== 2) return false;

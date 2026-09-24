@@ -70,11 +70,12 @@ export function parseMidiFile(buffer) {
   const ticksPerQuarter = division;
   const ntrks = (bytes[10] << 8) | bytes[11];
 
-  let pos = 14;
+  const headerLen = ((bytes[4] << 24) | (bytes[5] << 16) | (bytes[6] << 8) | bytes[7]) >>> 0;
+  let pos = 8 + (headerLen >= 6 ? headerLen : 6);
   const allEvents = []; // { tick, type: "tempo"|"note", ...}
   for (let t = 0; t < ntrks; t++) {
     if (readStr(pos, 4) !== "MTrk") throw new Error("Malformed MIDI file (missing MTrk chunk).");
-    const trackLen = (bytes[pos + 4] << 24) | (bytes[pos + 5] << 16) | (bytes[pos + 6] << 8) | bytes[pos + 7];
+    const trackLen = ((bytes[pos + 4] << 24) | (bytes[pos + 5] << 16) | (bytes[pos + 6] << 8) | bytes[pos + 7]) >>> 0;
     const trackEnd = pos + 8 + trackLen;
     pos += 8;
     let tick = 0, runningStatus = null;
@@ -82,8 +83,12 @@ export function parseMidiFile(buffer) {
       let delta; [delta, pos] = readVarLen(bytes, pos);
       tick += delta;
       let statusByte = bytes[pos];
-      if (statusByte < 0x80) { statusByte = runningStatus; } else { pos++; runningStatus = statusByte; }
+      if (statusByte < 0x80) {
+        if (runningStatus === null) { pos++; continue; } // stray data byte with no status to inherit — skip it
+        statusByte = runningStatus;
+      } else { pos++; if (statusByte < 0xf0) runningStatus = statusByte; else runningStatus = null; } // meta/sysex cancel running status
       const type = statusByte & 0xf0;
+      const channel = statusByte & 0x0f;
       if (statusByte === 0xff) { // meta event
         const metaType = bytes[pos++];
         let len; [len, pos] = readVarLen(bytes, pos);
@@ -98,7 +103,7 @@ export function parseMidiFile(buffer) {
       } else if (type === 0x90 || type === 0x80) { // note on / note off
         const note = bytes[pos++], velocity = bytes[pos++];
         const isOn = type === 0x90 && velocity > 0;
-        allEvents.push({ tick, type: isOn ? "noteOn" : "noteOff", note, velocity });
+        allEvents.push({ tick, type: isOn ? "noteOn" : "noteOff", note, velocity, channel });
       } else if (type === 0xa0 || type === 0xb0 || type === 0xe0) { // 2-data-byte messages
         pos += 2;
       } else if (type === 0xc0 || type === 0xd0) { // 1-data-byte messages (program change, channel pressure)
@@ -109,7 +114,10 @@ export function parseMidiFile(buffer) {
     }
     pos = trackEnd;
   }
-  allEvents.sort((a, b) => a.tick - b.tick);
+  // At equal ticks, note-offs are processed before note-ons so a
+  // re-struck note ends the old one rather than the new one.
+  const order = { tempo: 0, noteOff: 1, noteOn: 2 };
+  allEvents.sort((a, b) => a.tick - b.tick || order[a.type] - order[b.type]);
 
   // Convert ticks -> seconds by walking events in order, applying whatever
   // tempo is active at each point — a real tempo map, not an assumed
@@ -117,16 +125,19 @@ export function parseMidiFile(buffer) {
   let usPerQuarter = 500000, lastTick = 0, lastSec = 0;
   const tickToSec = (tick) => lastSec + ((tick - lastTick) * usPerQuarter) / 1e6 / ticksPerQuarter;
   const notes = [];
-  const openNotes = new Map(); // note -> {startSec, velocity}
+  const openNotes = new Map(); // "channel:note" -> queue of {startSec, velocity} (FIFO, so overlapping same-pitch notes pair in order)
   for (const ev of allEvents) {
     const sec = tickToSec(ev.tick);
     if (ev.type === "tempo") {
       lastSec = sec; lastTick = ev.tick; usPerQuarter = ev.usPerQuarter;
     } else if (ev.type === "noteOn") {
-      openNotes.set(ev.note, { startSec: sec, velocity: ev.velocity });
+      const key = ev.channel * 128 + ev.note;
+      if (!openNotes.has(key)) openNotes.set(key, []);
+      openNotes.get(key).push({ startSec: sec, velocity: ev.velocity });
     } else if (ev.type === "noteOff") {
-      const open = openNotes.get(ev.note);
-      if (open) { notes.push({ note: ev.note, velocity: open.velocity, startSec: open.startSec, endSec: Math.max(sec, open.startSec + 0.02) }); openNotes.delete(ev.note); }
+      const queue = openNotes.get(ev.channel * 128 + ev.note);
+      const open = queue && queue.shift();
+      if (open) notes.push({ note: ev.note, velocity: open.velocity, startSec: open.startSec, endSec: Math.max(sec, open.startSec + 0.02) });
     }
   }
   notes.sort((a, b) => a.startSec - b.startSec);
@@ -525,6 +536,9 @@ export class SoundMode {
     const audio = document.createElement("audio");
     audio.controls = true;
     audio.src = url;
+    // Browsers keep pitch constant when playbackRate changes by default;
+    // turn that off so speed and pitch really are coupled, as described.
+    audio.preservesPitch = false; audio.mozPreservesPitch = false; audio.webkitPreservesPitch = false;
     container.appendChild(audio);
 
     const { wrap: canvasWrap, canvas } = this._makeCanvas();

@@ -596,7 +596,7 @@ export const DEWEY_SECTIONS = [
   { code: "446", name: "Not assigned or no longer used" },
   { code: "447", name: "Historical and geographic variations, modern nongeographic variations of French" },
   { code: "448", name: "Standard French usage (Prescriptive linguistics)" },
-  { code: "449", name: "Occitan Catalan, Franco-Provençal" },
+  { code: "449", name: "Occitan, Catalan, Franco-Provençal" },
   { code: "450", name: "Italian, Dalmatian, Romanian, Rhaetian, Sardinian, Corsican" },
   { code: "451", name: "Writing systems, phonology, phonetics of standard Italian" },
   { code: "452", name: "Etymology of standard Italian" },

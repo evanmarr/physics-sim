@@ -143,17 +143,17 @@ export const STARS = [
 
 // Equilibrium blackbody temperature (K) of a planet at distance `distAu`
 // AU from a star of `luminosity` solar units, with the given Bond albedo
-// (0 = absorbs everything, 1 = reflects everything). 278.5 K is Earth's own
+// (0 = absorbs everything, 1 = reflects everything). 278.3 K is Earth's own
 // real zero-albedo equilibrium temperature at 1 AU from the Sun, derived
 // from the actual solar constant (S₀ = 1361 W/m²) via the Stefan-Boltzmann
 // law: T = (S₀/4σ)^0.25 — everything else is the same inverse-square-law
 // flux scaling (flux ∝ L/d²) applied relative to that anchor, so this
 // isn't a separate formula per star, just the one real physical relationship.
 export function equilibriumTemperatureK(luminosity, distAu, albedo = 0.3) {
-  return 278.5 * Math.pow(luminosity, 0.25) / Math.sqrt(distAu) * Math.pow(1 - albedo, 0.25);
+  return 278.3 * Math.pow(luminosity, 0.25) / Math.sqrt(distAu) * Math.pow(1 - albedo, 0.25);
 }
 
-// Conservative habitable-zone bounds (AU) for a star of the given
+// Simplified habitable-zone bounds (AU) for a star of the given
 // luminosity — the classic simplified scaling from the Kasting et al. (1993)
 // limits for an Earth-like planet: the inner edge is where a runaway moist
 // greenhouse becomes likely (~1.1x Earth's solar flux), the outer edge is
@@ -253,8 +253,13 @@ export function findNextSolarEclipse(fromDate, searchMonths = 18) {
     cursor += synodic;
   }
 
-  candidates.sort((a, b) => Math.abs(a.moonLat) - Math.abs(b.moonLat));
-  const winner = candidates[0];
+  // "Next" means earliest: take the first new moon (in date order) that is
+  // close enough to a node for an eclipse. Only if none qualifies within the
+  // search window, fall back to the tightest alignment found.
+  const upcoming = candidates.filter((c) => c.jd >= startJd);
+  const pool = upcoming.length ? upcoming : candidates;
+  const winner = pool.find((c) => Math.abs(c.moonLat) < 1.5)
+    || pool.slice().sort((a, b) => Math.abs(a.moonLat) - Math.abs(b.moonLat))[0];
   return {
     date: julianDateToDate(winner.jd),
     moonLatitude: winner.moonLat,

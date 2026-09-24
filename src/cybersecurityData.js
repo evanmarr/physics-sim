@@ -63,7 +63,7 @@ export const CYBER_ENTRIES = [
     category: "malware",
     name: "CryptoLocker",
     year: "2013",
-    summary: "One of the first ransomware strains to demand payment in Bitcoin, popularizing the modern ransomware model.",
+    summary: "One of the first ransomware strains to accept Bitcoin, popularizing the modern ransomware model.",
     detail: "Encrypted victims' files and displayed a countdown timer demanding payment for the decryption key, spread mainly through email attachments and an existing botnet. Its takedown (Operation Tovar, 2014) recovered the private keys needed to decrypt files for free.",
     tags: ["ransomware", "encryption", "bitcoin", "botnet"],
   },
@@ -127,7 +127,7 @@ export const CYBER_ENTRIES = [
     name: "Conficker",
     year: "2008",
     summary: "A worm that infected an estimated 9-15 million Windows computers, forming one of the largest botnets ever recorded.",
-    detail: "Its sheer scale and the sophistication of how it hid and updated itself alarmed security researchers enough to form the 'Conficker Working Group,' an unusual industry-wide coalition — yet its authors were never identified, and it was ultimately never used for anything more than sitting dormant.",
+    detail: "Its sheer scale and the sophistication of how it hid and updated itself alarmed security researchers enough to form the 'Conficker Working Group,' an unusual industry-wide coalition — yet its authors were never publicly identified, and the botnet mostly sat dormant, only occasionally used to push scareware.",
     tags: ["worm", "botnet"],
   },
   {
@@ -145,7 +145,7 @@ export const CYBER_ENTRIES = [
     name: "Petya",
     year: "2016",
     summary: "Ransomware that encrypted an entire hard drive's file table at once, rather than files one at a time.",
-    detail: "Instead of slowly encrypting individual files, Petya overwrote the master boot record and encrypted the disk's master file table, locking out the whole drive in one stroke — a precursor to the far more destructive NotPetya the following year, which reused some of its code.",
+    detail: "Instead of slowly encrypting individual files, Petya overwrote the master boot record and encrypted the disk's master file table, locking out the whole drive in one stroke — a precursor to the far more destructive NotPetya the following year, which borrowed its look and name but was largely new code.",
     tags: ["ransomware", "master boot record"],
   },
   {
@@ -209,7 +209,7 @@ export const CYBER_ENTRIES = [
     category: "hacker",
     name: "Samy Kamkar",
     year: "2005",
-    summary: "Created the fastest-spreading virus of its time as a MySpace prank — it wasn't designed to spread at all.",
+    summary: "Created what was then the fastest-spreading virus ever, as a MySpace prank that got out of hand.",
     detail: "His 'Samy' worm just added 'Samy is my hero' and an automatic friend request to anyone who viewed his profile — but each infected profile then infected everyone who viewed it, reaching over a million profiles in under 20 hours before MySpace was forced offline to contain it.",
     tags: ["worm", "myspace", "social network"],
   },
@@ -228,7 +228,7 @@ export const CYBER_ENTRIES = [
     name: "Marcus Hutchins (MalwareTech)",
     year: "2017",
     summary: "Accidentally stopped the global spread of the WannaCry ransomware attack within hours of it breaking out.",
-    detail: "While reverse-engineering a WannaCry sample, Hutchins registered a strange, unregistered domain name found in its code out of curiosity — that single act triggered a 'kill switch' built into the malware, halting its worldwide spread almost immediately.",
+    detail: "While reverse-engineering a WannaCry sample, Hutchins registered a strange, unregistered domain name found in its code, meaning to track the malware's spread — that single act triggered a 'kill switch' built into the malware, halting its worldwide spread almost immediately.",
     tags: ["wannacry", "kill switch", "security research"],
   },
 
@@ -284,7 +284,7 @@ export const CYBER_ENTRIES = [
     name: "Cult of the Dead Cow",
     year: "1984–present",
     summary: "One of the oldest hacking groups in existence, credited with coining the term 'hacktivism.'",
-    detail: "Founded in a Lubbock, Texas, fast-food restaurant's meat locker (hence the name), cDc released Back Orifice in 1998 — a remote-administration tool built to embarrass Microsoft over Windows security holes, drawing wide attention to how vulnerable the OS really was. Members later included Beto O'Rourke, who went on to serve in Congress and run for US president.",
+    detail: "Founded in 1984 in a former slaughterhouse in Lubbock, Texas (hence the name), cDc released Back Orifice in 1998 — a remote-administration tool built to embarrass Microsoft over Windows security holes, drawing wide attention to how vulnerable the OS really was. Members later included Beto O'Rourke, who went on to serve in Congress and run for US president.",
     tags: ["hacktivism", "back orifice", "windows security"],
   },
   {

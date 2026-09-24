@@ -2,13 +2,13 @@
 // elements reactions actually care about) common oxidation states.
 //
 // Electron shell counts (the classic "2, 8, 8, 1"-style Bohr diagram) are
-// *derived*, not hand-typed, using the standard Aufbau/Madelung subshell
-// fill order summed by principal quantum number. That's correct for the
-// large majority of elements. About twenty — mostly transition metals like
-// chromium and copper, where a d-subshell "steals" an electron from the
-// outer s-subshell — are known real-world exceptions to strict Aufbau
-// filling; this model doesn't special-case those; it's a simplified,
-// consistent shell model for visualization, not a subshell-exact one.
+// derived using the standard Aufbau/Madelung subshell fill order summed by
+// principal quantum number, which is correct for the large majority of
+// elements. The known ground-state exceptions (chromium, copper, palladium,
+// gold, the early actinides, etc., where a d- or f-subshell shifts an
+// electron out of the outer s-subshell) are listed in SHELL_EXCEPTIONS below.
+// Superheavy elements (Z >= 104) use the predicted Aufbau filling; their real
+// configurations have not been measured.
 
 export const CATEGORY_COLORS = {
   "alkali": "#e2483f",
@@ -164,7 +164,19 @@ const AUFBAU_ORDER = [
   [4, 10], [5, 6], [6, 2], [4, 14], [5, 10], [6, 6], [7, 2], [5, 14], [6, 10], [7, 6],
 ];
 
+// Measured ground-state shell counts that differ from strict Aufbau order.
+const SHELL_EXCEPTIONS = {
+  24: [2, 8, 13, 1], 29: [2, 8, 18, 1], 41: [2, 8, 18, 12, 1], 42: [2, 8, 18, 13, 1],
+  44: [2, 8, 18, 15, 1], 45: [2, 8, 18, 16, 1], 46: [2, 8, 18, 18], 47: [2, 8, 18, 18, 1],
+  57: [2, 8, 18, 18, 9, 2], 58: [2, 8, 18, 19, 9, 2], 64: [2, 8, 18, 25, 9, 2],
+  78: [2, 8, 18, 32, 17, 1], 79: [2, 8, 18, 32, 18, 1],
+  89: [2, 8, 18, 32, 18, 9, 2], 90: [2, 8, 18, 32, 18, 10, 2], 91: [2, 8, 18, 32, 20, 9, 2],
+  92: [2, 8, 18, 32, 21, 9, 2], 93: [2, 8, 18, 32, 22, 9, 2], 96: [2, 8, 18, 32, 25, 9, 2],
+  103: [2, 8, 18, 32, 32, 8, 3],
+};
+
 function shellsFor(z) {
+  if (SHELL_EXCEPTIONS[z]) return SHELL_EXCEPTIONS[z].slice();
   const shells = [0, 0, 0, 0, 0, 0, 0];
   let remaining = z;
   for (const [n, cap] of AUFBAU_ORDER) {
@@ -182,9 +194,9 @@ function shellsFor(z) {
 const OXIDATION_STATES = {
   H: [1, -1], Li: [1], Na: [1], K: [1], Rb: [1], Cs: [1], Fr: [1],
   Be: [2], Mg: [2], Ca: [2], Sr: [2], Ba: [2], Ra: [2],
-  B: [3], Al: [3], Ga: [3], In: [3], Tl: [3, 1],
+  B: [3, -3], Al: [3], Ga: [3], In: [3], Tl: [3, 1],
   C: [4, -4, 2], Si: [4, -4], Ge: [4], Sn: [4, 2], Pb: [2, 4],
-  N: [-3, 3, 5], P: [-3, 3, 5], As: [-3, 3, 5], Sb: [3, 5], Bi: [3],
+  N: [-3, 3, 5], P: [-3, 3, 5], As: [-3, 3, 5], Sb: [3, 5, -3], Bi: [3, 5],
   O: [-2], S: [-2, 4, 6], Se: [-2, 4, 6], Te: [-2, 4, 6],
   F: [-1], Cl: [-1, 1, 5, 7], Br: [-1, 1, 5], I: [-1, 1, 5, 7], At: [-1],
   He: [0], Ne: [0], Ar: [0], Kr: [0], Xe: [0], Rn: [0], Og: [0],
@@ -193,6 +205,10 @@ const OXIDATION_STATES = {
   Y: [3], Zr: [4], Nb: [5], Mo: [6, 4], Tc: [7], Ru: [3, 4], Rh: [3], Pd: [2, 4],
   Ag: [1], Cd: [2], Hf: [4], Ta: [5], W: [6, 4], Re: [4, 7], Os: [4], Ir: [3, 4],
   Pt: [2, 4], Au: [3, 1], Hg: [2, 1], Po: [2, 4],
+  La: [3], Ce: [3, 4], Pr: [3], Nd: [3], Pm: [3], Sm: [3, 2], Eu: [3, 2], Gd: [3], Tb: [3], Dy: [3],
+  Ho: [3], Er: [3], Tm: [3], Yb: [3, 2], Lu: [3],
+  Ac: [3], Th: [4], Pa: [5, 4], U: [6, 4, 3], Np: [5, 4, 6], Pu: [4, 3, 6], Am: [3, 4], Cm: [3], Bk: [3, 4],
+  Cf: [3], Es: [3], Fm: [3], Md: [3, 2], No: [2, 3], Lr: [3],
 };
 
 const GROUP_DEFAULT_OXIDATION = { 1: 1, 2: 2, 13: 3, 14: 4, 15: -3, 16: -2, 17: -1, 18: 0 };
@@ -233,9 +249,9 @@ const DIATOMIC = new Set(["H", "N", "O", "F", "Cl", "Br", "I"]);
 // rest of the periodic table with a simplified but broadly-applicable
 // prediction instead of a hand-verified one.
 export const REACTION_TABLE = {
-  "H-O": { formula: "H₂O", name: "Water", type: "covalent", energy: "exothermic", ratio: { H: 2, O: 1 }, structure: "H—O—H", note: "Two hydrogens share electrons with one oxygen. The reaction that powers hydrogen fuel cells and rocket engines (burned explosively); splitting water back into H₂ and O₂ (electrolysis) takes that energy back in." },
+  "H-O": { formula: "H₂O", name: "Water", type: "covalent", energy: "exothermic", ratio: { H: 2, O: 1 }, structure: "H—O—H", note: "Two hydrogens share electrons with one oxygen. The reaction that powers hydrogen fuel cells and rocket engines (burned rapidly); splitting water back into H₂ and O₂ (electrolysis) takes that energy back in." },
   "Cl-H": { formula: "HCl", name: "Hydrogen chloride", type: "covalent", energy: "exothermic", ratio: { H: 1, Cl: 1 }, structure: "H—Cl", note: "Dissolves in water to form hydrochloric acid — the acid in your stomach." },
-  "Cl-Na": { formula: "NaCl", name: "Table salt", type: "ionic", energy: "exothermic", ratio: { Na: 1, Cl: 1 }, structure: "Na⁺ Cl⁻", note: "Sodium gives up its outer electron, chlorine takes it — a violent reaction between a soft explosive metal and a toxic gas that somehow makes the salt on your fries." },
+  "Cl-Na": { formula: "NaCl", name: "Table salt", type: "ionic", energy: "exothermic", ratio: { Na: 1, Cl: 1 }, structure: "Na⁺ Cl⁻", note: "Sodium gives up its outer electron, chlorine takes it — a violent reaction between a soft, reactive metal and a toxic gas that somehow makes the salt on your fries." },
   "C-O": { formula: "CO₂", name: "Carbon dioxide", type: "covalent", energy: "exothermic", ratio: { C: 1, O: 2 }, structure: "O═C═O", note: "What you exhale, and what plants breathe in. Also what burning carbon-based fuel produces." },
   "H-N": { formula: "NH₃", name: "Ammonia", type: "covalent", energy: "exothermic", ratio: { N: 1, H: 3 }, structure: "H—N(—H)—H", note: "Made industrially by the millions of tons via the Haber process to feed the world's crops as fertilizer." },
   "C-H": { formula: "CH₄", name: "Methane", type: "covalent", energy: "exothermic", ratio: { C: 1, H: 4 }, structure: "H—C(—H)(—H)—H", note: "The simplest hydrocarbon — natural gas is mostly this. A potent greenhouse gas." },
@@ -268,7 +284,7 @@ export const REACTION_TABLE = {
   "Cl-Mg": { formula: "MgCl₂", name: "Magnesium chloride", type: "ionic", energy: "exothermic", ratio: { Mg: 1, Cl: 2 }, structure: "Cl⁻ Mg²⁺ Cl⁻", note: "Spread on roads to melt ice, and used to make tofu curdle from soy milk." },
   "Ca-Cl": { formula: "CaCl₂", name: "Calcium chloride", type: "ionic", energy: "exothermic", ratio: { Ca: 1, Cl: 2 }, structure: "Cl⁻ Ca²⁺ Cl⁻", note: "Dissolving it in water releases so much heat it's used in instant hand warmers and heavy-duty ice melt." },
   "Mg-N": { formula: "Mg₃N₂", name: "Magnesium nitride", type: "ionic", energy: "exothermic", ratio: { Mg: 3, N: 2 }, structure: "(Mg²⁺)₃ (N³⁻)₂", note: "One reason burning magnesium can't be put out with a nitrogen extinguisher — it'll happily react with nitrogen gas too, not just oxygen." },
-  "Cu-S": { formula: "CuS", name: "Copper sulfide", type: "ionic", energy: "exothermic", ratio: { Cu: 1, S: 1 }, structure: "Cu²⁺ S²⁻", note: "The dark tarnish that forms on copper and silverware exposed to sulfur compounds in the air." },
+  "Cu-S": { formula: "CuS", name: "Copper sulfide", type: "ionic", energy: "exothermic", ratio: { Cu: 1, S: 1 }, structure: "Cu²⁺ S²⁻", note: "The dark tarnish that forms on copper exposed to sulfur compounds in the air (silverware tarnishes the same way, as silver sulfide)." },
   "Fe-S": { formula: "FeS", name: "Iron sulfide", type: "ionic", energy: "exothermic", ratio: { Fe: 1, S: 1 }, structure: "Fe²⁺ S²⁻", note: "A classic classroom demo — mix iron filings and sulfur powder, heat it, and the reaction sustains itself once started." },
   "O-Ti": { formula: "TiO₂", name: "Titanium dioxide", type: "ionic", energy: "exothermic", ratio: { Ti: 1, O: 2 }, structure: "Ti⁴⁺ (O²⁻)₂", note: "The brilliant white pigment in most white paint, sunscreen, and the coating on some pills." },
   "Cr-O": { formula: "Cr₂O₃", name: "Chromium(III) oxide", type: "ionic", energy: "exothermic", ratio: { Cr: 2, O: 3 }, structure: "(Cr³⁺)₂ (O²⁻)₃", note: "A deep green pigment used in paint, ceramics, and camouflage coatings." },
@@ -299,7 +315,7 @@ export const REACTION_TABLE = {
   "Cl-P": { formula: "PCl₃", name: "Phosphorus trichloride", type: "covalent", energy: "exothermic", ratio: { P: 1, Cl: 3 }, structure: "Cl—P(—Cl)—Cl", note: "A major industrial intermediate used to manufacture pesticides and flame retardants." },
   "Cl-S": { formula: "SCl₂", name: "Sulfur dichloride", type: "covalent", energy: "exothermic", ratio: { S: 1, Cl: 2 }, structure: "Cl—S—Cl", note: "A foul-smelling, corrosive liquid used to make mustard gas historically and, more benignly, in vulcanizing rubber." },
   "C-Cl": { formula: "CCl₄", name: "Carbon tetrachloride", type: "covalent", energy: "exothermic", ratio: { C: 1, Cl: 4 }, structure: "Cl—C(—Cl)(—Cl)—Cl", note: "Once a common dry-cleaning solvent and fire extinguisher fluid — phased out once it was found to deplete the ozone layer and damage the liver." },
-  "C-F": { formula: "CF₄", name: "Carbon tetrafluoride", type: "covalent", energy: "exothermic", ratio: { C: 1, F: 4 }, structure: "F—C(—F)(—F)—F", note: "Extremely stable and chemically inert — used to etch silicon in computer-chip manufacturing precisely because it barely reacts with anything else." },
+  "C-F": { formula: "CF₄", name: "Carbon tetrafluoride", type: "covalent", energy: "exothermic", ratio: { C: 1, F: 4 }, structure: "F—C(—F)(—F)—F", note: "Extremely stable — the strong C—F bonds make it inert until a plasma tears it apart, which is how it's used to etch silicon in computer-chip manufacturing. Also a very long-lived greenhouse gas." },
   "Ca-N": { formula: "Ca₃N₂", name: "Calcium nitride", type: "ionic", energy: "exothermic", ratio: { Ca: 3, N: 2 }, structure: "(Ca²⁺)₃ (N³⁻)₂", note: "Reacts vigorously with water to release ammonia gas — a useful reminder that 'nitride' compounds aren't nitrates." },
   "Al-N": { formula: "AlN", name: "Aluminum nitride", type: "covalent", energy: "exothermic", ratio: { Al: 1, N: 1 }, structure: "—Al—N—, repeating network", note: "Conducts heat almost as well as some metals while remaining a strong electrical insulator — prized for cooling high-power electronics." },
   "Ba-Cl": { formula: "BaCl₂", name: "Barium chloride", type: "ionic", energy: "exothermic", ratio: { Ba: 1, Cl: 2 }, structure: "Cl⁻ Ba²⁺ Cl⁻", note: "Burns with a vivid green flame — the same barium compounds used to color fireworks green." },
@@ -318,13 +334,13 @@ export const REACTION_TABLE = {
   "H-K": { formula: "KH", name: "Potassium hydride", type: "ionic", energy: "exothermic", ratio: { K: 1, H: 1 }, structure: "K⁺ H⁻", note: "The hydrogen here is the negatively-charged hydride ion, not a proton — the opposite of the H⁺ found in acids." },
   "Au-Cl": { formula: "AuCl₃", name: "Gold(III) chloride", type: "covalent", energy: "exothermic", ratio: { Au: 1, Cl: 3 }, structure: "Au³⁺ (Cl⁻)₃, bridged dimer", note: "Used in gold electroplating and in making the deep ruby-red 'cranberry glass' popular in Victorian-era decor." },
   "N-Ti": { formula: "TiN", name: "Titanium nitride", type: "covalent", energy: "exothermic", ratio: { Ti: 1, N: 1 }, structure: "Ti—N (rock-salt lattice)", note: "Extremely hard and gold-colored — used as a wear-resistant coating on drill bits and, decoratively, on some jewelry and watch cases." },
-  "C-Ti": { formula: "TiC", name: "Titanium carbide", type: "covalent", energy: "exothermic", ratio: { Ti: 1, C: 1 }, structure: "Ti—C (rock-salt lattice)", note: "One of the hardest materials known to exist naturally-derived — used in cutting tools and heat-resistant coatings." },
+  "C-Ti": { formula: "TiC", name: "Titanium carbide", type: "covalent", energy: "exothermic", ratio: { Ti: 1, C: 1 }, structure: "Ti—C (rock-salt lattice)", note: "One of the hardest known ceramics, with a melting point above 3,000 °C — used in cutting tools and heat-resistant coatings." },
   "C-W": { formula: "WC", name: "Tungsten carbide", type: "covalent", energy: "exothermic", ratio: { W: 1, C: 1 }, structure: "W—C (dense covalent lattice)", note: "Nearly as hard as diamond — most 'carbide-tipped' drill bits and saw blades are exactly this." },
   "F-Xe": { formula: "XeF₂", name: "Xenon difluoride", type: "covalent", energy: "exothermic", ratio: { Xe: 1, F: 2 }, structure: "F—Xe—F", note: "One of the first compounds ever made from a 'noble' gas, overturning the old assumption that these elements never react with anything." },
   "N-Si": { formula: "Si₃N₄", name: "Silicon nitride", type: "covalent", energy: "exothermic", ratio: { Si: 3, N: 4 }, structure: "Si—N (covalent ceramic network)", note: "A tough, heat-resistant ceramic used in ball bearings, turbine blades, and some engine components." },
   "Cl-Ti": { formula: "TiCl₄", name: "Titanium tetrachloride", type: "covalent", energy: "exothermic", ratio: { Ti: 1, Cl: 4 }, structure: "Cl—Ti(—Cl)(—Cl)—Cl", note: "A fuming liquid at room temperature, used industrially as the key step in manufacturing titanium dioxide, the white pigment in most white paint." },
   "Al-F": { formula: "AlF₃", name: "Aluminum fluoride", type: "ionic", energy: "exothermic", ratio: { Al: 1, F: 3 }, structure: "Al³⁺ (F⁻)₃", note: "Added to molten aluminum oxide during aluminum smelting to lower its melting point and save enormous amounts of energy." },
-  "Al-Br": { formula: "AlBr₃", name: "Aluminum bromide", type: "covalent", energy: "exothermic", ratio: { Al: 1, Br: 3 }, structure: "Al—Br (covalent, dimerizes to Al₂Br₆)", note: "Unlike most aluminum salts, this one is covalent rather than ionic and conducts electricity when melted, a classic textbook exception." },
+  "Al-Br": { formula: "AlBr₃", name: "Aluminum bromide", type: "covalent", energy: "exothermic", ratio: { Al: 1, Br: 3 }, structure: "Al—Br (covalent, dimerizes to Al₂Br₆)", note: "Unlike most aluminum salts, this one is covalent rather than ionic — it exists as Al₂Br₆ pairs and barely conducts electricity when melted, a classic textbook exception." },
   "Al-I": { formula: "AlI₃", name: "Aluminum iodide", type: "covalent", energy: "exothermic", ratio: { Al: 1, I: 3 }, structure: "Al—I (covalent, dimerizes to Al₂I₆)", note: "The reaction between powdered aluminum and iodine is a classic (and vigorous) chemistry demonstration, releasing visible purple iodine vapor." },
   "F-Fe": { formula: "FeF₃", name: "Iron(III) fluoride", type: "ionic", energy: "exothermic", ratio: { Fe: 1, F: 3 }, structure: "Fe³⁺ (F⁻)₃", note: "A pale, nearly colorless solid — unlike iron's oxides and chlorides, its fluoride shows almost none of iron's usual rust-like coloring." },
   "Ag-S": { formula: "Ag₂S", name: "Silver sulfide", type: "ionic", energy: "exothermic", ratio: { Ag: 2, S: 1 }, structure: "(Ag⁺)₂ S²⁻", note: "The black tarnish that forms on silverware — caused by trace sulfur compounds in ordinary air, not by oxygen at all." },
@@ -398,7 +414,7 @@ function formatRatio(counts) {
 // this is a lookup for the nonmetals/halogens that can appear here.
 const IONIC_ROOT = {
   H: "Hydride", C: "Carbide", N: "Nitride", O: "Oxide", P: "Phosphide", S: "Sulfide", Se: "Selenide",
-  F: "Fluoride", Cl: "Chloride", Br: "Bromide", I: "Iodide", At: "Astatide", Ts: "Tennestide",
+  F: "Fluoride", Cl: "Chloride", Br: "Bromide", I: "Iodide", At: "Astatide", Ts: "Tennesside",
 };
 function ionicRoot(nonmetal) {
   return IONIC_ROOT[nonmetal.symbol] ?? `${nonmetal.name}ide`;
@@ -419,11 +435,13 @@ export function predictWaterReaction(el) {
   return {
     formula: el.category === "alkali" ? `2${el.symbol} + 2H₂O → 2${el.symbol}OH + H₂↑`
       : el.symbol === "Al" ? `2Al + 6H₂O → 2Al(OH)₃ + 3H₂↑`
+      : el.symbol === "Zn" ? `Zn + H₂O(steam) → ZnO + H₂↑`
+      : el.symbol === "Fe" ? `3Fe + 4H₂O(steam) → Fe₃O₄ + 4H₂↑`
       : `${el.symbol} + 2H₂O → ${el.symbol}(OH)₂ + H₂↑`,
-    name: `${el.name} hydroxide + hydrogen gas`,
+    name: el.symbol === "Zn" ? "Zinc oxide + hydrogen gas" : el.symbol === "Fe" ? "Iron(II,III) oxide + hydrogen gas" : `${el.name} hydroxide + hydrogen gas`,
     type: "ionic",
     energy: "exothermic",
-    note: `${el.name} reacts with water — reactivity: ${reactivity}. It displaces hydrogen gas and forms an alkaline hydroxide solution. Alkali metals react more violently as you go down the group — the outer electron is held more loosely the farther it sits from the nucleus.`,
+    note: `${el.name} reacts with water — reactivity: ${reactivity}. It displaces hydrogen gas from the water${el.symbol === "Zn" || el.symbol === "Fe" ? " and forms an oxide (this only happens with hot steam)" : " and forms a hydroxide"}. Among the alkali metals, reactivity climbs from Li to Cs — the outer electron is held more loosely the farther it sits from the nucleus.`,
   };
 }
 
@@ -482,8 +500,8 @@ export function predictReaction(elA, elB) {
 }
 
 // ---- Melting/boiling points (Kelvin) and phase-at-temperature ----
-// Curated for the commonly-explored elements; anything else falls back to a
-// category-typical estimate. These are approximate, standard-pressure
+// Measured values for nearly every element through lawrencium; anything else
+// falls back to a category-typical estimate. These are approximate, standard-pressure
 // values — enough to teach "solid/liquid/gas at this temperature," not a
 // reference table.
 const MELT_BOIL = {
@@ -492,14 +510,26 @@ const MELT_BOIL = {
   Al: [933, 2792], Si: [1687, 3538], P: [317, 550], S: [388, 718], Cl: [172, 239], Ar: [84, 87],
   K: [337, 1032], Ca: [1115, 1757], Sc: [1814, 3109], Ti: [1941, 3560], V: [2183, 3680],
   Cr: [2180, 2944], Mn: [1519, 2334], Fe: [1811, 3134], Co: [1768, 3200], Ni: [1728, 3186],
-  Cu: [1358, 2835], Zn: [693, 1180], Ga: [303, 2673], Ge: [1211, 3106], As: [1090, 887],
+  Cu: [1358, 2835], Zn: [693, 1180], Ga: [303, 2673], Ge: [1211, 3106], As: [887, 887],
   Se: [494, 958], Br: [266, 332], Kr: [116, 120], Rb: [312, 961], Sr: [1050, 1655],
   Y: [1799, 3609], Zr: [2128, 4650], Nb: [2750, 5017], Mo: [2896, 4912], Ru: [2607, 4423],
   Rh: [2237, 3968], Pd: [1828, 3236], Ag: [1235, 2435], Cd: [594, 1040], In: [430, 2345],
   Sn: [505, 2875], Sb: [904, 1860], Te: [723, 1261], I: [387, 457], Xe: [161, 165],
   Cs: [302, 944], Ba: [1000, 2170], W: [3695, 5828], Pt: [2041, 4098], Au: [1337, 3129],
   Hg: [234, 630], Tl: [577, 1746], Pb: [600, 2022], Bi: [545, 1837], Rn: [202, 211],
+  Tc: [2430, 4538], Hf: [2506, 4876], Ta: [3290, 5731], Re: [3459, 5869], Os: [3306, 5285], Ir: [2719, 4701],
+  Po: [527, 1235], At: [575, 610], Fr: [300, 950], Ra: [973, 2010],
+  La: [1193, 3737], Ce: [1068, 3716], Pr: [1208, 3793], Nd: [1297, 3347], Pm: [1315, 3273], Sm: [1345, 2067],
+  Eu: [1099, 1802], Gd: [1585, 3546], Tb: [1629, 3503], Dy: [1680, 2840], Ho: [1734, 2993], Er: [1802, 3141],
+  Tm: [1818, 2223], Yb: [1097, 1469], Lu: [1925, 3675],
+  Ac: [1323, 3471], Th: [2115, 5061], Pa: [1841, 4300], U: [1405, 4404], Np: [917, 4273], Pu: [913, 3501],
+  Am: [1449, 2880], Cm: [1613, 3383], Bk: [1259, 2900], Cf: [1173, 1743], Es: [1133, 1269], Fm: [1800, 2000],
+  Md: [1100, 1500], No: [1100, 1500], Lr: [1900, 2500],
 };
+// Values above for Fr, At, Bk-Lr are estimates (these elements have never been
+// made in visible amounts). Elements 104-118 are so short-lived that their
+// melting and boiling points are unmeasured; they use the rough category
+// defaults below, which are predictions at best.
 const CATEGORY_MELT_BOIL_DEFAULT = {
   "alkali": [350, 1000], "alkaline-earth": [1000, 1700], "transition": [1800, 3200],
   "post-transition": [600, 2200], "metalloid": [1200, 2800], "nonmetal": [200, 300],

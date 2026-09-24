@@ -33,7 +33,7 @@ const STEPS = [
     advance: { type: "click", selector: "#play-btn" },
   },
   {
-    text: "Click the ball while it's moving — every object shows a live speed readout while Play is running. Double-click the units to change them.",
+    text: "Click the ball while it's moving — every object shows a live speed readout while Play is running. Use the m/s button in the toolbar to change the units.",
     target: "#canvas-wrap",
     advance: { type: "next" },
   },

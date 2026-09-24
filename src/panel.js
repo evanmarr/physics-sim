@@ -136,6 +136,7 @@ export function renderPanel(container, spec, state, handlers) {
     // own density until a different value is dragged in here again.
     const mat = materialOf(spec.material);
     container.appendChild(sliderField("Weight", spec.densityOverride ?? mat.density, 0.05, 15, 0.05, (v) => set({ densityOverride: v }), null, weightScale, weightUnit));
+    container.appendChild(helpText("Weight sets density (mass = density × area): heavier objects are harder to push, launch, or stop."));
     // Same value physicsEdu.js's "e (restitution)" formula line edits — this
     // is just a friendlier, more discoverable name/location for the exact
     // same override, for anyone who never opens the math panel.
@@ -158,7 +159,7 @@ export function renderPanel(container, spec, state, handlers) {
     const powerLabel = { bomb: "Blast Power", fan: "Wind Force", magnet: "Magnet Force" }[spec.type] || "Launch Power";
     const [min, max] = spec.type === "magnet" ? [-50, 50] : [4, 50];
     if (spec.type === "magnet") {
-      const magnetText = (v) => (v >= 0 ? "Positive force attracts metal objects." : "Negative force repels metal objects.");
+      const magnetText = (v) => (v >= 0 ? "Positive force attracts metal objects — and the pull drops off very fast with distance." : "Negative force repels metal objects — and the push drops off very fast with distance.");
       const magnetHelp = helpText(magnetText(spec.power));
       container.appendChild(sliderField(powerLabel, spec.power, min, max, 1, (v) => set({ power: v }), (v) => { magnetHelp.textContent = magnetText(v); }));
       container.appendChild(magnetHelp);
@@ -168,9 +169,11 @@ export function renderPanel(container, spec, state, handlers) {
   }
   if (fields.includes("radiusOfEffect")) {
     container.appendChild(sliderField("Blast Radius", spec.radiusOfEffect, 60, 600, 10, (v) => set({ radiusOfEffect: v })));
+    container.appendChild(helpText("The blast pushes hardest at the center and fades to nothing at the edge of this radius. Glass anywhere inside it shatters."));
   }
   if (fields.includes("range")) {
     container.appendChild(sliderField("Range", spec.range, 80, 1000, 10, (v) => set({ range: v })));
+    container.appendChild(helpText(spec.type === "magnet" ? "Beyond this distance the magnet has no effect at all." : "The wind fades out with distance and stops at this range."));
   }
   if (fields.includes("targetId")) {
     container.appendChild(targetField(spec, state, (v) => set({ targetId: v })));

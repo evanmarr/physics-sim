@@ -47,19 +47,19 @@
   </div>
   <div id="account-controls">
     <div id="search-wrap">
-      <button id="search-btn" title="Search all sandboxes">
+      <button id="search-btn" title="Search all sandboxes" aria-label="Search all sandboxes">
         <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
       </button>
     </div>
     <button id="ai-tutor-btn" title="Kinetic AI Tutor">AI Tutor <span class="plus-badge">PLUS</span></button>
     <div id="achievements-wrap">
-      <button id="achievements-btn" title="Achievements">
+      <button id="achievements-btn" title="Achievements" aria-label="Achievements">
         <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 21h8"/><path d="M12 17v4"/><path d="M7 4h10v5a5 5 0 0 1-10 0V4Z"/><path d="M7 5H4a1 1 0 0 0-1 1v1a4 4 0 0 0 4 4"/><path d="M17 5h3a1 1 0 0 1 1 1v1a4 4 0 0 1-4 4"/></svg>
         <span id="achievements-badge" class="notif-badge hidden">0</span>
       </button>
     </div>
     <div id="notifications-wrap" class="hidden">
-      <button id="notifications-btn" title="Notifications">
+      <button id="notifications-btn" title="Notifications" aria-label="Notifications">
         <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
         <span id="notifications-badge" class="notif-badge hidden">0</span>
       </button>
@@ -73,7 +73,7 @@
     <button id="account-btn">Sign In</button>
   </div>
   <div id="menu-wrap">
-    <button id="menu-btn" title="More">⋯</button>
+    <button id="menu-btn" title="More" aria-label="More">⋯</button>
     <div id="menu-dropdown" class="hidden">
       <button id="quiz-btn">Quiz</button>
       <button id="tutorial-btn">Tutorial</button>
@@ -135,7 +135,7 @@
       <div id="preset-controls" title="Real-world environment: sets gravity, air and friction from published values">
         <label for="preset-select">World</label>
         <select id="preset-select"></select>
-        <button id="preset-info-btn" title="Show the constants, sources and assumptions behind this preset">ⓘ</button>
+        <button id="preset-info-btn" title="Show the constants, sources and assumptions behind this preset" aria-label="Show the constants, sources and assumptions behind this preset">ⓘ</button>
       </div>
       <div id="gravity-controls">
         <label>Gravity <span id="gravity-val">1.0</span>x</label>
@@ -159,8 +159,8 @@
         <button id="challenges-btn" class="primary">Physics Challenges</button>
         <button id="my-worlds-btn">My Worlds</button>
         <button id="world-share-btn" title="Generate a short code to share this world, or load someone else's">Share Code</button>
-        <button id="undo-btn" title="Undo (Ctrl/Cmd+Z)" disabled>↶</button>
-        <button id="redo-btn" title="Redo (Ctrl/Cmd+Shift+Z)" disabled>↷</button>
+        <button id="undo-btn" title="Undo (Ctrl/Cmd+Z)" aria-label="Undo (Ctrl/Cmd+Z)" disabled>↶</button>
+        <button id="redo-btn" title="Redo (Ctrl/Cmd+Shift+Z)" aria-label="Redo (Ctrl/Cmd+Shift+Z)" disabled>↷</button>
         <button id="clear-btn">Clear</button>
       </div>
       <div id="mobile-edit-controls">
@@ -323,7 +323,7 @@
     <p>Kinetic is an independent project built by <strong>Evan Marr</strong>, a
       hobbyist developer and lifelong science enthusiast who kept wishing
       textbooks let you actually touch the thing they were describing. It's
-      built and maintained as a free, ad-free educational resource.</p>
+      built and maintained as an ad-free educational resource — free to use, with optional Kinetic Plus for extras.</p>
     <div class="about-actions">
       <button id="about-close">Close</button>
     </div>

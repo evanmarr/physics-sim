@@ -45,7 +45,7 @@ const BODIES = {
 // reach orbit, without either being trivial. The remaining entries are real
 // rockets, for free flight — approximate published first-stage figures
 // (dry/propellant mass, sea-level thrust, sea-level Isp), each with its own
-// real length/diameter so "zoom in on the rocket" shows something honest.
+// real first-stage length/diameter (not the full stacked vehicle) so "zoom in on the rocket" shows something honest.
 // Multi-stage real vehicles are collapsed to their first stage only here —
 // this sim doesn't model a full multi-stage real ascent profile for them.
 const STAGE_PRESETS = {
@@ -82,22 +82,22 @@ const STAGE_PRESETS = {
   },
   electron: {
     displayName: "Rocket Lab Electron (real, 1st stage)",
-    length: 18, diameter: 1.2,
-    stages: [{ name: "Stage 1", dryMass: 950, fuelMass: 2150, thrust: 216000, isp: 303 }],
+    length: 12, diameter: 1.2,
+    stages: [{ name: "Stage 1", dryMass: 950, fuelMass: 9250, thrust: 224000, isp: 311 }],
   },
   falcon9: {
     displayName: "SpaceX Falcon 9 (real, 1st stage)",
-    length: 70, diameter: 3.7,
+    length: 41.2, diameter: 3.7,
     stages: [{ name: "Stage 1", dryMass: 25600, fuelMass: 395700, thrust: 7607000, isp: 282 }],
   },
   atlasV: {
     displayName: "ULA Atlas V 401 (real, 1st stage)",
-    length: 58.3, diameter: 3.81,
+    length: 32.5, diameter: 3.81,
     stages: [{ name: "Stage 1", dryMass: 21054, fuelMass: 284089, thrust: 3827000, isp: 311 }],
   },
   saturnV: {
     displayName: "Saturn V (real, 1st stage)",
-    length: 110.6, diameter: 10.1,
+    length: 42, diameter: 10.1,
     stages: [{ name: "Stage 1 (S-IC)", dryMass: 130000, fuelMass: 2077000, thrust: 34020000, isp: 263 }],
   },
 };
@@ -272,7 +272,7 @@ const ROCKET_MODEL_INFO = {
     "Numerical integration is semi-implicit Euler with a small fixed timestep, not an adaptive/RK4 integrator.",
     "Drag uses one constant cross-section/drag-coefficient figure, not a real vehicle's full aerodynamic model.",
     "Isp and thrust stay at their sea-level values at every altitude (real engines gain performance in vacuum), and the planet's own rotation is ignored, so there is no free eastward launch speed.",
-    "Planets use real mass/radius; the rocket itself (stage mass/thrust/Isp) is an illustrative small-launcher figure, not any specific real vehicle's spec sheet.",
+    "Planets use real mass/radius. The three challenge rockets are illustrative small launchers; the real-rocket presets (Electron, Falcon 9, Atlas V, Saturn V) use approximate published first-stage figures only, so they can't reach orbit like the full vehicles do.",
     "Companion body (Moon/Venus/Mars) positions are real current ephemeris (direction AND distance), but this sim only tracks gravity around ONE body at a time — it isn't a full N-body solar system.",
   ],
   sources: ["Newton's law of universal gravitation", "The Tsiolkovsky rocket equation", "Vis-viva / specific orbital energy for apoapsis, periapsis, and escape velocity"],

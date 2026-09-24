@@ -66,7 +66,7 @@ async function renderHome() {
         <div class="saves-item" data-id="${it.id}">
           <div class="saves-item-info">
             <div class="saves-item-name">${escapeHtml(it.name)}</div>
-            <div class="saves-item-date">${it.data.vertices.length} vertices · ${materialOf(it.data.material).label || it.data.material}</div>
+            <div class="saves-item-date">${it.data.vertices.length} vertices · ${escapeHtml(materialOf(it.data.material).label || it.data.material)}</div>
           </div>
           <div class="saves-item-actions">
             <button class="ci-place" data-id="${it.id}">Place</button>
@@ -96,7 +96,7 @@ async function renderHome() {
     renderHome();
   }));
   box.querySelectorAll(".ci-delete").forEach((b) => b.addEventListener("click", async () => {
-    const ok = await confirmPopup("Delete this custom item? This can't be undone.", { title: "Delete item", confirmLabel: "Delete" });
+    const ok = await confirmPopup("Delete this custom item? This can't be undone.", { title: "Delete item", confirmLabel: "Delete", danger: true });
     if (!ok) return;
     await deleteSavedItem("custom-items", b.dataset.id);
     renderHome();

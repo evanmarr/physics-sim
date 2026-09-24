@@ -212,7 +212,7 @@ export class EconomicsMode {
     const m = this.market;
 
     // Equilibrium without tax, and with tax (supply shifted up by tax).
-    const qNoTax = (m.a - m.c) / (m.b + m.d);
+    const qNoTax = Math.max(0, (m.a - m.c) / (m.b + m.d)); // if the first buyer values it below the first seller's cost (a ≤ c) there is no trade
     const pNoTax = m.a - m.b * qNoTax;
     const qTax = Math.max(0, (m.a - m.c - m.tax) / (m.b + m.d));
     const pBuyer = m.a - m.b * qTax; // what buyers pay
@@ -277,13 +277,20 @@ export class EconomicsMode {
       lines.push(`Equilibrium without tax: Q=${qNoTax.toFixed(1)}, P=${pNoTax.toFixed(1)}`);
       lines.push(`With a ${m.tax}-per-unit tax: Q=${qTax.toFixed(1)} — buyers pay ${pBuyer.toFixed(1)}, sellers keep ${pSeller.toFixed(1)} (the gap is the tax).`);
       const wedge = pBuyer - (m.c + m.d * qTax); // equals the tax unless it's high enough to shut the market entirely
-      const dwl = 0.5 * wedge * Math.max(0, qNoTax - qTax);
+      const dwl = 0.5 * Math.max(0, wedge) * Math.max(0, qNoTax - qTax);
       lines.push(`Deadweight loss ≈ ${dwl.toFixed(1)} — value that would've been created by trades the tax now prevents.`);
+      if (qTax > 0) {
+        lines.push(`Tax revenue = ${(m.tax * qTax).toFixed(1)}. Buyers bear ${(100 * (pBuyer - pNoTax) / m.tax).toFixed(0)}% of the tax and sellers ${(100 * (pNoTax - pSeller) / m.tax).toFixed(0)}% — the less price-sensitive side (the steeper curve) pays more.`);
+      } else if (qNoTax > 0) {
+        lines.push("The tax is so large that no trade happens at all — the whole gain from trade is lost.");
+      }
+    } else if (m.a <= m.c) {
+      lines.push("No trade: even the first buyer values the good at less than the cheapest seller's cost (a ≤ c), so no price works.");
     } else {
       lines.push(`Equilibrium: Q=${qNoTax.toFixed(1)}, P=${pNoTax.toFixed(1)}`);
     }
     if (m.control === "ceiling") {
-      if (m.controlPrice < pNoTax) {
+      if (m.a > m.c && m.controlPrice < pNoTax) {
         const qDemanded = (m.a - m.controlPrice) / m.b;
         const qSupplied = Math.max(0, (m.controlPrice - m.c) / m.d);
         lines.push(`Ceiling is below equilibrium: shortage of ${(qDemanded - qSupplied).toFixed(1)} units (buyers want more than sellers will supply at that price).`);
@@ -291,9 +298,9 @@ export class EconomicsMode {
         lines.push("Ceiling is above equilibrium, so it isn't actually binding — the market clears normally.");
       }
     } else if (m.control === "floor") {
-      if (m.controlPrice > pNoTax) {
+      if (m.a > m.c && m.controlPrice > pNoTax) {
         const qDemanded = Math.max(0, (m.a - m.controlPrice) / m.b);
-        const qSupplied = (m.controlPrice - m.c) / m.d;
+        const qSupplied = Math.max(0, (m.controlPrice - m.c) / m.d);
         lines.push(`Floor is above equilibrium: surplus of ${(qSupplied - qDemanded).toFixed(1)} units (sellers want to sell more than buyers will buy at that price).`);
       } else {
         lines.push("Floor is below equilibrium, so it isn't actually binding — the market clears normally.");
@@ -330,7 +337,7 @@ export class EconomicsMode {
       table.appendChild(tr);
     }
     sidebar.appendChild(table);
-    sidebar.appendChild(helpText("Each cell reads as (your score, opponent's score) for that combination of moves. Notice mutual cooperation (3,3) beats mutual defection (1,1) for BOTH players, yet defecting is each player's best individual move no matter what the other does — that tension is the whole Prisoner's Dilemma. A \"dominant strategy\" (defect, here) is one that's your best move regardless of what the other side does."));
+    sidebar.appendChild(helpText("Each cell reads as (your score, opponent's score) for that combination of moves. With the default payoffs, mutual cooperation (3,3) beats mutual defection (1,1) for BOTH players, yet defecting is each player's best individual move no matter what the other does (a true dilemma needs temptation > reward > punishment > sucker's payoff; edit the numbers and it may stop being one) — that tension is the whole Prisoner's Dilemma. A \"dominant strategy\" (defect, here) is one that's your best move regardless of what the other side does."));
 
     sidebar.appendChild(sectionTitle("Opponent's strategy"));
     const stratSelect = document.createElement("select");
@@ -383,7 +390,7 @@ export class EconomicsMode {
       const mutualCoop = this.game.history.filter((r) => r.you === "cooperate" && r.opp === "cooperate").length;
       const mutualDefect = this.game.history.filter((r) => r.you === "defect" && r.opp === "defect").length;
       insight.textContent = mutualDefect > mutualCoop
-        ? "Notice how often you both end up defecting, even though mutual cooperation (3,3) beats mutual defection (1,1) for both of you — that's the Prisoner's Dilemma: defecting is each player's individually best move regardless of what the other does, so rational self-interest lands you on a worse outcome than cooperating would have."
+        ? "Notice how often you both end up defecting, even though (with the default payoffs) mutual cooperation (3,3) beats mutual defection (1,1) for both of you — that's the Prisoner's Dilemma: defecting is each player's individually best move regardless of what the other does, so rational self-interest lands you on a worse outcome than cooperating would have."
         : "You're finding more mutual cooperation than mutual defection — that usually only holds up against a strategy like Tit-for-Tat, which punishes defection immediately, making cooperation the individually rational choice too.";
       main.appendChild(insight);
     }

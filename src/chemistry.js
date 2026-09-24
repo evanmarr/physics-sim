@@ -12,6 +12,8 @@ const CHEMISTRY_MODEL_INFO = {
   ],
   assumptions: [
     "Two nonmetals with no curated formula are assumed to bond 1:1 (the simplest covalent case) — not the correct ratio for every real nonmetal pair.",
+    "Electron shell counts follow strict Aufbau filling except for a hand-listed set of known exceptions (Cr, Cu, Pd, Au, early actinides...). Superheavy elements (104-118) use predicted values because they have never been measured.",
+    "Melting and boiling points are real standard-pressure values through lawrencium, with a few estimates (Fr, At, Bk-Lr); for elements 104-118 they are rough category-based placeholders. Phase changes are shown at a single fixed pressure.",
     "A metal + nonmetal pair with no curated formula picks the metal's first positive oxidation state and the nonmetal's first negative one to charge-balance a predicted formula.",
   ],
   limitations: [

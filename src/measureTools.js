@@ -51,7 +51,7 @@ function buildRow() {
       <span class="measure-laps" id="sw-laps"></span>
     </span>
     <span class="measure-status" id="measure-status"></span>
-    <span class="measure-note" title="Lengths use the grid (1 square = 1 m); speeds and forces are in sandbox units, like the rest of the sim.">sandbox units</span>`;
+    <span class="measure-note" title="Lengths use the grid (1 square = 1 m). Speeds and forces are scaled to match, but this is a sandbox — treat them as consistent relative values, not lab measurements.">sandbox units</span>`;
   swEl = rowEl.querySelector("#measure-stopwatch");
   statusEl = rowEl.querySelector("#measure-status");
   rowEl.querySelectorAll(".measure-tool").forEach((btn) => btn.addEventListener("click", () => toggleTool(btn.dataset.tool)));

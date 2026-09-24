@@ -34,7 +34,7 @@ const PLAN_COPY = {
       "Daily challenges, tutorials, quizzes",
       "Limited saved worlds (6)",
       "Basic graphs",
-      "How This Model Works + sources — always free",
+      "How This Works + sources — always free",
       "Limited Experiment Notebook",
     ],
   },
@@ -43,10 +43,11 @@ const PLAN_COPY = {
     features: [
       "Everything in Free, plus:",
       "Custom Physics Items (build your own shapes)",
-      "Unlimited saved worlds & Notebook history",
+      "More saved worlds (40), plus unlimited Notebook history",
       "Advanced graphs, export, full Compare Runs",
       "Physics world sharing codes",
       "Advanced mode across simulations",
+      "Parameter Sweep, and Text labels in the Physics sandbox",
     ],
   },
   teacher: {
@@ -54,8 +55,8 @@ const PLAN_COPY = {
     features: [
       "Everything in Plus, plus:",
       "Classrooms, rosters, assignments",
-      "Progress dashboards & shared notebooks",
-      "Freeze Controls during class",
+      "Randomized per-student assignment values",
+      "Share worlds, notebooks and more with your class from the Dashboard",
       "Students never need Plus to participate",
     ],
   },

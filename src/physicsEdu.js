@@ -57,7 +57,7 @@ export function physicsMath(spec) {
   if (!spec.fixed) {
     lines.push({
       formula: `W = m · g ≈ ${fmt(mass, 2)} × ${G} ≈ ${fmt(mass * G, 1)}`,
-      note: `Weight is what gravity pulls it down with — heavier objects need more upward force (a bounce, a fan, a spring) to counter it.`,
+      note: `Weight is the force gravity pulls it down with (W = m·g). Heavier objects need more upward force (a bounce, a fan, a spring) to counter it. Note that heavier things don't fall faster — gravity pulls harder, but they also take more force to accelerate.`,
     });
   }
 
@@ -73,7 +73,7 @@ export function physicsMath(spec) {
 
   lines.push({
     formula: `e (restitution) = ${fmt(restitution, 2)}`,
-    note: `On impact, the rebound speed is roughly e × the impact speed. e=0 means no bounce at all; e=1 would be a perfectly elastic bounce that loses no energy.`,
+    note: `On impact, the rebound speed is roughly e × the impact speed, so a drop from height h bounces back to about e² × h. e=0 means no bounce at all; e=1 would be a perfectly elastic bounce that loses no energy. When two different materials collide, the engine blends their values.`,
     edit: { key: "restitutionOverride", value: restitution, min: 0, max: 1, step: 0.02 },
   });
 
@@ -119,7 +119,7 @@ export function physicsMath(spec) {
   if (spec.type === "fan") {
     lines.push({
       formula: `F(d) = power · (1 − d / range), applied every tick`,
-      note: `Unlike a bomb's one-time push, a fan applies this continuously — so a body sitting in the wind keeps accelerating as long as it stays in range.`,
+      note: `Unlike a bomb's one-time push, a fan applies this continuously — so a body sitting in the wind keeps accelerating as long as it stays in range. It only helps a body rise if the push beats its weight, so light objects lift off easily and heavy ones just get shoved. Air drag and a solid wall in the way both weaken it.`,
       edit: { key: "power", value: spec.power, min: 4, max: 50, step: 1, resetValue: 18 },
     });
     lines.push({

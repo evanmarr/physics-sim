@@ -24,7 +24,9 @@ function tokenize(src) {
     if (/[0-9.]/.test(c)) {
       let j = i + 1;
       while (j < src.length && /[0-9.]/.test(src[j])) j++;
-      tokens.push({ type: "num", value: parseFloat(src.slice(i, j)) });
+      const text = src.slice(i, j);
+      if (!/^(\d+\.?\d*|\.\d+)$/.test(text)) throw new Error(`Invalid number "${text}"`);
+      tokens.push({ type: "num", value: parseFloat(text) });
       i = j;
     } else if (/[a-zA-Z_]/.test(c)) {
       let j = i + 1;

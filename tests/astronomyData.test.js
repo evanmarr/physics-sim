@@ -32,3 +32,11 @@ test("real relative orbital periods: Mercury < Earth < Mars < Jupiter", () => {
   assert.ok(mars < jupiter, "Mars orbits faster than Jupiter");
   assert.ok(Math.abs(earth - 365.25) < 2, `Earth's period should be ~365.25 days, got ${earth}`);
 });
+
+test("next solar eclipse from mid-2026 is the 12 Aug 2026 one (within a day or two)", async () => {
+  const { findNextSolarEclipse } = await import("../src/astronomyData.js");
+  const r = findNextSolarEclipse(new Date("2026-07-01T00:00:00Z"));
+  const target = Date.parse("2026-08-12T17:00:00Z");
+  assert.ok(Math.abs(r.date.getTime() - target) < 2 * 86400000, `got ${r.date.toISOString()}`);
+  assert.ok(r.likely);
+});

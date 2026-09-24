@@ -71,3 +71,34 @@ test("rejects SMPTE-based timing (only ticks-per-quarter is supported)", () => {
   bytes[12] |= 0x80; // set the SMPTE flag bit on the division field
   assert.throws(() => parseMidiFile(bytes.buffer), /SMPTE/);
 });
+
+function rawMidi(events, ticksPerQuarter = 480) {
+  const trackLen = events.length;
+  const header = [0x4d, 0x54, 0x68, 0x64, 0, 0, 0, 6, 0, 0, 0, 1, (ticksPerQuarter >> 8) & 0xff, ticksPerQuarter & 0xff];
+  const track = [0x4d, 0x54, 0x72, 0x6b, (trackLen >> 24) & 0xff, (trackLen >> 16) & 0xff, (trackLen >> 8) & 0xff, trackLen & 0xff, ...events];
+  return new Uint8Array([...header, ...track]).buffer;
+}
+
+test("same note on two channels is tracked independently", () => {
+  const { notes } = parseMidiFile(rawMidi([
+    0, 0x90, 60, 100, 0, 0x91, 60, 100, // ch0 and ch1 both start note 60
+    0x83, 0x60, 0x80, 60, 0, // (delta 480) ch0 off
+    0x83, 0x60, 0x81, 60, 0, // (delta 480) ch1 off
+    0, 0xff, 0x2f, 0,
+  ]));
+  assert.equal(notes.length, 2);
+  const ends = notes.map((n) => n.endSec).sort();
+  assert.ok(Math.abs(ends[0] - 0.5) < 1e-9 && Math.abs(ends[1] - 1.0) < 1e-9);
+});
+
+test("meta events cancel running status (no misparse of following data bytes)", () => {
+  // note on (status 0x90), meta event, then a full new status note off.
+  const { notes } = parseMidiFile(rawMidi([
+    0, 0x90, 60, 100,
+    0x83, 0x60, 0xff, 0x01, 0x01, 0x41, // text meta after 480 ticks
+    0, 0x80, 60, 0,
+    0, 0xff, 0x2f, 0,
+  ]));
+  assert.equal(notes.length, 1);
+  assert.ok(Math.abs(notes[0].endSec - 0.5) < 1e-9);
+});

@@ -20,7 +20,8 @@ function sample(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
 function buildChemistryQuestions() {
   const questions = [];
   for (const el of shuffle(ELEMENTS).slice(0, 10)) {
-    const kind = sample(["symbol", "number", "category", "phase"]);
+    // Elements 104+ have no measured melting/boiling points, so no phase questions for them.
+    const kind = sample(el.number > 103 ? ["symbol", "number", "category"] : ["symbol", "number", "category", "phase"]);
     if (kind === "symbol") {
       const distractors = pick(ELEMENTS.filter((e) => e.symbol !== el.symbol), 3).map((e) => e.symbol);
       questions.push({
@@ -103,10 +104,10 @@ const PHYSICS_CONCEPT_QUESTIONS = [
     explanation: "F = m·a — a denser object of the same size has more mass, so it takes more force for the same acceleration.",
   },
   {
-    prompt: "By Archimedes' principle, an object floats in water when...",
+    prompt: "By Archimedes' principle, an object floats in real water when...",
     options: ["Its density is less than water's", "Its density is greater than water's", "Its density equals air's", "It has high friction"],
     answer: "Its density is less than water's",
-    explanation: "F_buoyancy = ρ_fluid · V_submerged · g pushes up regardless of the object's material — it floats if it's less dense than the fluid.",
+    explanation: "F_buoyancy = ρ_fluid · V_submerged · g pushes up regardless of the object's material — it floats if it's less dense than the fluid. (This sandbox has no buoyancy, but it's real physics.)",
   },
   {
     prompt: "A cannon's launch velocity is v = (P·cos θ, P·sin θ). What is θ?",
@@ -140,7 +141,7 @@ const PHYSICS_CONCEPT_QUESTIONS = [
   },
   {
     prompt: "What does Newton's First Law say happens to an object with no net force acting on it?",
-    options: ["It keeps moving at constant velocity (or stays at rest)", "It always speeds up", "It always slows to a stop", "It falls at 9.8 units/s² regardless"],
+    options: ["It keeps moving at constant velocity (or stays at rest)", "It always speeds up", "It always slows to a stop", "It always drifts downward"],
     answer: "It keeps moving at constant velocity (or stays at rest)",
     explanation: "Inertia: without a net force, velocity doesn't change — this is why objects need friction, gravity, or a push to change speed or direction.",
   },
@@ -151,26 +152,16 @@ const PHYSICS_CONCEPT_QUESTIONS = [
     explanation: "The force is always equal and opposite on both objects — what differs is the acceleration each one gets from it, since the lighter ball has less mass to push around (F = m·a).",
   },
   {
-    prompt: "In this sim, a rope is built as a chain of small rigid segments. Why does each segment need an explicit length:0 on its connecting constraint?",
-    options: [
-      "Matter.js doesn't rotate a constraint's auto-computed rest length by the body's angle at creation time",
-      "Rope segments have no mass",
-      "It makes the rope invisible",
-      "It disables gravity on the rope",
-    ],
-    answer: "Matter.js doesn't rotate a constraint's auto-computed rest length by the body's angle at creation time",
-    explanation: "For a pre-rotated segment, the auto-computed rest length silently bakes in the wrong value — setting it explicitly to 0 sidesteps that bug entirely.",
+    prompt: "Ignoring air resistance, which launch angle sends a cannonball the farthest along level ground?",
+    options: ["45°", "30°", "60°", "90° (straight up)"],
+    answer: "45°",
+    explanation: "Range is R = v²·sin(2θ)/g, which peaks when 2θ = 90°, so θ = 45°. Try it with the Cannon's Fire Angle — though with air drag switched on, the best angle drops a little below 45°.",
   },
   {
-    prompt: "Why do a ball bearing and the board it pivots need to be on a shared no-collide group?",
-    options: [
-      "The bearing sits physically embedded inside the board — without it, solid-body collision fights the pin constraint every step",
-      "So the board changes color",
-      "To make the bearing invisible",
-      "It's purely a performance optimization, not a correctness fix",
-    ],
-    answer: "The bearing sits physically embedded inside the board — without it, solid-body collision fights the pin constraint every step",
-    explanation: "Two overlapping solid bodies get pushed apart by collision resolution every tick — fighting a rigid pin constraint that's trying to hold them together looks like violent jitter.",
+    prompt: "A ball moving at speed v has kinetic energy KE = ½mv². If you double its speed, its kinetic energy...",
+    options: ["Quadruples", "Doubles", "Stays the same", "Triples"],
+    answer: "Quadruples",
+    explanation: "KE grows with the square of speed, so 2× the speed means 4× the energy — which is why fast collisions are so much more violent than slow ones.",
   },
   {
     prompt: "What is momentum, in terms of an object's mass (m) and velocity (v)?",
@@ -217,7 +208,7 @@ function buildPhysicsQuestions() {
     explanation: `${materialOf(densest).label} has a density of ${materialOf(densest).density} — the highest of this sim's materials.`,
   });
   questions.push({
-    prompt: "Which material floats on water (density < 1.0)?",
+    prompt: "Which of this sim's materials would float in real water (density < 1.0)?",
     options: shuffle(pick(MATERIAL_LIST.filter((m) => m !== lightest), 3).concat(lightest)).map((m) => materialOf(m).label),
     answer: materialOf(lightest).label,
     explanation: `${materialOf(lightest).label} has a density of ${materialOf(lightest).density}, below water's 1.0 — the rest sink.`,
@@ -326,10 +317,10 @@ function buildAstronomyQuestions() {
     explanation: "Positions are computed live from each planet's real orbital elements — scrubbing the date instantly recomputes where everything actually was or will be, not a canned animation.",
   });
   questions.push({
-    prompt: "Why are planet sizes and moon distances shown exaggerated instead of true-to-scale?",
-    options: ["At true scale, the inner planets and moons would be invisible specks", "To make the simulation run faster", "The real sizes aren't precisely known", "It's a rendering limit of the browser"],
-    answer: "At true scale, the inner planets and moons would be invisible specks",
-    explanation: "Real solar-system distances and sizes span such an enormous range that true-to-scale rendering would make almost everything too small to see or click on.",
+    prompt: "Why are the distances between orbits (and moon orbits) shown compressed instead of true-to-scale?",
+    options: ["At true scale, the outer planets would be far off-screen and the inner ones tiny specks", "To make the simulation run faster", "The real distances aren't precisely known", "It's a rendering limit of the browser"],
+    answer: "At true scale, the outer planets would be far off-screen and the inner ones tiny specks",
+    explanation: "Real solar-system distances span such an enormous range (Neptune is about 30 AU out) that a true-to-scale layout would put most bodies too far apart or too small to see or click on. Planet sizes here are on one consistent real scale; it's the orbit spacing that's compressed.",
   });
 
   return { title: "Astronomy Quiz", questions: pick(questions, 10) };
@@ -360,9 +351,15 @@ function buildHistoryQuestions() {
     });
   }
 
-  for (const entry of shuffle(pool).slice(0, 4)) {
+  // Only single, named people make sensible answer choices (skip "Various",
+  // institutions, and cultures), and distractors must be distinct names.
+  const isNamedPerson = (e) => /^\p{Lu}[\p{L}.'’-]*( \p{Lu}[\p{L}.'’-]*)+$/u.test(firstPerson(e.people))
+    && !/^The |Labs|IBM|Union|Bell /.test(firstPerson(e.people));
+  const personPool = pool.filter(isNamedPerson);
+  for (const entry of shuffle(personPool).slice(0, 4)) {
     const correctPerson = firstPerson(entry.people);
-    const distractors = pick(pool.filter((e) => firstPerson(e.people) !== correctPerson), 3).map((e) => firstPerson(e.people));
+    const names = [...new Set(personPool.map((e) => firstPerson(e.people)).filter((n) => n !== correctPerson))];
+    const distractors = pick(names, 3);
     questions.push({
       prompt: `Who is credited with this, in ${entry.year}: "${entry.title}"?`,
       options: shuffle([correctPerson, ...distractors]),

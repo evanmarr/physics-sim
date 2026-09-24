@@ -221,7 +221,11 @@ export class WordCloudTool {
     for (const id of this._timers) clearTimeout(id);
     this._timers = [];
     if (this._ro) { this._ro.disconnect(); this._ro = null; }
-    if (this.tip) this.tip.style.display = "none";
+    // The controls' own listeners were registered through _on() too, so
+    // they were just removed above — mark the panel unbuilt so the next
+    // mount() rebuilds it (settings live in this.s and are kept).
+    if (this.tip) { this.tip.remove(); this.tip = null; }
+    this._built = false;
   }
 
   // Settings no longer redraw on every tweak — change as many as you like,
@@ -453,6 +457,6 @@ export class WordCloudTool {
   async _copy() {
     const txt = this.freq.slice(0, this.s.maxWords).map((t) => `${t.word}\t${t.count}`).join("\n");
     try { await navigator.clipboard.writeText(txt); this._status("Frequency table copied."); }
-    catch { this.ta.value === "" || 0; this._status("Clipboard unavailable in this browser context.", true); }
+    catch { this._status("Clipboard unavailable in this browser context.", true); }
   }
 }

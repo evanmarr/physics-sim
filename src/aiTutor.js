@@ -7,7 +7,7 @@
 // tested for whenever a real provider is wired in — swapping the server
 // route's canned reply for a real call is the only change that day.
 //
-// A real Plus feature (like Physics 3D and Custom Items), reachable from
+// A Plus feature (like Custom Items and Parameter Sweep), reachable from
 // the global top bar rather than nested inside any one subject mode —
 // "AI Tutor, aware of your current simulation" only makes sense as
 // something available everywhere, not just from Physics.
@@ -54,7 +54,7 @@ function render() {
           <p class="ai-tutor-subtitle">Hint → Bigger Hint → Explain It — aware of your current simulation and challenge, once it's live.</p>
         </div>
       </div>
-      <button id="ait-close-x" class="ai-tutor-close-x" title="Close">×</button>
+      <button id="ait-close-x" class="ai-tutor-close-x" title="Close" aria-label="Close">×</button>
     </div>
     <p class="ai-tutor-disclaimer"><strong>Not connected yet</strong> — every message below gets a real, honest error, not a fabricated answer.</p>
     <div id="ait-history" class="ai-tutor-history"></div>

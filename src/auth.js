@@ -58,9 +58,8 @@ export async function resendCode(token) {
 }
 
 // "Title" is teacher / student / independent — set at signup, changeable
-// any time from the account dropdown. Purely descriptive (used by the
-// classroom-sharing dashboard to decide what to show) — it's never used as
-// a permission check, since a real person can be more than one of these.
+// any time from the account dropdown. It decides who can create a
+// classroom (Teacher) or join one (Student), and what the Dashboard shows.
 export async function setTitle(title) {
   const data = await api("/title", { method: "POST", body: { title } });
   setUser(data);
@@ -416,7 +415,7 @@ async function showShareLink(simId) {
   }
 }
 
-export async function openSavesPanel({ kind, title, itemNoun, serialize, apply, max = 6, getSnapshot }) {
+export async function openSavesPanel({ kind, title, itemNoun, serialize, apply, max: maxOverride, getSnapshot }) {
   if (!user) {
     renderAuthModal("signin");
     authModal.classList.remove("hidden");
@@ -425,6 +424,10 @@ export async function openSavesPanel({ kind, title, itemNoun, serialize, apply, 
   const modal = document.getElementById("saves-modal");
   const box = document.getElementById("saves-modal-box");
   const communityEnabled = COMMUNITY_ENABLED_KINDS.has(kind);
+  // The plan's own limit (server/entitlements.js) — Plus gets far more than Free's 6.
+  const LIMIT_KEYS = { worlds: "maxWorlds", "math-items": "maxMathItems", cities: "maxCities", "ai-chats": "maxAiChats", whiteboards: "maxWhiteboards", notes: "maxNotes", "rocket-flights": "maxRocketFlights" };
+  const planLimit = user.entitlements?.limits?.[LIMIT_KEYS[kind]];
+  const max = maxOverride ?? (planLimit === null ? Infinity : (planLimit ?? 6));
   let tab = "mine";
   let favoriteIds = new Set();
   let subscribedCreatorEmails = new Set();
@@ -606,7 +609,7 @@ export async function openSavesPanel({ kind, title, itemNoun, serialize, apply, 
     box.querySelectorAll(".community-remix").forEach((btn) => btn.addEventListener("click", async () => {
       const result = await remixCommunitySim(btn.dataset.id);
       if (result.error) { await alertPopup(result.error, { title: "Couldn't remix" }); return; }
-      await alertPopup(`Added "${result.item.name}" to your own ${escapeHtml(title)}.`, { title: "Remixed" });
+      await alertPopup(`Added "${result.item.name}" to your own ${title}.`, { title: "Remixed" });
       tab = "mine";
       render();
     }));
