@@ -15,6 +15,9 @@ function box(id, x, y, rotation, width = 160) {
 export const CHALLENGES = [
   {
     id: "float_test",
+    // Parts that DEFINE the puzzle. Change or delete one and the challenge can no longer be completed
+    // (the tunable parts — a cannon's power/angle, a spring's power, a ball's material — are deliberately not listed).
+    critical: [{ id: "chal_md_floor", label: "the floor", props: ["x", "y", "width", "height", "fixed"] }, { id: "chal_md_magnet", label: "the magnet", props: ["x", "y", "power", "range", "fixed"] }],
     name: "Metal Detector",
     difficulty: "Simple",
     concept: "Magnetism only acts on ferrous metal",
@@ -50,6 +53,9 @@ export const CHALLENGES = [
   },
   {
     id: "fan_lift",
+    // Parts that DEFINE the puzzle. Change or delete one and the challenge can no longer be completed
+    // (the tunable parts — a cannon's power/angle, a spring's power, a ball's material — are deliberately not listed).
+    critical: [{ id: "chal_fl_ground", label: "the ground", props: ["x", "y", "width", "fixed"] }, { id: "chal_fl_marker", label: "the lower target line", props: ["x", "y", "width", "fixed"] }, { id: "chal_fl_ceiling", label: "the upper target line", props: ["x", "y", "width", "fixed"] }, { id: "chal_fl_pad", label: "the spring pad's position", props: ["x", "y", "width", "fixed"] }],
     name: "Spring Launch",
     difficulty: "Easy",
     concept: "A single instantaneous impulse vs. a target BAND, not just a minimum",
@@ -84,6 +90,9 @@ export const CHALLENGES = [
   },
   {
     id: "glass_breaker",
+    // Parts that DEFINE the puzzle. Change or delete one and the challenge can no longer be completed
+    // (the tunable parts — a cannon's power/angle, a spring's power, a ball's material — are deliberately not listed).
+    critical: [{ id: "chal_gb_ground", label: "the ground", props: ["x", "y", "width", "fixed"] }, { id: "chal_gb_cannon", label: "the cannon's position", props: ["x", "y", "fixed"] }, { id: "chal_gb_button", label: "the button", props: ["x", "y", "width", "height", "fixed"] }, { id: "chal_gb_bomb", label: "the bomb", props: ["x", "y", "radius", "fixed"] }, { id: "chal_gb_payload", label: "the payload ball", props: ["x", "y", "radius"] }],
     name: "Button Chain",
     difficulty: "Medium",
     concept: "Indirect triggering — the ball you aim isn't the one that scores",
@@ -127,6 +136,9 @@ export const CHALLENGES = [
   },
   {
     id: "lever_launch",
+    // Parts that DEFINE the puzzle. Change or delete one and the challenge can no longer be completed
+    // (the tunable parts — a cannon's power/angle, a spring's power, a ball's material — are deliberately not listed).
+    critical: [{ id: "chal_ll_ground", label: "the ground", props: ["x", "y", "width", "fixed"] }, { id: "chal_ll_cannon", label: "the cannon's position", props: ["x", "y", "fixed"] }, { id: "chal_ll_domino", label: "the domino", props: ["x", "y", "width", "height"] }, { id: "chal_ll_goalball", label: "the goal ball", props: ["x", "y", "radius", "material"] }],
     name: "Domino Push",
     difficulty: "Hard",
     concept: "Momentum transfer through a chain of collisions",
@@ -153,6 +165,9 @@ export const CHALLENGES = [
   },
   {
     id: "triple_bounce",
+    // Parts that DEFINE the puzzle. Change or delete one and the challenge can no longer be completed
+    // (the tunable parts — a cannon's power/angle, a spring's power, a ball's material — are deliberately not listed).
+    critical: [{ id: "chal_tb_ground_left", label: "the left ground", props: ["x", "y", "width", "fixed"] }, { id: "chal_tb_ground_right", label: "the right ground", props: ["x", "y", "width", "fixed"] }, { id: "chal_tb_pit_floor", label: "the pit floor", props: ["x", "y", "width", "fixed"] }, { id: "chal_tb_near_wall", label: "the near wall", props: ["x", "y", "width", "height", "fixed"] }, { id: "chal_tb_far_wall", label: "the far wall", props: ["x", "y", "width", "height", "fixed"] }, { id: "chal_tb_cannon", label: "the cannon's position", props: ["x", "y", "fixed"] }],
     name: "Threading the Gap",
     difficulty: "Challenging",
     concept: "Precise 2-variable aim — a narrow window between two obstacles",
@@ -183,6 +198,9 @@ export const CHALLENGES = [
   },
   {
     id: "portal_trick_shot",
+    // Parts that DEFINE the puzzle. Change or delete one and the challenge can no longer be completed
+    // (the tunable parts — a cannon's power/angle, a spring's power, a ball's material — are deliberately not listed).
+    critical: [{ id: "chal_pt_ground", label: "the ground", props: ["x", "y", "width", "fixed"] }, { id: "chal_pt_cannon", label: "the cannon's position", props: ["x", "y", "fixed"] }, { id: "chal_pt_magnet", label: "the magnet", props: ["x", "y", "power", "range", "fixed"] }],
     name: "Overload the Charge",
     difficulty: "Extreme",
     concept: "Combining two earlier ideas into one chain — an impulse AND a magnetic catch",
@@ -212,6 +230,9 @@ export const CHALLENGES = [
   },
   {
     id: "pit_stop",
+    // Parts that DEFINE the puzzle. Change or delete one and the challenge can no longer be completed
+    // (the tunable parts — a cannon's power/angle, a spring's power, a ball's material — are deliberately not listed).
+    critical: [{ id: "chal_ll2_ground", label: "the ground", props: ["x", "y", "width", "fixed"] }, { id: "chal_ll2_pad", label: "the launch pad", props: ["x", "y", "width", "fixed"] }, { id: "chal_ll2_seesaw", label: "the seesaw", props: ["x", "y", "width", "height", "fixed"] }, { id: "chal_ll2_bearing", label: "the pivot bearing", props: ["x", "y", "fixed"] }, { id: "chal_ll2_payload", label: "the payload", props: ["x", "y", "radius"] }],
     name: "Precision Drop",
     difficulty: "Impossible",
     concept: "Torque, tuned to a target — not just a threshold",
@@ -250,6 +271,37 @@ export const CHALLENGES = [
 ];
 
 assertFullLadder(CHALLENGES, "Physics");
+
+// Compares the workspace against the challenge's own blueprint for every
+// `critical` part. Numbers may drift by half a unit (grid snapping); anything
+// else means the puzzle was altered and can't be completed as designed.
+export function checkIntegrity(challenge, objects) {
+  const problems = [];
+  if (!challenge?.critical) return { ok: true, problems };
+  const base = challenge.build();
+  for (const c of challenge.critical) {
+    const want = base.find((o) => o.id === c.id);
+    const have = objects.find((o) => o.id === c.id);
+    if (!want) continue;
+    if (!have) { problems.push({ id: c.id, label: c.label, deleted: true, changed: [] }); continue; }
+    const changed = c.props.filter((p) => {
+      const a = want[p], b = have[p];
+      return typeof a === "number" && typeof b === "number" ? Math.abs(a - b) > 0.5 : a !== b;
+    });
+    if (changed.length) problems.push({ id: c.id, label: c.label, deleted: false, changed });
+  }
+  return { ok: problems.length === 0, problems };
+}
+
+// Puts every altered or missing critical part back exactly as designed, keeping everything else the player built.
+export function restoreCritical(challenge, objects) {
+  const { problems } = checkIntegrity(challenge, objects);
+  if (!problems.length) return objects;
+  const base = challenge.build();
+  const bad = new Set(problems.map((p) => p.id));
+  const kept = objects.filter((o) => !bad.has(o.id));
+  return [...kept, ...base.filter((o) => bad.has(o.id))];
+}
 
 export function findChallenge(id) {
   return CHALLENGES.find((c) => c.id === id);

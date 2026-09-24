@@ -14,7 +14,10 @@
      need this real, high-resolution raster icon (Safari otherwise falls
      back to a blurry screenshot of the page as the app icon). -->
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
-<link rel="manifest" href="manifest.json" />
+<link rel="manifest" href="/manifest.webmanifest" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-title" content="Kinetic" />
 <meta name="theme-color" content="#38bdf8" />
 <link rel="stylesheet" href="style.css" />
 </head>
@@ -41,6 +44,7 @@
     <button id="mode-whiteboard-btn" class="mode-tab">Whiteboard</button>
     <button id="mode-economics-btn" class="mode-tab">Economics</button>
     <button id="mode-zoology-btn" class="mode-tab">Zoology</button>
+    <button id="mode-genetics-btn" class="mode-tab">Genetics</button>
     <button id="mode-sound-btn" class="mode-tab">Sound</button>
     <button id="mode-sustainability-btn" class="mode-tab">Sustainability</button>
     <button id="mode-war-btn" class="mode-tab">War</button>
@@ -79,6 +83,7 @@
       <button id="tutorial-btn">Tutorial</button>
       <button id="about-btn">About</button>
       <button id="apps-menu-btn">Apps</button>
+      <button id="install-btn" class="hidden">Install app</button>
       <button id="classroom-btn">Classroom</button>
       <button id="notebook-btn">Notebook</button>
       <button id="plans-btn">Plans</button>
@@ -177,6 +182,7 @@
     <main id="canvas-wrap">
       <svg id="canvas"></svg>
       <div id="mode-banner" class="hidden">SIMULATING — space to pause</div>
+      <div id="challenge-status" class="hidden" role="status"></div>
       <div id="grid-scale-badge" title="Every grid square is 1 meter — position, size, and weight fields in the panel are in the same units">1 square = 1 m</div>
     </main>
 
@@ -220,6 +226,7 @@
 
 <div id="economics-root" class="hidden"></div>
 <div id="zoology-root" class="hidden"></div>
+<div id="genetics-root" class="hidden"></div>
 <div id="sound-root" class="hidden"></div>
 <div id="sustainability-root" class="hidden"></div>
 <div id="war-root" class="hidden"></div>
@@ -331,17 +338,82 @@
 </div>
 
 <div id="feedback-modal" class="modal hidden">
-  <div class="modal-box">
-    <h2>Send feedback</h2>
-    <p class="feedback-hint">Bug, idea, confusing explanation — anything. If you're signed in, your email rides along automatically so a reply is possible.</p>
-    <textarea id="feedback-text" rows="6" maxlength="4000" placeholder="What's on your mind?"></textarea>
-    <div class="about-actions">
-      <button id="feedback-submit" class="primary">Send</button>
-      <button id="feedback-cancel">Cancel</button>
+  <div class="modal-box classroom-box fb-box">
+    <form id="fb-form" novalidate autocomplete="off">
+      <h2>Send feedback</h2>
+      <p class="feedback-hint">Bugs, ideas, mistakes in an explanation, or just a thumbs up: it all helps.</p>
+
+      <div class="fb-group">
+        <span class="fb-label" id="fb-cat-label">What kind of feedback?</span>
+        <div class="fb-chips" role="radiogroup" aria-labelledby="fb-cat-label" id="fb-cats"></div>
+      </div>
+
+      <div class="fb-group">
+        <label for="fb-section" class="fb-label">Where?</label>
+        <select id="fb-section"></select>
+      </div>
+
+      <div class="fb-group">
+        <span class="fb-label" id="fb-rating-label">Overall experience <span class="fb-opt">(optional)</span></span>
+        <div class="fb-stars" role="radiogroup" aria-labelledby="fb-rating-label" id="fb-stars"></div>
+      </div>
+
+      <div class="fb-group fb-bug hidden" id="fb-severity-group">
+        <span class="fb-label" id="fb-sev-label">How bad is it?</span>
+        <div class="fb-chips" role="radiogroup" aria-labelledby="fb-sev-label" id="fb-sev"></div>
+      </div>
+
+      <div class="fb-group">
+        <label for="fb-message" class="fb-label" id="fb-message-label">What happened?</label>
+        <textarea id="fb-message" rows="5" maxlength="4000" placeholder="Tell us what happened."></textarea>
+        <div class="fb-count" id="fb-count" aria-live="polite">0 / 4000</div>
+      </div>
+
+      <div class="fb-bug hidden" id="fb-bug-fields">
+        <div class="fb-group">
+          <label for="fb-steps" class="fb-label">Steps to reproduce <span class="fb-opt">(optional)</span></label>
+          <textarea id="fb-steps" rows="3" maxlength="2000" placeholder="1. Open... 2. Click..."></textarea>
+        </div>
+        <div class="fb-group">
+          <label for="fb-expected" class="fb-label">What did you expect? <span class="fb-opt">(optional)</span></label>
+          <textarea id="fb-expected" rows="2" maxlength="2000"></textarea>
+        </div>
+      </div>
+
+      <div class="fb-group">
+        <label for="fb-email" class="fb-label">Contact email <span class="fb-opt">(optional)</span></label>
+        <input type="email" id="fb-email" maxlength="254" placeholder="you@example.com" autocomplete="email" />
+        <label class="fb-check"><input type="checkbox" id="fb-reply-ok" /> <span>OK to reply to me</span></label>
+      </div>
+
+      <div class="fb-group">
+        <label class="fb-check"><input type="checkbox" id="fb-diag-on" checked /> <span>Include diagnostic info</span></label>
+        <details class="fb-diag-details">
+          <summary>See exactly what is sent</summary>
+          <pre id="fb-diag-preview" class="fb-diag"></pre>
+          <p class="fb-diag-note">Nothing else is sent. Your worlds and saved work are never included.</p>
+        </details>
+      </div>
+
+      <div class="fb-hp" aria-hidden="true"><label>Website <input type="text" id="fb-website" tabindex="-1" autocomplete="off" /></label></div>
+
+      <div id="fb-error" class="fb-error hidden" role="alert"></div>
+      <div class="about-actions fb-actions">
+        <button type="submit" id="feedback-submit" class="primary">Send</button>
+        <button type="button" id="feedback-cancel">Cancel</button>
+      </div>
+    </form>
+
+    <div id="fb-success" class="fb-success hidden">
+      <h2>Thank you!</h2>
+      <p>Your feedback is in. We read every message.</p>
+      <p class="fb-ref">Reference: <strong id="fb-ref-id"></strong></p>
+      <div class="about-actions"><button type="button" id="fb-done" class="primary">Done</button></div>
     </div>
   </div>
 </div>
 
+<div id="offline-badge" class="hidden" role="status">Offline — your work is saved on this device</div>
 <div id="challenge-toast" class="toast hidden"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>

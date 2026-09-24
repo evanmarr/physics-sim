@@ -4,6 +4,8 @@
 // morale. The simulation core (createGame / stepGame and friends) is DOM-free
 // and testable under node; WarMode is the canvas/HUD wrapper around it.
 
+import * as CP from "./warCampaign.js";
+
 export const WORLD_W = 1600;
 export const WORLD_H = 1000;
 export const CELL = 25;
@@ -892,6 +894,8 @@ export class WarMode {
     this.game = null; this.raf = 0; this.acc = 0; this.lastT = 0; this.ptr = null; this.listSig = "";
     this.splitTarget = null; this.splitFrac = 0.5;
     this.terrainImg = null; this.terrainKey = "";
+    this.mode = "skirmish"; this.camp = null; this.campBattle = null; this.campSel = null; this.campMsg = "";
+    this.campRecruit = { army: "new", n: 50, arc: 25, cav: 10 }; this.confirmKind = ""; this._skGame = null;
   }
 
   mount() {
@@ -901,6 +905,7 @@ export class WarMode {
     if (!this.built) this._build();
     if (!this.game) this._newGame(this.mapId, true);
     this.mounted = true;
+    this._setMode(this.mode);
     this._onKey = (e) => this._key(e);
     window.addEventListener("keydown", this._onKey);
     this.ro = new ResizeObserver(() => this._resize());
@@ -929,7 +934,15 @@ export class WarMode {
     root.innerHTML = "";
     root.className = "econ-root war-root";
     root.appendChild(el("h1", "econ-title", "War"));
-    const wrap = el("div", "war-wrap");
+    this.toggle = el("div", "war-camp-toggle");
+    this.tabBtns = {};
+    for (const [k, label] of [["skirmish", "Skirmish"], ["campaign", "Campaign"]]) {
+      const b = el("button", "war-btn", label); b.onclick = () => this._setMode(k); this.tabBtns[k] = b; this.toggle.appendChild(b);
+    }
+    root.appendChild(this.toggle);
+    try { this.camp = CP.loadCampaign(localStorage); } catch { this.camp = null; }
+    const wrap = el("div", "war-wrap"); this.wrap = wrap;
+    this.campBox = el("div", "war-camp-root"); this.campBox.style.display = "none";
     this.stage = el("div", "war-stage");
     this.canvas = el("canvas", "war-canvas");
     this.hud = el("div", "war-hud");
@@ -938,7 +951,7 @@ export class WarMode {
     this.stage.append(this.canvas, this.hud, this.banner, this.pop);
     this.side = el("div", "war-side");
     wrap.append(this.stage, this.side);
-    root.appendChild(wrap);
+    root.append(wrap, this.campBox);
     this.ctx2 = this.canvas.getContext("2d");
     this.fogCanvas = document.createElement("canvas");
 
@@ -955,7 +968,7 @@ export class WarMode {
     const r1 = el("div", "war-row"); r1.append(el("label", null, "Map"), mapSel, rnd);
     const r2 = el("div", "war-row"); r2.append(el("label", null, "Difficulty"), diffSel);
     const r3 = el("div", "war-row"); r3.append(fogB);
-    c1.append(r1, r2, r3); this.fogB = fogB;
+    c1.append(r1, r2, r3); this.fogB = fogB; this.c1 = c1;
 
     // phase card
     this.phaseCard = el("div", "war-card");
@@ -1006,6 +1019,17 @@ export class WarMode {
   _renderPhase() {
     const g = this.game, c = this.phaseCard;
     c.innerHTML = "";
+    if (this.campBattle && g.phase === "deploy") {
+      const cb = this.campBattle;
+      c.appendChild(el("h3", null, "Deployment"));
+      c.appendChild(el("div", "war-dim", `Attacking ${cb.name} (${cb.terrainName}). Enemy commander: ${DIFFICULTIES[cb.setup.difficulty].name}.` + (cb.setup.morale ? ` Long supply line: your morale starts ${cb.setup.morale} lower.` : "")));
+      c.appendChild(el("div", "war-dim", "Drag your armies inside the blue zone to set up. Survivors carry over to the campaign."));
+      const r = el("div", "war-row");
+      const start = el("button", "war-btn primary", "Start battle"); start.onclick = () => { startBattle(g); this._renderPhase(); };
+      const wd = el("button", "war-btn", "Withdraw"); wd.title = "Call off the attack; no losses"; wd.onclick = () => this._campExitBattle();
+      r.append(start, wd); c.appendChild(r);
+      return;
+    }
     if (g.phase === "deploy") {
       c.appendChild(el("h3", null, "Deployment"));
       // Sliders update in place: rebuilding the panel on every 'input' event
@@ -1047,6 +1071,269 @@ export class WarMode {
     }
   }
 
+  // ====================== campaign ======================
+  _setMode(m) {
+    this.mode = m;
+    for (const k of Object.keys(this.tabBtns)) this.tabBtns[k].classList.toggle("on", k === m);
+    const inBattle = !!this.campBattle;
+    this.wrap.style.display = m === "skirmish" || inBattle ? "" : "none";
+    this.campBox.style.display = m === "campaign" && !inBattle ? "" : "none";
+    if (m === "skirmish") { this.terrainKey = ""; this._resize(); this._renderPhase(); }
+    else if (!inBattle) this._campRender();
+  }
+  _campSave() { if (this.camp) CP.saveCampaign(this.camp, localStorage); }
+  _cb(label, fn, cls = "") { const b = el("button", "war-btn" + (cls ? " " + cls : ""), label); b.onclick = fn; return b; }
+  _campStart(id) {
+    this.camp = CP.newCampaign(id, Math.floor(Math.random() * 1e6));
+    this.campSel = null; this.campMsg = ""; this.confirmKind = ""; this._campSave(); this._campRender();
+  }
+  _campLeave() { CP.clearCampaign(localStorage); this.camp = null; this.campSel = null; this.campMsg = ""; this.confirmKind = ""; this._campRender(); }
+
+  _campRender() {
+    const box = this.campBox; box.innerHTML = "";
+    const st = this.camp;
+    if (!st) return this._campMenu();
+    if (st.status !== "active") return this._campSummary();
+    const sc = CP.scenarioById(st.scenarioId);
+    const wrap = el("div", "war-camp-wrap");
+    // map
+    const mapCol = el("div", "war-camp-mapcol");
+    const scroll = el("div", "war-camp-mapscroll"); scroll.appendChild(this._campMap(st, sc));
+    mapCol.append(scroll, el("div", "war-dim war-camp-legend", "Blue land is yours, red is enemy. Tap a red region next to your land to plan an attack. Dashed red roads show where you can attack."));
+    // side
+    const side = el("div", "war-camp-side");
+    // status
+    const c1 = el("div", "war-card"); c1.appendChild(el("h3", null, sc.name));
+    const chips = el("div", "war-camp-chips");
+    for (const t of [`Turn ${st.turn}`, `Gold ${st.gold}`, `+${CP.income(st)}/turn`, `Land ${CP.playerRegions(st).length}/${st.regions.length}`, `Troops ${CP.rosterTotal(st)}`]) chips.appendChild(el("span", "war-chip", t));
+    const r1 = el("div", "war-camp-btnrow");
+    const end = this._cb(st.attacked ? "End turn" : "End turn (skip attack)", () => { CP.endTurn(st); this._campSave(); this.campSel = null; this._campRender(); }, "primary");
+    r1.appendChild(end);
+    const r2 = el("div", "war-camp-btnrow");
+    const nb = this._cb(this.confirmKind === "new" ? "Really start over?" : "New campaign", () => { if (this.confirmKind === "new") this._campLeave(); else { this.confirmKind = "new"; this._campRender(); } });
+    const ab = this._cb(this.confirmKind === "abandon" ? "Really abandon?" : "Abandon", () => {
+      if (this.confirmKind === "abandon") { st.status = "lost"; st.endReason = "You abandoned the campaign."; this.confirmKind = ""; this._campSave(); this._campRender(); }
+      else { this.confirmKind = "abandon"; this._campRender(); }
+    });
+    r2.append(nb, ab);
+    c1.append(chips, r1, r2);
+    if (this.campMsg) c1.appendChild(el("div", "war-dim war-camp-msg", this.campMsg));
+    // region
+    const c2 = this._campRegionCard(st);
+    // roster
+    const c3 = this._campRosterCard(st);
+    // threats
+    const c4 = el("div", "war-card"); c4.appendChild(el("h3", null, "Enemy counter-attacks"));
+    const th = CP.threats(st).filter((t) => t.ratio > 0.55);
+    if (!th.length) c4.appendChild(el("div", "war-dim", "No enemy region is strong enough to threaten you right now."));
+    for (const t of th.slice(0, 4)) c4.appendChild(el("div", "war-camp-line", `${CP.tName(st, t.from)} to ${CP.tName(st, t.to)}: about ${t.atk} vs your ${t.def}`));
+    c4.appendChild(el("div", "war-dim", "Your field army adds half its strength to any region under attack. Forts and hills make defence stronger."));
+    if (st.lastReport.length) { c4.appendChild(el("h3", "war-camp-sub", "Last turn")); for (const l of st.lastReport) c4.appendChild(el("div", "war-camp-line", l)); }
+    // lesson
+    const c5 = el("div", "war-card war-dim"); c5.textContent = sc.blurb;
+    const c6 = el("div", "war-card"); c6.appendChild(el("h3", null, "Log"));
+    for (const l of st.log.slice(-6).reverse()) c6.appendChild(el("div", "war-camp-line", l));
+    side.append(c1, c2, c3, c4, c5, c6);
+    wrap.append(mapCol, side);
+    box.appendChild(wrap);
+  }
+
+  _campMenu() {
+    const box = this.campBox;
+    const head = el("div", "war-card"); head.appendChild(el("h3", null, "Campaign"));
+    head.appendChild(el("div", "war-dim", "Lead a persistent army across ten regions to capture the enemy capital. Survivors carry over between battles, so every loss matters. Earn gold from your land and spend it on new troops between fights."));
+    box.appendChild(head);
+    const grid = el("div", "war-camp-menu");
+    for (const sc of CP.SCENARIOS) {
+      const c = el("div", "war-card war-camp-scn");
+      c.append(el("h3", null, sc.level), el("div", "war-camp-scn-name", sc.name), el("div", "war-dim", sc.blurb), el("div", "war-dim", `Start: ${sc.gold} gold, ${sc.maxAttacks === 1 ? "1 enemy counter-attack" : sc.maxAttacks + " enemy counter-attacks"} per turn at most.`));
+      c.appendChild(this._cb("Start", () => this._campStart(sc.id), "primary"));
+      grid.appendChild(c);
+    }
+    box.appendChild(grid);
+  }
+
+  _campSummary() {
+    const st = this.camp, s = CP.summary(st), box = this.campBox;
+    const c = el("div", "war-card war-camp-sum");
+    c.append(el("h2", null, s.won ? "Campaign won" : "Campaign lost"), el("div", "war-dim", st.endReason), el("div", "war-camp-scn-name", s.scenario));
+    const grid = el("div", "war-camp-stats");
+    for (const [k, v] of [["Turns", s.turns], ["Battles", `${s.battlesWon} won of ${s.battles}`], ["Regions held", s.regionsHeld], ["Regions captured", s.captured], ["Regions lost", s.lostRegions], ["Attacks repelled", s.defended], ["Your troops lost", s.troopsLost], ["Enemy strength destroyed", s.enemyKilled], ["Gold spent", s.goldSpent]]) {
+      const d = el("div", "war-camp-stat"); d.append(el("b", null, String(v)), el("span", "war-dim", k)); grid.appendChild(d);
+    }
+    c.append(grid, el("div", "war-dim", s.lesson));
+    const r = el("div", "war-camp-btnrow");
+    r.append(this._cb("New campaign", () => this._campLeave(), "primary"));
+    c.appendChild(r); box.appendChild(c);
+  }
+
+  _campMap(st, sc) {
+    const NS = "http://www.w3.org/2000/svg";
+    const sv = (tag, attrs, parent) => { const n = document.createElementNS(NS, tag); for (const k in attrs) n.setAttribute(k, attrs[k]); if (parent) parent.appendChild(n); return n; };
+    const svg = sv("svg", { viewBox: "0 0 100 60", class: "war-camp-map", role: "group", "aria-label": "Campaign map" });
+    sv("rect", { x: 0, y: 0, width: 100, height: 60, fill: "#efe6cf" }, svg);
+    sv("rect", { x: 0.6, y: 0.6, width: 98.8, height: 58.8, fill: "none", stroke: "#8a6d3b", "stroke-width": 0.5, "stroke-dasharray": "1.5 1" }, svg);
+    const atk = new Set(CP.attackableRegions(st));
+    const P = CP.LAYOUT.pos;
+    for (const [a, b] of CP.LAYOUT.edges) {
+      const hot = (st.regions[a].owner !== st.regions[b].owner);
+      sv("line", { x1: P[a][0], y1: P[a][1], x2: P[b][0], y2: P[b][1], stroke: hot ? "#b23b3b" : "#8a6d3b", "stroke-width": hot ? 0.7 : 0.5, "stroke-dasharray": "1.2 1", "stroke-linecap": "round" }, svg);
+    }
+    for (const r of st.regions) {
+      const [cx, cy] = P[r.id], rng = mulberry32(sc.seed * 97 + r.id * 13);
+      const N = 12, pts = [];
+      for (let i = 0; i < N; i++) { const a = (i / N) * 6.283, rr = 6.2 * (0.86 + 0.28 * rng()); pts.push([cx + Math.cos(a) * rr * 1.15, cy + Math.sin(a) * rr]); }
+      const mid = (p, q) => `${((p[0] + q[0]) / 2).toFixed(2)} ${((p[1] + q[1]) / 2).toFixed(2)}`;
+      let d = "M" + mid(pts[N - 1], pts[0]);
+      for (let i = 0; i < N; i++) d += ` Q${pts[i][0].toFixed(2)} ${pts[i][1].toFixed(2)} ${mid(pts[i], pts[(i + 1) % N])}`;
+      const T = CP.TERRAINS[r.terrain], mine = r.owner === 0, sel = this.campSel === r.id;
+      const g = sv("g", { class: "war-camp-region" + (atk.has(r.id) ? " atk" : ""), tabindex: 0, role: "button", "aria-label": `${sc.names[r.id]}, ${T.name}, ${mine ? "yours" : "enemy"}` }, svg);
+      sv("path", { d: d + "Z", fill: T.fill, stroke: sel ? "#f59e0b" : mine ? "#2563eb" : "#dc2626", "stroke-width": sel ? 1.3 : 0.8, "stroke-linejoin": "round" }, g);
+      // terrain glyph
+      const ink = "#5b4a2a";
+      if (r.terrain === "forest") { for (const dx of [-2.2, 0.4, 2.8]) sv("path", { d: `M${cx + dx - 1.2} ${cy - 1.6}L${cx + dx} ${cy - 4.4}L${cx + dx + 1.2} ${cy - 1.6}Z`, fill: "#3f6b3a" }, g); }
+      else if (r.terrain === "hills") { sv("path", { d: `M${cx - 4} ${cy - 1.8}Q${cx - 2} ${cy - 5} ${cx} ${cy - 1.8}Q${cx + 2} ${cy - 4.6} ${cx + 4} ${cy - 1.8}`, fill: "none", stroke: ink, "stroke-width": 0.5 }, g); }
+      else if (r.terrain === "river") { sv("path", { d: `M${cx - 4} ${cy - 3.4}q1.3 -1.4 2.6 0t2.6 0t2.6 0`, fill: "none", stroke: "#3d6fa8", "stroke-width": 0.7 }, g); }
+      else if (r.terrain === "ruins") { for (const dx of [-2.6, 0, 2.6]) sv("rect", { x: cx + dx - 0.5, y: cy - 4.6 + (dx === 0 ? 1 : 0), width: 1, height: dx === 0 ? 2.6 : 3.6, fill: ink }, g); }
+      else { for (const dx of [-3, 0, 3]) sv("path", { d: `M${cx + dx - 0.6} ${cy - 1.8}L${cx + dx} ${cy - 3.6}L${cx + dx + 0.6} ${cy - 1.8}`, fill: "none", stroke: "#5f7a3a", "stroke-width": 0.4 }, g); }
+      const t1 = sv("text", { x: cx, y: cy + 1.4, "text-anchor": "middle", "font-size": 2.4, "font-weight": 700, fill: "#2b2416" }, g); t1.textContent = sc.names[r.id];
+      const gl = mine ? `${r.garrison}` : `~${Math.round(CP.defenderPoints(st, r.id) / 10) * 10}`;
+      const t2 = sv("text", { x: cx, y: cy + 4.4, "text-anchor": "middle", "font-size": 2.3, fill: mine ? "#1d4ed8" : "#b91c1c", "font-weight": 700 }, g); t2.textContent = gl + (r.fort ? " F" + r.fort : "");
+      if (r.id === CP.LAYOUT.playerCapital || r.id === CP.LAYOUT.enemyCapital) {
+        sv("path", { d: `M${cx} ${cy - 7.2}v-3.4l3 1.1l-3 1.1`, fill: mine ? "#2563eb" : "#dc2626", stroke: "#2b2416", "stroke-width": 0.3 }, g);
+      }
+      g.addEventListener("click", () => { this.campSel = r.id; this.campMsg = ""; this._campRender(); });
+      g.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); this.campSel = r.id; this._campRender(); } });
+    }
+    return svg;
+  }
+
+  _campRegionCard(st) {
+    const c = el("div", "war-card"); c.appendChild(el("h3", null, "Region"));
+    const rid = this.campSel;
+    if (rid == null) { c.appendChild(el("div", "war-dim", "Tap a region on the map.")); return c; }
+    const r = st.regions[rid], T = CP.TERRAINS[r.terrain], nm = CP.tName(st, rid);
+    c.appendChild(el("div", "war-camp-scn-name", `${nm}: ${T.name}`));
+    c.appendChild(el("div", "war-dim", T.note));
+    c.appendChild(el("div", "war-camp-line", `Income ${T.income}/turn` + (r.fort ? `  |  Fort level ${r.fort}` : "")));
+    if (r.owner === 0) {
+      c.appendChild(el("div", "war-camp-line", `Militia strength ${r.garrison}. Held by you.`));
+      const fc = CP.fortifyCost(st, rid);
+      const f = this._cb(r.fort >= 2 ? "Fully fortified" : `Fortify (${fc} gold)`, () => { const res = CP.fortify(st, rid); this.campMsg = res.ok ? "Fort built. Defenders behind walls hold out against larger forces." : res.reason; this._campSave(); this._campRender(); });
+      f.disabled = r.fort >= 2 || fc > st.gold; f.title = "Adds a fort level and some militia";
+      const row = el("div", "war-camp-btnrow"); row.appendChild(f); c.appendChild(row);
+    } else {
+      const chk = CP.canAttack(st, rid);
+      c.appendChild(el("div", "war-camp-line", `Enemy strength about ${Math.round(CP.defenderPoints(st, rid) / 10) * 10} points (terrain and forts included).`));
+      c.appendChild(el("div", "war-camp-line", `Enemy commander: ${DIFFICULTIES[CP.regionDifficulty(st, rid)].name}.`));
+      if (chk.ok) {
+        const pen = CP.moralePenalty(st, rid);
+        c.appendChild(el("div", "war-dim", pen ? `Supply line is ${pen / 4 + 1} regions long, so your morale starts ${pen} lower.` : "Short supply line: your troops arrive fresh."));
+      }
+      const a = this._cb("Attack", () => this._campAttack(rid), "primary"); a.disabled = !chk.ok;
+      const row = el("div", "war-camp-btnrow"); row.appendChild(a); c.appendChild(row);
+      if (!chk.ok) c.appendChild(el("div", "war-dim", chk.reason));
+    }
+    return c;
+  }
+
+  _campRosterCard(st) {
+    const c = el("div", "war-card"); c.appendChild(el("h3", null, `Roster (${st.roster.length}/${CP.MAX_ROSTER})`));
+    const list = el("div", "war-list");
+    for (const a of st.roster) {
+      const row = el("div", "war-camp-army");
+      const top = el("div", "war-camp-armytop"); top.append(el("b", null, a.name), el("span", "war-dim", `${a.n} troops`));
+      const comp = el("div", "war-dim", `Inf ${Math.round((1 - a.arc - a.cav) * 100)}%  Arc ${Math.round(a.arc * 100)}%  Cav ${Math.round(a.cav * 100)}%`);
+      const bar = el("div", "war-mini"), bi = el("i"); bi.style.width = a.morale + "%"; bi.style.background = a.morale > 50 ? "#22c55e" : a.morale > 25 ? "#eab308" : "var(--danger)"; bar.appendChild(bi);
+      row.append(top, comp, bar); list.appendChild(row);
+    }
+    if (!st.roster.length) list.appendChild(el("div", "war-dim", "No armies left. Recruit below."));
+    c.appendChild(list);
+    // recruit form: sliders update in place (never rebuilt during 'input')
+    c.appendChild(el("h3", "war-camp-sub", "Recruit"));
+    const rc = this.campRecruit;
+    if (rc.army !== "new" && !st.roster.some((a) => String(a.id) === rc.army)) rc.army = "new";
+    const sel = el("select"); const o0 = el("option", null, "New army"); o0.value = "new"; sel.appendChild(o0);
+    for (const a of st.roster) { const o = el("option", null, "Reinforce " + a.name); o.value = String(a.id); sel.appendChild(o); }
+    sel.value = rc.army;
+    const sr = el("div", "war-row"); sr.append(el("label", null, "Send to"), sel);
+    const sliders = [];
+    const mk = (label, key, min, max, step) => {
+      const r = el("div", "war-row"), inp = el("input"); inp.type = "range"; inp.min = min; inp.max = max; inp.step = step; inp.value = rc[key];
+      const v = el("span", "war-val", String(rc[key])); sliders.push({ inp, v, key });
+      inp.oninput = () => { rc[key] = +inp.value; if (rc.arc + rc.cav > 100) { if (key === "arc") rc.cav = 100 - rc.arc; else rc.arc = 100 - rc.cav; } sync(); };
+      r.append(el("label", null, label), inp, v); return r;
+    };
+    const info = el("div", "war-dim");
+    const btn = this._cb("Recruit", () => {
+      const res = CP.recruit(st, { armyId: rc.army === "new" ? null : +rc.army, n: rc.n, arcPct: rc.arc, cavPct: rc.cav });
+      this.campMsg = res.ok ? `Recruited for ${res.cost} gold.` : res.reason; this._campSave(); this._campRender();
+    }, "primary");
+    const sync = () => {
+      for (const s of sliders) { if (document.activeElement !== s.inp) s.inp.value = rc[s.key]; s.v.textContent = rc[s.key]; }
+      const cost = CP.recruitCost(rc.n, rc.arc, rc.cav);
+      info.textContent = `Cost ${cost} gold (you have ${st.gold}). Fresh recruits start at 85% morale.`;
+      btn.disabled = cost > st.gold || (rc.army === "new" && st.roster.length >= CP.MAX_ROSTER);
+    };
+    sel.onchange = () => { rc.army = sel.value; sync(); };
+    c.append(sr, mk("Troops", "n", CP.MIN_RECRUIT, CP.MAX_RECRUIT, 10), mk("Archers %", "arc", 0, 100, 5), mk("Cavalry %", "cav", 0, 100, 5), info);
+    const row = el("div", "war-camp-btnrow"); row.appendChild(btn); c.appendChild(row);
+    sync();
+    return c;
+  }
+
+  // ----- campaign battles -----
+  _campAttack(rid) {
+    const st = this.camp;
+    if (!CP.canAttack(st, rid).ok) return;
+    const setup = CP.battleSetup(st, rid);
+    const g = createGame({ map: setup.map, difficulty: setup.difficulty, seed: setup.seed, fog: this.fog, aiDeploy: false });
+    g.budget[0] = 0; g.budget[1] = setup.enemyBudget; autoDeploy(g, 1);
+    const k = setup.armies.length;
+    setup.armies.forEach((sa, i) => {
+      const comp = normComp(sa.arc, sa.cav);
+      for (let tries = 0; tries < 40; tries++) {
+        const x = 70 + g.rng() * 200, y = 80 + ((i + 0.5) / k) * 840 + (g.rng() - 0.5) * 40;
+        const a = addArmy(g, 0, x, y, sa.n, comp, { zone: true });
+        if (a) { a.morale = sa.morale; a.name = sa.name; break; }
+      }
+    });
+    const enemyStart = g.armies.filter((a) => a.team === 1).reduce((s, a) => s + a.n, 0);
+    this._skGame = this.game; this.game = g;
+    this.campBattle = { rid, setup, enemyStart, name: CP.tName(st, rid), terrainName: CP.TERRAINS[st.regions[rid].terrain].name };
+    this.sel.clear(); this.placing = false; this.paused = false; this.terrainKey = ""; this.listSig = ""; this._lastBudget = undefined;
+    this.banner.classList.remove("show"); this.pop.classList.remove("show");
+    this.toggle.style.display = "none"; this.c1.style.display = "none";
+    this._setMode("campaign");
+    this._renderPhase(); this._resize();
+  }
+  _campExitBattle() {
+    this.campBattle = null;
+    if (this._skGame) this.game = this._skGame; this._skGame = null;
+    this.sel.clear(); this.terrainKey = ""; this.listSig = ""; this.paused = false;
+    this.banner.classList.remove("show"); this.pop.classList.remove("show");
+    this.toggle.style.display = ""; this.c1.style.display = "";
+    this._setMode("campaign");
+  }
+  _campBanner() {
+    const g = this.game, cb = this.campBattle, win = g.winner.team === 0, b = this.banner, st = this.camp;
+    const surv = g.armies.filter((a) => a.team === 0).reduce((s, a) => s + a.n, 0);
+    const en = g.armies.filter((a) => a.team === 1).reduce((s, a) => s + a.n, 0);
+    b.innerHTML = "";
+    const box = el("div"); box.append(el("h2", null, win ? "Victory" : "Defeat"), el("div", "war-dim", win ? `${cb.name} is yours.` : `The attack on ${cb.name} failed.`));
+    const s = el("div"); s.style.margin = "10px 0"; s.style.fontSize = "13px";
+    s.innerHTML = `Troops before: ${Math.round(cb.setup.startTotal)}<br>Survivors: ${Math.round(Math.min(surv, cb.setup.startTotal))}`;
+    const r = el("div", "war-row"); r.style.justifyContent = "center";
+    const go = el("button", "war-btn primary", "Continue");
+    go.onclick = () => {
+      CP.applyBattle(st, cb.rid, { won: win, survivors: surv, startTotal: cb.setup.startTotal, enemyFrac: cb.enemyStart > 0 ? en / cb.enemyStart : 0 });
+      this.campMsg = win ? `Captured ${cb.name}.` : `Repelled at ${cb.name}. The garrison is weakened.`;
+      this.campSel = win ? null : cb.rid;
+      this._campSave(); this._campExitBattle();
+    };
+    r.appendChild(go); box.append(s, r); b.appendChild(box); b.classList.add("show");
+  }
+
   // ----- selection / orders -----
   _selArmies() { const g = this.game; return g.armies.filter((a) => this.sel.has(a.id) && a.team === 0); }
   _stance(s) { const g = this.game; if (g.phase !== "battle") return; setStance(g, this._selArmies(), s); }
@@ -1079,6 +1366,7 @@ export class WarMode {
 
   _key(e) {
     if (!this.mounted || !this.root.offsetParent) return;
+    if (this.mode === "campaign" && !this.campBattle) return;
     const tg = e.target; if (tg && (tg.tagName === "INPUT" || tg.tagName === "SELECT" || tg.tagName === "TEXTAREA")) return;
     const g = this.game; const k = e.key.toLowerCase();
     if (k === "escape") {
@@ -1218,6 +1506,7 @@ export class WarMode {
   _frame(dt, now) {
     const g = this.game;
     if (!g) return;
+    if (this.mode === "campaign" && !this.campBattle) return;
     if (g.phase === "battle" && !this.paused) {
       this.acc += dt * this.simSpeed;
       let n = 0;
@@ -1242,6 +1531,7 @@ export class WarMode {
   }
 
   _showBanner() {
+    if (this.campBattle) return this._campBanner();
     const g = this.game, win = g.winner.team === 0, b = this.banner;
     b.innerHTML = "";
     const box = el("div"); box.append(el("h2", null, win ? "Victory" : "Defeat"), el("div", "war-dim", g.winReason));

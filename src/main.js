@@ -6,8 +6,10 @@ import { PRESETS, getPreset, matchPreset, presetInfo } from "./physicsPresets.js
 import { initMeasureTools, measureOnFrame, measureOnReset, measureRefresh } from "./measureTools.js";
 import { simMass } from "./measureMath.js";
 import { initParamSweepUI } from "./paramSweep.js";
+import { initDaily, renderDailyCard } from "./daily.js";
+import { initPWA, getInstallState, promptInstall, onInstallStateChange, onOnlineChange } from "./pwa.js";
 import { registerVariationApplier } from "./classroom.js";
-import { CHALLENGES, findChallenge, ChallengeTracker } from "./challenges.js";
+import { CHALLENGES, findChallenge, ChallengeTracker, checkIntegrity, restoreCritical } from "./challenges.js";
 import { CHEMISTRY_CHALLENGES } from "./chemistryChallenges.js";
 import { HISTORY_CHALLENGES } from "./historyChallenges.js";
 import { CYBER_CHALLENGES } from "./cyberChallenges.js";
@@ -25,6 +27,8 @@ import { MathematicsMode } from "./mathematics.js";
 import { WhiteboardMode } from "./whiteboard.js";
 import { EconomicsMode } from "./economics.js";
 import { ZoologyMode } from "./zoology.js";
+import { GeneticsMode } from "./genetics.js";
+import { GENETICS_BLURB } from "./geneticsMath.js";
 import { SoundMode } from "./sound.js";
 import { SustainabilityMode } from "./sustainability.js";
 import { WarMode } from "./war.js";
@@ -47,7 +51,8 @@ import { initAchievementsUI, refreshAchievements, onChallengeCompleted } from ".
 import { initSearchUI } from "./search.js";
 import { initOnboarding } from "./onboarding.js";
 import { initTutorial } from "./tutorial.js";
-import { initDeviceMode, showPrompt as showDeviceModePrompt } from "./deviceMode.js";
+import { initDeviceMode, showPrompt as showDeviceModePrompt, getDeviceMode } from "./deviceMode.js";
+import { initFeedbackForm } from "./feedback.js";
 import { toggleUnitSystem, distanceUnitSuffix, weightUnitSuffix, gridSquareInUnits } from "./units.js";
 import { confirmPopup, alertPopup, promptPopup } from "./popup.js";
 import { startLoadingAnimation, finishLoading } from "./loading.js";
@@ -89,6 +94,7 @@ let mathematicsMode = null;
 let whiteboardMode = null;
 let economicsMode = null;
 let zoologyMode = null;
+let geneticsMode = null;
 let soundMode = null;
 let sustainabilityMode = null;
 let warMode = null;
@@ -226,7 +232,39 @@ function boot() {
   window.addEventListener("beforeunload", persistWorld);
 }
 
+// Challenge status strip: shows which challenge is active and whether its
+// defining parts are still as designed. Moving/deleting one (a target line,
+// the magnet, a wall…) makes it impossible to complete — say so plainly and offer a one-click fix.
+function updateChallengeStatus() {
+  const el = document.getElementById("challenge-status");
+  if (!el) return;
+  const c = state.activeChallengeId ? findChallenge(state.activeChallengeId) : null;
+  if (!c) { el.classList.add("hidden"); return; }
+  const { ok, problems } = checkIntegrity(c, state.objects);
+  el.classList.remove("hidden");
+  el.classList.toggle("broken", !ok);
+  el.innerHTML = "";
+  const text = document.createElement("span");
+  if (ok) text.textContent = `Challenge: ${c.name} — ${c.successCondition}`;
+  else {
+    const what = problems.map((p) => `${p.label}${p.deleted ? " (deleted)" : ""}`).join(", ");
+    text.textContent = `⚠ ${c.name} can't be completed — you changed ${what}. Those parts define the puzzle; tune the tunable ones instead (see the hint).`;
+  }
+  el.appendChild(text);
+  if (!ok) {
+    const btn = document.createElement("button");
+    btn.textContent = "Restore challenge parts";
+    btn.addEventListener("click", () => {
+      pushUndoNow();
+      state.objects = restoreCritical(c, state.objects);
+      renderAll(); renderPanelUI(); scheduleSave();
+    });
+    el.appendChild(btn);
+  }
+}
+
 function renderAll() {
+  updateChallengeStatus();
   const items = state.objects.map(specToRenderItem);
   window._renderer.render(items, { editable: !state.playing, selectedId: state.selectedId, selectedIds: state.selectedIds });
   updateTrajectoryPreview();
@@ -745,6 +783,12 @@ function wireTopbar(renderer) {
   initPlansUI();
   initPhysicsViewTabs();
   wireAppsModal();
+  initPWA({ showToast });
+  try {
+    const d = initDaily({ onOpenMode: (m) => window._setMode(m) });
+    if (d?.milestone) setTimeout(() => showToast(d.milestone), 1200);
+  } catch { /* streaks are a bonus — never block boot */ }
+  wireInstallButton();
   initPresetPicker();
   initMeasureTools({
     getRenderer: () => window._renderer,
@@ -852,21 +896,22 @@ function wireUnitsToggle() {
 }
 
 function wireFeedback() {
-  const modal = document.getElementById("feedback-modal");
-  const text = document.getElementById("feedback-text");
-  const open = () => { text.value = ""; modal.classList.remove("hidden"); text.focus(); };
-  const close = () => modal.classList.add("hidden");
+  initFeedbackForm({ getSection: () => state.mode || "home", getUser, sendFeedback, getDeviceMode });
+}
 
-  document.getElementById("feedback-btn").addEventListener("click", open);
-  document.getElementById("feedback-cancel").addEventListener("click", close);
-  document.getElementById("feedback-submit").addEventListener("click", async () => {
-    const message = text.value.trim();
-    if (!message) { text.focus(); return; }
-    const result = await sendFeedback(message);
-    if (result.error) { await alertPopup(result.error, { title: "Couldn't send feedback" }); return; }
-    close();
-    showToast("Thanks — feedback sent.");
+// "Install app" menu entry (native prompt where the browser offers one, iOS how-to otherwise) + offline badge
+function wireInstallButton() {
+  const btn = document.getElementById("install-btn");
+  const badge = document.getElementById("offline-badge");
+  const sync = () => { const st = getInstallState(); btn?.classList.toggle("hidden", st.installed || !(st.canInstall || st.ios)); };
+  btn?.addEventListener("click", async () => {
+    const st = getInstallState();
+    if (st.canInstall) await promptInstall();
+    else if (st.ios) alertPopup(st.iosInstructions, { title: "Install Kinetic" });
   });
+  onInstallStateChange(sync); sync();
+  onOnlineChange((online) => badge?.classList.toggle("hidden", online));
+  if (badge && !navigator.onLine) badge.classList.remove("hidden");
 }
 
 function wireAppsModal() {
@@ -958,6 +1003,10 @@ function togglePlay(renderer) {
     window._renderer.renderTrajectory(null);
     const clones = state.objects.map(cloneSpec);
     tracker = state.activeChallengeId ? new ChallengeTracker(findChallenge(state.activeChallengeId)) : null;
+    if (tracker && !checkIntegrity(tracker.challenge, state.objects).ok) {
+      showToast("This challenge can't be completed while its defining parts are changed — use “Restore challenge parts”.");
+      tracker = null; // running is still allowed for experimenting, but nothing can be awarded
+    }
     sim = new PhysicsSim(clones, state.gravity, {
       onFrame: (items) => {
         renderer.render(items, { editable: false });
@@ -1131,12 +1180,19 @@ function closeTouchMenuOutside(e) {
   if (!touchMenuEl?.contains(e.target)) closeTouchMenu();
 }
 
-function showToast(msg) {
+function showToast(msg, opts) {
   const toast = document.getElementById("challenge-toast");
   toast.textContent = msg;
+  if (opts?.actionLabel && opts.onAction) {
+    const b = document.createElement("button");
+    b.textContent = opts.actionLabel;
+    b.style.marginLeft = "10px";
+    b.addEventListener("click", () => { toast.classList.add("hidden"); opts.onAction(); });
+    toast.appendChild(b);
+  }
   toast.classList.remove("hidden");
   clearTimeout(showToast._t);
-  showToast._t = setTimeout(() => toast.classList.add("hidden"), 3500);
+  showToast._t = setTimeout(() => toast.classList.add("hidden"), opts?.actionLabel ? 12000 : 3500);
 }
 
 function wireChallenges() {
@@ -1240,6 +1296,7 @@ const HOME_SECTIONS = [
   { mode: "whiteboard", title: "Whiteboard", blurb: "A draw surface for sketching ideas and equations, plus a simple notebook for text notes.", kind: "whiteboard", hues: [160, 40] },
   { mode: "economics", title: "Economics", blurb: "A real supply-and-demand market (with taxes and price controls) and a repeated Prisoner's Dilemma sandbox.", kind: "economics", hues: [140, 20] },
   { mode: "zoology", title: "Zoology", blurb: "Explore food chains and energy pyramids, then build your own food web from real predator-prey relationships.", kind: "zoology", hues: [95, 30] },
+  { mode: "genetics", title: "Genetics Lab", blurb: GENETICS_BLURB, kind: "genetics", hues: [330, 200] },
   { mode: "sound", title: "Sound", blurb: "Record your voice and watch the real waveform, or build your own tones with a live oscillator.", kind: "sound", hues: [260, 190] },
   { mode: "war", title: "War", blurb: "Place armies, paint terrain, give orders, and watch real agent-based battles play out.", kind: "war", hues: [5, 30] },
   { mode: "sustainability", title: "Sustainability", blurb: "Run a city — route energy, manage pollution, and grow your population without wrecking either.", kind: "sustainability", hues: [150, 210] },
@@ -1376,7 +1433,7 @@ function countLabel(count) {
   return `${count.toLocaleString()} ${count === 1 ? "person has" : "people have"} completed this`;
 }
 
-// Global search's index: all 13 sandboxes (so typing a subject name jumps
+// Global search's index: all 14 sandboxes (so typing a subject name jumps
 // straight there) plus every challenge each one defines (reusing
 // weeklyPool()'s same {sandbox, name, detail, go} shape — one list of
 // "everything you can search for," not two separately maintained ones).
@@ -1391,6 +1448,7 @@ const SEARCH_SANDBOXES = [
   { mode: "whiteboard", label: "Whiteboard" },
   { mode: "economics", label: "Economics" },
   { mode: "zoology", label: "Zoology" },
+  { mode: "genetics", label: "Genetics Lab" },
   { mode: "sound", label: "Sound" },
   { mode: "sustainability", label: "Sustainability" },
   { mode: "war", label: "War" },
@@ -1445,11 +1503,11 @@ function buildHomePage(root, onNavigate) {
     <div class="home-wrap">
       <div class="home-hero">
         <img class="home-logo" src="icons/kinetic-logo-transparent.png" width="48" height="48" alt="" aria-hidden="true" />
-        <div class="home-kicker">thirteen sandboxes · one app</div>
+        <div class="home-kicker">fourteen sandboxes · one app</div>
         <h1>Kinetic</h1>
         <p class="home-slogan">Build it. Change it. See what happens.</p>
         <p class="home-tagline">Real simulations, not animations — physics, chemistry, astronomy,
-          mathematics, economics, zoology, sound, a city to run sustainably, a war strategy game, a whiteboard for your own
+          mathematics, economics, zoology, genetics, sound, a city to run sustainably, a war strategy game, a whiteboard for your own
           ideas, and the history and security behind them all. Pick a section to start.</p>
         <div class="home-hero-ctas">
           <button class="home-cta home-cta-primary" id="home-cta-create">Create</button>
@@ -1490,7 +1548,7 @@ function buildHomePage(root, onNavigate) {
 }
 
 // A real random pick across whatever's actually available right now — the
-// 13 sandboxes always count, and once the Featured/Community rails have
+// 14 sandboxes always count, and once the Featured/Community rails have
 // loaded their random pool grows to include real published sims too, so
 // this stays an honest "surprise" instead of a fixed rotation.
 let _surprisePool = [];
@@ -1521,6 +1579,12 @@ async function buildHomeRails(container, onNavigate) {
   container.innerHTML = "";
   _surprisePool = [];
   const user = getUser();
+
+  // Streak + Concept of the Day sits above every rail
+  const dailyBox = document.createElement("div");
+  dailyBox.className = "daily-slot";
+  container.appendChild(dailyBox);
+  try { renderDailyCard(dailyBox); } catch { dailyBox.remove(); /* never let a broken card block the rest of home */ }
 
   const simCard = (sim) => {
     const card = document.createElement("button");
@@ -1890,6 +1954,13 @@ function buildHomeThumbnail(el, section) {
     svg.append("line").attr("x1", margin).attr("y1", margin).attr("x2", w - margin).attr("y2", h - margin).attr("stroke", colorA).attr("stroke-width", 2.5);
     svg.append("line").attr("x1", margin).attr("y1", h - margin).attr("x2", w - margin).attr("y2", margin).attr("stroke", colorB).attr("stroke-width", 2.5);
     svg.append("circle").attr("cx", (margin + w - margin) / 2).attr("cy", h / 2).attr("r", 4.5).attr("fill", "var(--text)");
+  } else if (section.kind === "genetics") {
+    // A tiny Punnett square: four cells, two dominant-looking and two recessive-looking.
+    const cell = Math.min(w, h) * 0.3, x0 = w / 2 - cell, y0 = h / 2 - cell;
+    for (let r = 0; r < 2; r++) for (let c = 0; c < 2; c++) {
+      svg.append("rect").attr("x", x0 + c * cell + 2).attr("y", y0 + r * cell + 2).attr("width", cell - 4).attr("height", cell - 4).attr("rx", 5)
+        .attr("fill", r + c === 2 ? colorB : colorA).attr("opacity", r + c === 2 ? 0.85 : 0.35 + 0.2 * (r + c));
+    }
   } else if (section.kind === "zoology") {
     // A tiny 3-node food chain: producer -> consumer -> predator.
     const positions = [[w * 0.22, h * 0.7], [w * 0.5, h * 0.35], [w * 0.78, h * 0.7]];
@@ -2059,10 +2130,11 @@ function wireModeTabs() {
   const whiteboardBtn = document.getElementById("mode-whiteboard-btn");
   const economicsBtn = document.getElementById("mode-economics-btn");
   const zoologyBtn = document.getElementById("mode-zoology-btn");
+  const geneticsBtn = document.getElementById("mode-genetics-btn");
   const soundBtn = document.getElementById("mode-sound-btn");
   const sustainabilityBtn = document.getElementById("mode-sustainability-btn");
   const warBtn = document.getElementById("mode-war-btn");
-  const modeButtons = { physics: physicsBtn, chemistry: chemistryBtn, astronomy: astronomyBtn, history: historyBtn, cybersecurity: cybersecurityBtn, particles: particlesBtn, mathematics: mathematicsBtn, whiteboard: whiteboardBtn, economics: economicsBtn, zoology: zoologyBtn, sound: soundBtn, sustainability: sustainabilityBtn, war: warBtn };
+  const modeButtons = { physics: physicsBtn, chemistry: chemistryBtn, astronomy: astronomyBtn, history: historyBtn, cybersecurity: cybersecurityBtn, particles: particlesBtn, mathematics: mathematicsBtn, whiteboard: whiteboardBtn, economics: economicsBtn, zoology: zoologyBtn, genetics: geneticsBtn, sound: soundBtn, sustainability: sustainabilityBtn, war: warBtn };
 
   const homeRoot = document.getElementById("home-root");
   buildHomePage(homeRoot, (mode) => setMode(mode));
@@ -2077,10 +2149,11 @@ function wireModeTabs() {
   const whiteboardRoot = document.getElementById("whiteboard-root");
   const economicsRoot = document.getElementById("economics-root");
   const zoologyRoot = document.getElementById("zoology-root");
+  const geneticsRoot = document.getElementById("genetics-root");
   const soundRoot = document.getElementById("sound-root");
   const sustainabilityRoot = document.getElementById("sustainability-root");
   const warRoot = document.getElementById("war-root");
-  const roots = { home: homeRoot, physics: workspace, chemistry: chemRoot, astronomy: astronomyRoot, history: historyRoot, cybersecurity: cybersecurityRoot, particles: particlesRoot, mathematics: mathematicsRoot, whiteboard: whiteboardRoot, economics: economicsRoot, zoology: zoologyRoot, sound: soundRoot, sustainability: sustainabilityRoot, war: warRoot };
+  const roots = { home: homeRoot, physics: workspace, chemistry: chemRoot, astronomy: astronomyRoot, history: historyRoot, cybersecurity: cybersecurityRoot, particles: particlesRoot, mathematics: mathematicsRoot, whiteboard: whiteboardRoot, economics: economicsRoot, zoology: zoologyRoot, genetics: geneticsRoot, sound: soundRoot, sustainability: sustainabilityRoot, war: warRoot };
 
   const physicsOnlyControls = [
     document.getElementById("run-controls"),
@@ -2115,7 +2188,7 @@ function wireModeTabs() {
     // Home is just a launcher, and Particle Physics is a gallery of
     // embedded external demos — neither is a knowledge domain with quiz
     // content the way the other modes are.
-    const NO_QUIZ_MODES = new Set(["particles", "home", "mathematics", "whiteboard", "economics", "zoology", "sound", "sustainability", "war"]);
+    const NO_QUIZ_MODES = new Set(["particles", "home", "mathematics", "whiteboard", "economics", "zoology", "genetics", "sound", "sustainability", "war"]);
     quizBtn.style.display = NO_QUIZ_MODES.has(mode) ? "none" : "";
 
     if (mode === "physics") startParticleLoop(); else stopParticleLoop();
@@ -2176,6 +2249,13 @@ function wireModeTabs() {
       zoologyMode?.unmount();
     }
 
+    if (mode === "genetics") {
+      if (!geneticsMode) geneticsMode = new GeneticsMode(geneticsRoot);
+      geneticsMode.mount();
+    } else {
+      geneticsMode?.unmount();
+    }
+
     if (mode === "sound") {
       if (!soundMode) soundMode = new SoundMode(soundRoot);
       soundMode.mount();
@@ -2209,6 +2289,7 @@ function wireModeTabs() {
   whiteboardBtn.addEventListener("click", () => setMode("whiteboard"));
   economicsBtn.addEventListener("click", () => setMode("economics"));
   zoologyBtn.addEventListener("click", () => setMode("zoology"));
+  geneticsBtn.addEventListener("click", () => setMode("genetics"));
   soundBtn.addEventListener("click", () => setMode("sound"));
   sustainabilityBtn.addEventListener("click", () => setMode("sustainability"));
   warBtn.addEventListener("click", () => setMode("war"));

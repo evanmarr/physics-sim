@@ -112,6 +112,18 @@ export function ensureSchema() {
       email TEXT,
       created_at BIGINT NOT NULL
     );
+    ALTER TABLE feedback ADD COLUMN IF NOT EXISTS category TEXT;
+    ALTER TABLE feedback ADD COLUMN IF NOT EXISTS section TEXT;
+    ALTER TABLE feedback ADD COLUMN IF NOT EXISTS rating INTEGER;
+    ALTER TABLE feedback ADD COLUMN IF NOT EXISTS severity TEXT;
+    ALTER TABLE feedback ADD COLUMN IF NOT EXISTS steps TEXT;
+    ALTER TABLE feedback ADD COLUMN IF NOT EXISTS expected TEXT;
+    ALTER TABLE feedback ADD COLUMN IF NOT EXISTS contact_email TEXT;
+    ALTER TABLE feedback ADD COLUMN IF NOT EXISTS reply_ok BOOLEAN NOT NULL DEFAULT false;
+    ALTER TABLE feedback ADD COLUMN IF NOT EXISTS diagnostics JSONB;
+    ALTER TABLE feedback ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'new';
+    ALTER TABLE feedback ADD COLUMN IF NOT EXISTS admin_note TEXT;
+    ALTER TABLE feedback ADD COLUMN IF NOT EXISTS updated_at BIGINT;
     CREATE TABLE IF NOT EXISTS mailing_list (
       email TEXT PRIMARY KEY
     );
@@ -978,8 +990,14 @@ export async function getSharedItemById(id) {
 
 // ---------- feedback ----------
 
-export async function insertFeedback(id, message, email, createdAt) {
-  await query("INSERT INTO feedback (id, message, email, created_at) VALUES ($1, $2, $3, $4)", [id, message, email, createdAt]);
+export async function insertFeedback(id, message, email, createdAt, extra = {}) {
+  await query(
+    `INSERT INTO feedback (id, message, email, created_at, category, section, rating, severity, steps, expected, contact_email, reply_ok, diagnostics, status, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'new', $4)`,
+    [id, message, email, createdAt, extra.category ?? null, extra.section ?? null, extra.rating ?? null, extra.severity ?? null,
+     extra.steps ?? null, extra.expected ?? null, extra.contactEmail ?? null, !!extra.replyOk,
+     extra.diagnostics ? JSON.stringify(extra.diagnostics) : null]
+  );
 }
 
 export async function listFeedback(limit = 50) {

@@ -15,7 +15,7 @@ const QUESTIONS = [
     key: "subjects",
     prompt: "Which subjects are you most excited to explore? (pick any)",
     multi: true,
-    options: ["Physics", "Chemistry", "Astronomy", "History", "Cybersecurity", "Mathematics", "Economics", "Zoology", "Sound", "Sustainability", "War"],
+    options: ["Physics", "Chemistry", "Astronomy", "History", "Cybersecurity", "Mathematics", "Economics", "Zoology", "Genetics", "Sound", "Sustainability", "War"],
   },
   {
     key: "learningStyle",

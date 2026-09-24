@@ -147,7 +147,7 @@ export const verifyUnlockCode = (kind, id, code) =>
 
 // Works whether or not anyone is signed in — the server attaches the
 // session email automatically if there is one.
-export const sendFeedback = (message) => api("/feedback", { method: "POST", body: { message } }).catch((e) => ({ error: e.message }));
+export const sendFeedback = (payload) => api("/feedback", { method: "POST", body: typeof payload === "string" ? { message: payload } : payload }).catch((e) => ({ error: e.message }));
 
 // Server validates and applies the redemption; on success it returns the
 // full updated user object (setUser here so `entitlements` everywhere else

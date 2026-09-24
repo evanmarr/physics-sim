@@ -1,5 +1,5 @@
 // Global search across every sandbox — a thin, generic modal UI. The
-// actual index (what's searchable: all 13 sandboxes plus every challenge
+// actual index (what's searchable: all 14 sandboxes plus every challenge
 // each one defines) lives in main.js, right next to the data it's built
 // from, and is handed in as a callback so this module stays free of any
 // per-sandbox knowledge — it just filters and renders whatever list it's

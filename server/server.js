@@ -25,6 +25,9 @@ import { unsubscribeToken } from "./unsubscribe.js";
 import { sendEmail } from "./newsletter/mailer.js";
 import { wrapEmailHtml } from "./emailTemplate.js";
 import * as db from "./db.js";
+import { validateFeedback, feedbackEmailHtml } from "./feedbackValidate.js";
+const FEEDBACK_WINDOW_MS = 60 * 60 * 1000;
+const FEEDBACK_MAX_PER_WINDOW = 8;
 import { sanitizeVariation } from "../src/assignmentVariation.js";
 import { resolveEntitlements, publicEntitlements, PLAN_SOURCES } from "./entitlements.js";
 import { AI_MONTHLY_COST_CAP_USD, currentPeriodKey } from "./aiConfig.js";
@@ -731,11 +734,28 @@ export async function handleApi(req, res, url) {
   // a reply is possible without asking the person to type it in twice.
   if (parts[1] === "feedback" && req.method === "POST") {
     const body = await readJsonBody(req);
-    const message = String(body.message || "").trim().slice(0, 4000);
-    if (!message) return sendJson(res, 400, { error: "Feedback can't be empty." });
-    const fromEmail = (await sessionUser(req)) || validateEmail(body.email) || null;
-    await db.insertFeedback(crypto.randomUUID(), message, fromEmail, Date.now());
-    return sendJson(res, 200, { ok: true });
+    const checked = validateFeedback(body);
+    // Honeypot hits get a fake success so bots don't learn to adapt.
+    if (checked.honeypot) return sendJson(res, 200, { ok: true, id: crypto.randomUUID().slice(0, 8) });
+    const sessionEmail = await sessionUser(req);
+    // Same persisted counter the login throttle uses, keyed per user or IP.
+    const ip = String(req.headers["x-forwarded-for"] || req.socket.remoteAddress || "unknown").split(",")[0].trim();
+    const key = `feedback:${sessionEmail || ip}`;
+    const rec = await db.getLoginAttempts(key);
+    const fresh = !rec || Date.now() - rec.firstAt > FEEDBACK_WINDOW_MS;
+    if (!fresh && rec.count >= FEEDBACK_MAX_PER_WINDOW) return sendJson(res, 429, { error: "You've sent a lot of feedback lately — thank you! Please try again later." });
+    if (!checked.ok) return sendJson(res, 400, { error: checked.error });
+    await db.recordLoginAttempt(key, fresh ? 1 : rec.count + 1, fresh ? Date.now() : rec.firstAt);
+    const f = checked.value;
+    const fromEmail = sessionEmail || f.contactEmail || null;
+    const id = crypto.randomUUID();
+    await db.insertFeedback(id, f.message, fromEmail, Date.now(), f);
+    const ref = id.slice(0, 8);
+    const notifyTo = process.env.FEEDBACK_NOTIFY_EMAIL || process.env.GMAIL_USER;
+    if (notifyTo) {
+      sendEmail({ to: notifyTo, subject: `Kinetic feedback [${f.category}/${f.section}] ${ref}`, html: wrapEmailHtml(feedbackEmailHtml(f, id, fromEmail)) }).catch(() => {});
+    }
+    return sendJson(res, 200, { ok: true, id: ref });
   }
 
   // Community Sims browsing is public — no account needed to look around,
@@ -1189,6 +1209,7 @@ const MIME = {
   ".css": "text/css; charset=utf-8", ".json": "application/json; charset=utf-8", ".svg": "image/svg+xml",
   ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".ico": "image/x-icon",
   ".woff": "font/woff", ".woff2": "font/woff2", ".txt": "text/plain; charset=utf-8",
+  ".webmanifest": "application/manifest+json; charset=utf-8", ".webp": "image/webp", ".gif": "image/gif",
 };
 
 async function serveStatic(req, res, pathname) {
@@ -1200,7 +1221,10 @@ async function serveStatic(req, res, pathname) {
     const stat = await fs.stat(resolved);
     if (stat.isDirectory()) return serveStatic(req, res, pathname.replace(/\/?$/, "/index.html"));
     const ext = path.extname(resolved).toLowerCase();
-    res.writeHead(200, { "Content-Type": MIME[ext] || "application/octet-stream", "Content-Length": stat.size });
+    const headers = { "Content-Type": MIME[ext] || "application/octet-stream", "Content-Length": stat.size };
+    // The service worker must always be revalidated so updates are picked up.
+    if (rel === "/sw.js") headers["Cache-Control"] = "no-cache";
+    res.writeHead(200, headers);
     // An unhandled 'error' here (e.g. the file vanishing mid-read) would
     // otherwise crash the whole process — one bad request taking down every
     // other user's session — so it's a hard requirement, not just tidiness.
