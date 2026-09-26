@@ -1170,7 +1170,7 @@ export async function handleApi(req, res, url) {
   const collectionKey = parts[1] === "worlds" ? "worlds" : parts[1] === "math-items" ? "mathItems" : parts[1] === "cities" ? "cities"
     : parts[1] === "custom-items" ? "customItems" : parts[1] === "notebook" ? "notebookEntries"
     : parts[1] === "ai-chats" ? "aiChats" : parts[1] === "whiteboards" ? "whiteboards" : parts[1] === "notes" ? "notes"
-    : parts[1] === "rocket-flights" ? "rocketFlights" : null;
+    : parts[1] === "rocket-flights" ? "rocketFlights" : parts[1] === "structures" ? "structures" : null;
   if (collectionKey) {
     if (req.method === "GET") return sendJson(res, 200, { items: await listItems(email, collectionKey) });
     if (req.method === "POST") {
@@ -1181,6 +1181,7 @@ export async function handleApi(req, res, url) {
         : collectionKey === "notebookEntries" ? limits.notebookEntries
         : collectionKey === "aiChats" ? limits.maxAiChats : collectionKey === "whiteboards" ? limits.maxWhiteboards
         : collectionKey === "notes" ? limits.maxNotes : collectionKey === "rocketFlights" ? limits.maxRocketFlights
+        : collectionKey === "structures" ? limits.maxStructures
         : limits.maxMathItems;
       const result = await createItem(email, collectionKey, max, body.name, body.data, body.snapshot);
       return sendJson(res, result.error ? 400 : 200, result.error ? result : { item: result.item });

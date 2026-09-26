@@ -47,6 +47,10 @@ test("an invalid/garbage plan string falls back to free, not a crash", () => {
 
 test("free vs plus limits actually differ and free is never higher", () => {
   assert.ok(LIMITS.free.maxWorlds < LIMITS.plus.maxWorlds);
+  assert.ok(LIMITS.free.maxStructures < LIMITS.plus.maxStructures);
+  assert.equal(LIMITS.free.maxStructures, 3);
+  assert.equal(LIMITS.plus.maxStructures, 40);
+  assert.deepEqual(LIMITS.teacher, LIMITS.plus);
   assert.equal(LIMITS.free.customItemsEnabled, false);
   assert.equal(LIMITS.plus.customItemsEnabled, true);
   assert.equal(isUnlimited(LIMITS.plus.notebookEntries), true);

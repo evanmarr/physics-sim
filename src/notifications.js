@@ -9,7 +9,7 @@ import { getUser, onAuthChange, fetchNotifications, markNotificationsRead, markN
 
 const KIND_LABELS = {
   interaction: "Activity", new_world: "New world", new_subscriber: "Subscriber",
-  product_update: "Product update", newsletter: "Newsletter", donor_thanks: "Thank you",
+  product_update: "Product update", newsletter: "Newsletter", donor_thanks: "Thank you", featured: "Featured",
 };
 
 let modal, box, btn, badgeEl;
@@ -134,7 +134,7 @@ async function render() {
 
 const KIND_INITIALS = {
   interaction: "A", new_world: "W", new_subscriber: "S",
-  product_update: "U", newsletter: "N", donor_thanks: "T",
+  product_update: "U", newsletter: "N", donor_thanks: "T", featured: "F",
 };
 
 function rowHtml(n) {

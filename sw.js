@@ -3,7 +3,7 @@
  * browser only re-installs the worker when this file's bytes change; a new
  * version also makes old caches get deleted on activate). Static files are
  * revalidated at runtime, so ordinary content edits reach users anyway. */
-const VERSION = 'kinetic-v1';
+const VERSION = 'kinetic-v2';
 const CACHE = VERSION;
 
 // Hand-maintained; tests/pwa.test.js fails if a src/*.js module or
@@ -79,12 +79,14 @@ const PRECACHE = [
   "/src/sound.js",
   "/src/storage.js",
   "/src/structures.js",
+  "/src/structureSave.js",
   "/src/sustainability.js",
   "/src/sweepMath.js",
   "/src/tutorial.js",
   "/src/units.js",
   "/src/war.js",
   "/src/warCampaign.js",
+  "/src/warPvp.js",
   "/src/whiteboard.js",
   "/src/wordcloud.js",
   "/src/world.js",

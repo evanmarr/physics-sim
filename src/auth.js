@@ -425,7 +425,7 @@ export async function openSavesPanel({ kind, title, itemNoun, serialize, apply, 
   const box = document.getElementById("saves-modal-box");
   const communityEnabled = COMMUNITY_ENABLED_KINDS.has(kind);
   // The plan's own limit (server/entitlements.js) — Plus gets far more than Free's 6.
-  const LIMIT_KEYS = { worlds: "maxWorlds", "math-items": "maxMathItems", cities: "maxCities", "ai-chats": "maxAiChats", whiteboards: "maxWhiteboards", notes: "maxNotes", "rocket-flights": "maxRocketFlights" };
+  const LIMIT_KEYS = { worlds: "maxWorlds", "math-items": "maxMathItems", cities: "maxCities", "ai-chats": "maxAiChats", whiteboards: "maxWhiteboards", notes: "maxNotes", "rocket-flights": "maxRocketFlights", structures: "maxStructures" };
   const planLimit = user.entitlements?.limits?.[LIMIT_KEYS[kind]];
   const max = maxOverride ?? (planLimit === null ? Infinity : (planLimit ?? 6));
   let tab = "mine";

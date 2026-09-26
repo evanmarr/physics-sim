@@ -326,6 +326,49 @@ export class Renderer {
   // handful of glinting shards — for effects like glass shattering. Lives
   // entirely on its own timer via d3 transitions, decoupled from the physics
   // render loop, and removes itself when done.
+  // Bomb detonation: white flash, orange fireball that swells and cools to smoke, an expanding
+  // shockwave ring sized to the blast radius, flying sparks, drifting smoke puffs and a short camera shake.
+  explode(x, y, radius = 260, power = 26) {
+    const R = Math.max(60, radius), k = Math.min(1.6, Math.max(0.6, power / 26));
+    const g = this.objectLayer.append("g").attr("class", "explosion-fx").attr("pointer-events", "none").attr("transform", `translate(${x},${y})`);
+    g.append("circle").attr("r", 8).attr("fill", "#fff8d6").attr("opacity", 0.95)
+      .transition().duration(140).ease(d3.easeCubicOut).attr("r", R * 0.35).attr("opacity", 0).remove();
+    g.append("circle").attr("r", 10).attr("fill", "#ff9a2e").attr("opacity", 0.9)
+      .transition().duration(420).ease(d3.easeCubicOut).attr("r", R * 0.42 * k).attr("fill", "#d2451e").attr("opacity", 0.0).remove();
+    g.append("circle").attr("r", R * 0.05).attr("fill", "none").attr("stroke", "#ffd27a").attr("stroke-width", 6).attr("opacity", 0.95)
+      .transition().duration(520).ease(d3.easeCubicOut).attr("r", R).attr("stroke-width", 0.8).attr("opacity", 0).remove();
+    g.append("circle").attr("r", R * 0.05).attr("fill", "none").attr("stroke", "#ff7a2e").attr("stroke-width", 3).attr("opacity", 0.8)
+      .transition().delay(90).duration(600).ease(d3.easeCubicOut).attr("r", R * 0.72).attr("stroke-width", 0.5).attr("opacity", 0).remove();
+    const sparks = 22;
+    for (let i = 0; i < sparks; i++) {
+      const a = (i / sparks) * Math.PI * 2 + Math.random() * 0.5, d = R * (0.35 + Math.random() * 0.75) * k;
+      g.append("line").attr("x1", 0).attr("y1", 0).attr("x2", 0).attr("y2", 0)
+        .attr("stroke", i % 3 ? "#ffb13d" : "#fff3b0").attr("stroke-width", 2.5).attr("stroke-linecap", "round")
+        .transition().duration(380 + Math.random() * 320).ease(d3.easeCubicOut)
+        .attr("x1", Math.cos(a) * d * 0.55).attr("y1", Math.sin(a) * d * 0.55).attr("x2", Math.cos(a) * d).attr("y2", Math.sin(a) * d).attr("opacity", 0).remove();
+    }
+    for (let i = 0; i < 7; i++) {
+      const a = Math.random() * Math.PI * 2, d = R * (0.15 + Math.random() * 0.3);
+      g.append("circle").attr("r", R * 0.06).attr("fill", "#4b4f57").attr("opacity", 0)
+        .transition().delay(120).duration(200).attr("opacity", 0.5)
+        .transition().duration(900).ease(d3.easeCubicOut)
+        .attr("cx", Math.cos(a) * d).attr("cy", Math.sin(a) * d - R * 0.15).attr("r", R * (0.12 + Math.random() * 0.08)).attr("opacity", 0).remove();
+    }
+    g.transition().delay(1400).remove();
+    // Camera shake: a few decaying jolts applied on top of the current pan/zoom
+    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+    const vp = this.viewport, base = this.zoomTransform.toString(), amp = Math.min(10, 3 + R / 60) * k;
+    const t0 = performance.now();
+    const shake = (now) => {
+      const p = (now - t0) / 380;
+      if (p >= 1) { vp.attr("transform", base); return; }
+      const f = (1 - p) * amp;
+      vp.attr("transform", `translate(${(Math.random() - 0.5) * 2 * f},${(Math.random() - 0.5) * 2 * f}) ${base}`);
+      requestAnimationFrame(shake);
+    };
+    requestAnimationFrame(shake);
+  }
+
   burst(x, y, radius = 60) {
     const g = this.objectLayer.append("g").attr("class", "burst-fx").attr("transform", `translate(${x},${y})`);
 

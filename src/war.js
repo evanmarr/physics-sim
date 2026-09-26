@@ -5,6 +5,7 @@
 // and testable under node; WarMode is the canvas/HUD wrapper around it.
 
 import * as CP from "./warCampaign.js";
+import * as PV from "./warPvp.js";
 
 export const WORLD_W = 1600;
 export const WORLD_H = 1000;
@@ -882,6 +883,7 @@ function el(tag, cls, text) {
   if (text != null) e.textContent = text;
   return e;
 }
+const PVP_HELP = "Hot-seat PvP: two people share this device. Blue deploys, then Red, each behind a cover screen, so look away when it is not your turn. Battle runs in rounds: Blue gives secret orders, then Red, then the round plays out in real time. With fog on you only see what your own armies see; while a round plays, the view shows what either side can see. Drag from an army to route it, drag onto another of yours to merge, click a selected army to split. Win by destroying the enemy HQ or all their armies; on time-out the stronger side wins.";
 const STANCE_LABEL = { advance: "Advance", hold: "Hold", retreat: "Retreat" };
 
 export class WarMode {
@@ -936,7 +938,7 @@ export class WarMode {
     root.appendChild(el("h1", "econ-title", "War"));
     this.toggle = el("div", "war-camp-toggle");
     this.tabBtns = {};
-    for (const [k, label] of [["skirmish", "Skirmish"], ["campaign", "Campaign"]]) {
+    for (const [k, label] of [["skirmish", "Skirmish"], ["campaign", "Campaign"], ["pvp", "PvP"]]) {
       const b = el("button", "war-btn", label); b.onclick = () => this._setMode(k); this.tabBtns[k] = b; this.toggle.appendChild(b);
     }
     root.appendChild(this.toggle);
@@ -992,8 +994,9 @@ export class WarMode {
     this.listCard = el("div", "war-card"); this.listCard.appendChild(el("h3", null, "Armies"));
     this.listBox = el("div", "war-list"); this.listCard.appendChild(this.listBox);
     // hint
-    const hint = el("div", "war-card war-dim");
-    hint.innerHTML = "Click an army to select; drag a box to select several. Click the map to move; drag from an army to draw a route; Shift adds waypoints. Click a selected army (or long-press) to split; drag one army onto another to merge them. S split, M merge, A/H/R stance, Space pause, Esc cancel. Stand on control points to capture them for reinforcements. Destroy the enemy HQ or wipe out their armies to win; if time runs out, the stronger side wins.";
+    const hint = el("div", "war-card war-dim"); this.hintCard = hint; this._hintSk =
+      "Click an army to select; drag a box to select several. Click the map to move; drag from an army to draw a route; Shift adds waypoints. Click a selected army (or long-press) to split; drag one army onto another to merge them. S split, M merge, A/H/R stance, Space pause, Esc cancel. Stand on control points to capture them for reinforcements. Destroy the enemy HQ or wipe out their armies to win; if time runs out, the stronger side wins.";
+    hint.innerHTML = this._hintSk;
     this.side.append(c1, this.phaseCard, this.selCard, this.listCard, hint);
 
     // pointer input
@@ -1016,21 +1019,7 @@ export class WarMode {
     void first;
   }
 
-  _renderPhase() {
-    const g = this.game, c = this.phaseCard;
-    c.innerHTML = "";
-    if (this.campBattle && g.phase === "deploy") {
-      const cb = this.campBattle;
-      c.appendChild(el("h3", null, "Deployment"));
-      c.appendChild(el("div", "war-dim", `Attacking ${cb.name} (${cb.terrainName}). Enemy commander: ${DIFFICULTIES[cb.setup.difficulty].name}.` + (cb.setup.morale ? ` Long supply line: your morale starts ${cb.setup.morale} lower.` : "")));
-      c.appendChild(el("div", "war-dim", "Drag your armies inside the blue zone to set up. Survivors carry over to the campaign."));
-      const r = el("div", "war-row");
-      const start = el("button", "war-btn primary", "Start battle"); start.onclick = () => { startBattle(g); this._renderPhase(); };
-      const wd = el("button", "war-btn", "Withdraw"); wd.title = "Call off the attack; no losses"; wd.onclick = () => this._campExitBattle();
-      r.append(start, wd); c.appendChild(r);
-      return;
-    }
-    if (g.phase === "deploy") {
+  _deployCard(c, g, T, startLabel, onStart) {
       c.appendChild(el("h3", null, "Deployment"));
       // Sliders update in place: rebuilding the panel on every 'input' event
       // destroyed the slider under the pointer mid-drag, so it couldn't be dragged.
@@ -1048,18 +1037,37 @@ export class WarMode {
       const syncDeploy = () => {
         for (const sl of sliders) { if (document.activeElement !== sl.inp) sl.inp.value = this.recruit[sl.key]; sl.v.textContent = sl.fmt(this.recruit[sl.key]); }
         const comp = normComp(this.recruit.arc / 100, this.recruit.cav / 100), cost = Math.round(armyCost(this.recruit.n, comp));
-        info.textContent = `Infantry ${Math.round(comp.inf * 100)}%  |  cost ${cost} pts  |  budget left ${Math.round(g.budget[0])}`;
-        if (place) place.disabled = cost > g.budget[0];
+        info.textContent = `Infantry ${Math.round(comp.inf * 100)}%  |  cost ${cost} pts  |  budget left ${Math.round(g.budget[T])}`;
+        if (place) place.disabled = cost > g.budget[T];
       };
       syncDeploy();
       const r = el("div", "war-row");
       place = el("button", "war-btn" + (this.placing ? " on" : ""), this.placing ? "Click deployment zone..." : "Place army");
       place.onclick = () => { this.placing = !this.placing; this._renderPhase(); };
-      const auto = el("button", "war-btn", "Auto deploy"); auto.onclick = () => { for (const a of g.armies.filter((x) => x.team === 0).slice()) removeArmyRefund(g, a); autoDeploy(g, 0); this._renderPhase(); };
-      const start = el("button", "war-btn primary", "Start battle"); start.disabled = !g.armies.some((a) => a.team === 0);
-      start.onclick = () => { startBattle(g); this.placing = false; this._renderPhase(); };
+      const auto = el("button", "war-btn", "Auto deploy"); auto.onclick = () => { for (const a of g.armies.filter((x) => x.team === T).slice()) removeArmyRefund(g, a); autoDeploy(g, T); this._renderPhase(); };
+      const start = el("button", "war-btn primary", startLabel); start.disabled = !g.armies.some((a) => a.team === T);
+      start.onclick = () => { this.placing = false; onStart(); };
       r.append(place, auto, start); c.appendChild(r); syncDeploy();
-      c.appendChild(el("div", "war-dim", "Drag your armies inside the blue zone to reposition them. Unspent points become reinforcement reserve."));
+      c.appendChild(el("div", "war-dim", "Drag your armies inside your zone to reposition them. Unspent points become reinforcement reserve."));
+  }
+
+  _renderPhase() {
+    const g = this.game, c = this.phaseCard;
+    c.innerHTML = "";
+    if (this.mode === "pvp") return this._pvpPhase();
+    if (this.campBattle && g.phase === "deploy") {
+      const cb = this.campBattle;
+      c.appendChild(el("h3", null, "Deployment"));
+      c.appendChild(el("div", "war-dim", `Attacking ${cb.name} (${cb.terrainName}). Enemy commander: ${DIFFICULTIES[cb.setup.difficulty].name}.` + (cb.setup.morale ? ` Long supply line: your morale starts ${cb.setup.morale} lower.` : "")));
+      c.appendChild(el("div", "war-dim", "Drag your armies inside the blue zone to set up. Survivors carry over to the campaign."));
+      const r = el("div", "war-row");
+      const start = el("button", "war-btn primary", "Start battle"); start.onclick = () => { startBattle(g); this._renderPhase(); };
+      const wd = el("button", "war-btn", "Withdraw"); wd.title = "Call off the attack; no losses"; wd.onclick = () => this._campExitBattle();
+      r.append(start, wd); c.appendChild(r);
+      return;
+    }
+    if (g.phase === "deploy") {
+      this._deployCard(c, g, 0, "Start battle", () => { startBattle(g); this._renderPhase(); });
     } else {
       c.appendChild(el("h3", null, "Battle"));
       const r = el("div", "war-row");
@@ -1071,14 +1079,138 @@ export class WarMode {
     }
   }
 
+  // ====================== PvP (hot-seat) ======================
+  _pvpCfg() { if (!this._pcfg) this._pcfg = PV.defaultConfig(); return this._pcfg; }
+  // Setup-screen map preview (no armies; not the real game).
+  _pvpPreview() {
+    const c = this._pvpCfg();
+    if (!c.seed || c.seed === 1) c.seed = Math.floor(Math.random() * 1e9);
+    this.game = createGame({ map: c.map, seed: c.seed, fog: c.fog, aiTeams: [], aiDeploy: false });
+    this.terrainKey = ""; this.sel.clear();
+  }
+  _pvpStart(swapped = false) {
+    const c = PV.normalizeConfig(this._pvpCfg()); this._pcfg = c;
+    const g = createGame({ map: c.map, seed: c.seed, fog: c.fog, aiTeams: [], aiDeploy: false });
+    g.budget[0] = c.budget; g.budget[1] = c.budget;
+    this.game = g; this.pvp = PV.startPvp(c, swapped);
+    this.sel.clear(); this.placing = false; this.paused = false; this.terrainKey = ""; this.listSig = ""; this._lastBudget = undefined;
+    this._pvpSig = ""; this._pvpSync(true);
+  }
+  _pvpSync(force) {
+    const st = this.pvp; if (!st) return;
+    PV.tick(st, this.game);
+    const sig = st.stage + st.turn + ":" + st.round;
+    if (!force && sig === this._pvpSig) return;
+    this._pvpSig = sig; this.sel.clear(); this.placing = false; this.paused = false; this.listSig = ""; this._lastBudget = undefined;
+    this.pop.classList.remove("show");
+    this._renderPhase(); this._pvpBanner();
+  }
+  _pvpReady() {
+    const st = this.pvp, g = this.game; if (!st) return;
+    const n = g.armies.filter((a) => a.team === st.turn).length;
+    const r = PV.ready(st, g, n);
+    if (r === null) return;
+    if (r === "battleStart") startBattle(g);
+    this.acc = 0; this._pvpSync(true);
+  }
+  _pvpSkip() {
+    const st = this.pvp, g = this.game; if (!st || st.stage !== "play") return;
+    let guard = 0;
+    while (st.stage === "play" && g.phase === "battle" && guard++ < 20000) { stepGame(g, SIM_DT); PV.tick(st, g); this._mergeStep(SIM_DT); }
+    this._pvpSync(true);
+  }
+  _pvpBanner() {
+    const b = this.banner, st = this.pvp; b.innerHTML = ""; b.classList.remove("war-pvp-solid");
+    if (this.mode !== "pvp" || !st) { b.classList.remove("show"); return; }
+    if (st.stage === "cover") {
+      b.classList.add("show", "war-pvp-solid");
+      const T = st.turn, nm = TEAMS[T].name, box = el("div", "war-pvp-cover");
+      const what = st.next === "deploy" ? "deploy your armies" : `your orders (round ${st.round})`;
+      box.append(el("h2", null, `Pass the device to ${nm}`), el("div", "war-dim", `${PV.label(st, T)}: ${what}. ${TEAMS[1 - T].name}, look away.`));
+      const btn = el("button", "war-btn primary", "Ready"); btn.onclick = () => this._pvpReady();
+      box.appendChild(btn); b.appendChild(box);
+    } else if (st.stage === "over") {
+      const s = PV.summarize(this.game); b.classList.add("show");
+      const box = el("div", "war-pvp-cover");
+      box.append(el("h2", null, s.winner < 0 ? "Draw" : `${TEAMS[s.winner].name} wins`), el("div", "war-dim", `${PV.label(st, s.winner < 0 ? 0 : s.winner)} - ${s.reason}. Time ${Math.floor(s.time / 60)}:${String(Math.floor(s.time % 60)).padStart(2, "0")}, ${st.round} round${st.round === 1 ? "" : "s"}.`));
+      const tbl = el("div", "war-pvp-stats");
+      for (const t of s.teams) {
+        const col = el("div", "war-pvp-statcol"); col.style.borderColor = TEAMS[t.team].color;
+        col.append(el("b", null, PV.label(st, t.team)), el("span", null, `Troops left ${Math.round(t.troops)}`), el("span", null, `Troops lost ${Math.round(t.lost)}`), el("span", null, `Enemy destroyed ${Math.round(t.killed)}`), el("span", null, `HQ ${t.hqPct}%`), el("span", null, `Control points ${t.points}`));
+        tbl.appendChild(col);
+      }
+      const r = el("div", "war-pvp-btns");
+      const rm = el("button", "war-btn primary", "Rematch (swap sides)"); rm.onclick = () => { this._pcfg = { ...st.cfg }; this._pvpStart(!st.swapped); };
+      const ng = el("button", "war-btn", "New game"); ng.onclick = () => { this.pvp = null; this._pvpPreview(); this._pvpSig = ""; this.listSig = ""; this._renderPhase(); this._pvpBanner(); };
+      r.append(rm, ng); box.append(tbl, r); b.appendChild(box);
+    } else b.classList.remove("show");
+  }
+  _pvpPhase() {
+    const g = this.game, c = this.phaseCard, st = this.pvp;
+    const mk = (label, fn, cls = "") => { const x = el("button", "war-btn" + (cls ? " " + cls : ""), label); x.onclick = fn; return x; };
+    if (!st) {
+      const cfg = this._pvpCfg();
+      c.appendChild(el("h3", null, "PvP setup"));
+      const row = (label, ...kids) => { const r = el("div", "war-row"); r.append(el("label", null, label), ...kids); c.appendChild(r); return r; };
+      const sel = (opts, cur, fn) => { const x = el("select"); for (const [v, t] of opts) { const o = el("option", null, t); o.value = v; x.appendChild(o); } x.value = String(cur); x.onchange = () => fn(x.value); return x; };
+      const seedIn = el("input", "war-pvp-seed"); seedIn.type = "number"; seedIn.min = 0; seedIn.value = cfg.seed;
+      const upd = () => { this._pvpPreview(); };
+      row("Map", sel([...MAPS.map((m) => [m.id, m.name]), ["random", "Random"]], cfg.map, (v) => { cfg.map = v; upd(); }));
+      seedIn.onchange = () => { cfg.seed = Math.max(0, Math.floor(+seedIn.value) || 1); seedIn.value = cfg.seed; this._pvpPreview(); };
+      const rr = mk("New seed", () => { cfg.seed = 2 + Math.floor(Math.random() * 1e9); seedIn.value = cfg.seed; this._pvpPreview(); });
+      row("Seed", seedIn, rr);
+      const fogB = mk("", () => { cfg.fog = !cfg.fog; fogB.textContent = "Fog of war: " + (cfg.fog ? "on" : "off"); fogB.classList.toggle("on", cfg.fog); this.game.fog = cfg.fog; });
+      fogB.textContent = "Fog of war: " + (cfg.fog ? "on" : "off"); fogB.classList.toggle("on", cfg.fog);
+      row("Fog", fogB);
+      row("Points", sel(PV.BUDGETS.map((b) => [b, b]), cfg.budget, (v) => { cfg.budget = +v; }));
+      row("Round", sel(PV.ROUND_LENGTHS.map((b) => [b, b + " s"]), cfg.roundLen, (v) => { cfg.roundLen = +v; }));
+      const go = el("div", "war-pvp-btns"); go.appendChild(mk("Start", () => this._pvpStart(false), "primary")); c.appendChild(go);
+      c.appendChild(el("div", "war-dim", "Two players, one device. Random map picks a layout from the seed."));
+      return;
+    }
+    if (st.stage === "cover") { c.appendChild(el("h3", null, "PvP")); c.appendChild(el("div", "war-dim", "Waiting for the next player to press Ready.")); return; }
+    if (st.stage === "deploy") {
+      this._deployCard(c, g, st.turn, "Ready", () => this._pvpReady());
+      c.appendChild(el("div", "war-dim war-pvp-note", `${TEAMS[st.turn].name} deploying. ${TEAMS[1 - st.turn].name} cannot see this.`));
+      return;
+    }
+    if (st.stage === "orders") {
+      c.appendChild(el("h3", null, `${TEAMS[st.turn].name}: your orders (round ${st.round})`));
+      c.appendChild(el("div", "war-dim", `Order your armies, then press Ready. The round lasts ${st.cfg.roundLen} s.`));
+      const r = el("div", "war-pvp-btns"); r.appendChild(mk(st.turn === 0 ? "Ready - pass to Red" : "Ready - play round", () => this._pvpReady(), "primary")); c.appendChild(r);
+      return;
+    }
+    if (st.stage === "play") {
+      c.appendChild(el("h3", null, `Round ${st.round} playing...`));
+      c.appendChild(el("div", "war-dim", g.fog ? "Fog is on: this view shows everything EITHER player can see, and routes are hidden." : "Fog is off: everything is visible. Routes are hidden."));
+      const r = el("div", "war-row");
+      r.appendChild(mk(this.paused ? "Resume" : "Pause", () => { this.paused = !this.paused; this._renderPhase(); }, this.paused ? "on" : ""));
+      for (const sp of [1, 2, 4]) r.appendChild(mk(sp + "x", () => { this.simSpeed = sp; this._renderPhase(); }, this.simSpeed === sp ? "on" : ""));
+      c.appendChild(r);
+      const r2 = el("div", "war-pvp-btns"); r2.appendChild(mk("Skip to end of round", () => this._pvpSkip())); c.appendChild(r2);
+      this.statusLine = el("div", "war-dim"); c.appendChild(this.statusLine);
+      return;
+    }
+    c.appendChild(el("h3", null, "Game over"));
+  }
+
   // ====================== campaign ======================
   _setMode(m) {
+    if (this.mode === "pvp" && m !== "pvp") { this._pvpKeep = { game: this.game, pvp: this.pvp }; if (this._skSaved) this.game = this._skSaved; this._skSaved = null; this.pvp = null; this._pvpBanner(); }
+    if (m === "pvp" && this.mode !== "pvp") {
+      this._skSaved = this.game;
+      if (this._pvpKeep) { this.game = this._pvpKeep.game; this.pvp = this._pvpKeep.pvp; this._pvpKeep = null; }
+      else { this.pvp = null; this._pvpPreview(); }
+    }
     this.mode = m;
+    this.hintCard.innerHTML = m === "pvp" ? PVP_HELP : this._hintSk;
+    this.c1.style.display = m === "pvp" || this.campBattle ? "none" : "";
+    this.sel.clear(); this.pop.classList.remove("show"); this.placing = false; this.terrainKey = ""; this.listSig = ""; this._lastBudget = undefined;
     for (const k of Object.keys(this.tabBtns)) this.tabBtns[k].classList.toggle("on", k === m);
     const inBattle = !!this.campBattle;
-    this.wrap.style.display = m === "skirmish" || inBattle ? "" : "none";
+    this.wrap.style.display = m === "skirmish" || m === "pvp" || inBattle ? "" : "none";
     this.campBox.style.display = m === "campaign" && !inBattle ? "" : "none";
-    if (m === "skirmish") { this.terrainKey = ""; this._resize(); this._renderPhase(); }
+    if (m === "skirmish" || m === "pvp") { this.terrainKey = ""; this._resize(); this._renderPhase(); this._pvpBanner(); }
     else if (!inBattle) this._campRender();
   }
   _campSave() { if (this.camp) CP.saveCampaign(this.camp, localStorage); }
@@ -1335,9 +1467,12 @@ export class WarMode {
   }
 
   // ----- selection / orders -----
-  _selArmies() { const g = this.game; return g.armies.filter((a) => this.sel.has(a.id) && a.team === 0); }
-  _stance(s) { const g = this.game; if (g.phase !== "battle") return; setStance(g, this._selArmies(), s); }
-  _merge() { const g = this.game; const s = this._selArmies(); if (g.phase !== "battle" && g.phase !== "deploy") return; const list = s.length > 1 ? s : g.armies.filter((a) => a.team === 0); if (s.length === 1) { for (const o of list) if (o !== s[0] && dist(o.x, o.y, s[0].x, s[0].y) < (armyRadius(o.n) + armyRadius(s[0].n)) * 0.9) mergeArmies(g, s[0], o); } else mergeOverlapping(g, s); }
+  // Which team this device's human may command right now (-1: nobody).
+  _me() { return this.mode === "pvp" ? PV.activeTeam(this.pvp) : 0; }
+  _canSim() { return this.mode !== "pvp" || (!!this.pvp && this.pvp.stage === "play"); }
+  _selArmies() { const g = this.game, T = this._me(); return g.armies.filter((a) => this.sel.has(a.id) && a.team === T); }
+  _stance(s) { const g = this.game; if (g.phase !== "battle" || this._me() < 0) return; setStance(g, this._selArmies(), s); }
+  _merge() { const g = this.game; const s = this._selArmies(); const T = this._me(); if (T < 0 || (g.phase !== "battle" && g.phase !== "deploy")) return; const list = s.length > 1 ? s : g.armies.filter((a) => a.team === T); if (s.length === 1) { for (const o of list) if (o !== s[0] && dist(o.x, o.y, s[0].x, s[0].y) < (armyRadius(o.n) + armyRadius(s[0].n)) * 0.9) mergeArmies(g, s[0], o); } else mergeOverlapping(g, s); }
   _openSplit() {
     const s = this._selArmies(); if (s.length !== 1 || s[0].n < 10) return;
     this.splitTarget = s[0]; this.splitFrac = 0.5; this._renderSplit();
@@ -1379,7 +1514,7 @@ export class WarMode {
     else if (k === "a") this._stance("advance");
     else if (k === "h") this._stance("hold");
     else if (k === "r") this._stance("retreat");
-    else if (k === " ") { if (g.phase === "battle") { this.paused = !this.paused; this._renderPhase(); e.preventDefault(); } }
+    else if (k === " ") { if (g.phase === "battle" && this._canSim()) { this.paused = !this.paused; this._renderPhase(); e.preventDefault(); } }
   }
 
   // ----- pointer handling -----
@@ -1394,7 +1529,7 @@ export class WarMode {
   _pick(p) {
     const g = this.game; let best = null, bd = 1e9;
     for (const a of g.armies) {
-      if (a.team !== 0) continue;
+      if (a.team !== this._me()) continue;
       const d = dist(a.x, a.y, p.x, p.y);
       if (d < a.dr + 8 && d < bd) { bd = d; best = a; }
     }
@@ -1403,7 +1538,7 @@ export class WarMode {
   _pickOther(p, ex) {
     let best = null, bd = 1e9;
     for (const a of this.game.armies) {
-      if (a.team !== 0 || a === ex) continue;
+      if (a.team !== this._me() || a === ex) continue;
       const d = dist(a.x, a.y, p.x, p.y);
       if (d < a.dr + 8 && d < bd) { bd = d; best = a; }
     }
@@ -1425,13 +1560,13 @@ export class WarMode {
     const g = this.game, p = this._world(e);
     this.canvas.setPointerCapture?.(e.pointerId);
     this.pop.classList.remove("show");
-    if (g.phase === "over") return;
+    if (g.phase === "over" || this._me() < 0) return;
     if (g.phase === "deploy") {
       if (this.placing) {
         const comp = normComp(this.recruit.arc / 100, this.recruit.cav / 100);
-        const a = addArmy(g, 0, p.x, p.y, this.recruit.n, comp, { pay: true, zone: true });
+        const T = this._me(), a = addArmy(g, T, p.x, p.y, this.recruit.n, comp, { pay: true, zone: true });
         if (a) { this.sel.clear(); this.sel.add(a.id); } else { this.hintFlash = performance.now(); }
-        if (g.budget[0] < armyCost(this.recruit.n, comp)) this.placing = false;
+        if (g.budget[T] < armyCost(this.recruit.n, comp)) this.placing = false;
         this._renderPhase(); return;
       }
       const a = this._pick(p);
@@ -1457,7 +1592,7 @@ export class WarMode {
     const t = this.ptr; if (!t) return;
     if (t.kind === "drag") {
       const a = t.a, nx = a.x + (p.x - t.sx), ny = a.y + (p.y - t.sy);
-      if (inZone(0, nx, ny) && !blockedAt(this.game, nx, ny)) { a.x = nx; a.y = ny; }
+      if (inZone(this._me(), nx, ny) && !blockedAt(this.game, nx, ny)) { a.x = nx; a.y = ny; }
       t.sx = p.x; t.sy = p.y;
     } else if (t.kind === "route") {
       if (dist(p.x, p.y, t.sx, t.sy) > 14) { t.moved = true; clearTimeout(this.lp); }
@@ -1488,7 +1623,7 @@ export class WarMode {
       if (moved) {
         const x0 = Math.min(t.sx, p.x), x1 = Math.max(t.sx, p.x), y0 = Math.min(t.sy, p.y), y1 = Math.max(t.sy, p.y);
         if (!t.shift) this.sel.clear();
-        for (const a of g.armies) if (a.team === 0 && a.x >= x0 && a.x <= x1 && a.y >= y0 && a.y <= y1) this.sel.add(a.id);
+        for (const a of g.armies) if (a.team === this._me() && a.x >= x0 && a.x <= x1 && a.y >= y0 && a.y <= y1) this.sel.add(a.id);
       } else if (g.phase === "battle") {
         const s = this._selArmies();
         if (s.length) orderMove(g, s, [p], t.shift || e.shiftKey);
@@ -1503,17 +1638,10 @@ export class WarMode {
     this.canvas.width = Math.round(this.cw * dpr); this.canvas.height = Math.round(this.ch * dpr);
   }
 
-  _frame(dt, now) {
+  _mergeStep(dt) {
     const g = this.game;
-    if (!g) return;
-    if (this.mode === "campaign" && !this.campBattle) return;
-    if (g.phase === "battle" && !this.paused) {
-      this.acc += dt * this.simSpeed;
-      let n = 0;
-      while (this.acc >= SIM_DT && n < 16) { stepGame(g, SIM_DT); this.acc -= SIM_DT; n++; if (g.phase !== "battle") break; }
-      if (n >= 16) this.acc = 0;
-    }
-    if (g.phase === "battle") for (const a of g.armies) {
+    if (g.phase !== "battle" || !this._canSim()) return;
+    for (const a of g.armies) {
       const b = a.mergeTarget; if (!b) continue;
       if (!g.armies.includes(b) || a.team !== b.team) { a.mergeTarget = null; continue; }
       if (dist(a.x, a.y, b.x, b.y) < (armyRadius(a.n) + armyRadius(b.n)) * 0.9) {
@@ -1524,8 +1652,23 @@ export class WarMode {
       a.mergeRetry = (a.mergeRetry || 0) + dt;
       if (a.mergeRetry > 0.6 && !a.engaged) { a.mergeRetry = 0; orderMove(g, [a], [{ x: b.x, y: b.y }], false); a.mergeTarget = b; }
     }
+  }
+
+  _frame(dt, now) {
+    const g = this.game;
+    if (!g) return;
+    if (this.mode === "campaign" && !this.campBattle) return;
+    if (this.mode === "pvp") this._pvpSync();
+    if (g.phase === "battle" && !this.paused && this._canSim()) {
+      this.acc += dt * this.simSpeed;
+      let n = 0;
+      while (this.acc >= SIM_DT && n < 16) { stepGame(g, SIM_DT); this.acc -= SIM_DT; n++; if (g.phase !== "battle") break; if (this.pvp && this.mode === "pvp" && g.t >= this.pvp.roundEnd - 1e-9) { this.acc = 0; break; } }
+      if (n >= 16) this.acc = 0;
+      if (this.mode === "pvp") this._pvpSync();
+    }
+    this._mergeStep(dt);
     for (const id of [...this.sel]) if (!g.armies.some((a) => a.id === id)) this.sel.delete(id);
-    if (g.phase === "over" && !this.banner.classList.contains("show")) this._showBanner();
+    if (g.phase === "over" && this.mode !== "pvp" && !this.banner.classList.contains("show")) this._showBanner();
     this._render(now / 1000);
     this._updateHud(now);
   }
@@ -1549,10 +1692,20 @@ export class WarMode {
     if (now - (this._hudT || 0) < 200) return; this._hudT = now;
     const m = Math.floor(g.t / 60), s = Math.floor(g.t % 60);
     let held = 0; for (const p of g.points) if (p.owner === 0) held++;
-    const chips = [g.phase === "deploy" ? "Deployment" : this.paused ? "Paused" : "Battle", `${m}:${String(s).padStart(2, "0")}`, `Points held ${held}/${g.points.length}`, `Reserve ${Math.round(g.phase === "deploy" ? g.budget[0] : g.reserve[0])}`];
+    const T = this._me(), pv = this.mode === "pvp";
+    let chips = [g.phase === "deploy" ? "Deployment" : this.paused ? "Paused" : "Battle", `${m}:${String(s).padStart(2, "0")}`, `Points held ${held}/${g.points.length}`, `Reserve ${Math.round(g.phase === "deploy" ? g.budget[0] : g.reserve[0])}`];
+    if (pv) {
+      const st = this.pvp;
+      chips = !st ? ["PvP setup"] : PV.hidesMap(st) ? [] : [st.stage === "deploy" ? `${TEAMS[T].name} deploying` : st.stage === "orders" ? `${TEAMS[T].name}: orders` : st.stage === "play" ? "Round playing" : "Game over"];
+      if (st && st.round) chips.push(`Round ${st.round}`);
+      if (st && st.stage === "play") chips.push(`${Math.ceil(PV.roundTimeLeft(st, g))}s left`);
+      if (st && T >= 0) chips.push(`Reserve ${Math.round(g.phase === "deploy" ? g.budget[T] : g.reserve[T])}`);
+      if (st && (st.stage === "play" || st.stage === "orders" || st.stage === "over")) chips.push(`${m}:${String(s).padStart(2, "0")}`);
+    }
     this.hud.innerHTML = ""; for (const c of chips) this.hud.appendChild(el("span", "war-chip", c));
-    if (this.statusLine) this.statusLine.textContent = `Your HQ ${Math.round(g.hqs[0].hp / g.hqs[0].max * 100)}%  |  Enemy HQ ${Math.round(g.hqs[1].hp / g.hqs[1].max * 100)}%`;
-    const mine = g.armies.filter((a) => a.team === 0);
+    if (this.statusLine) this.statusLine.textContent = pv ? (g.fog ? "" : `Blue HQ ${Math.round(g.hqs[0].hp / g.hqs[0].max * 100)}%  |  Red HQ ${Math.round(g.hqs[1].hp / g.hqs[1].max * 100)}%`) : `Your HQ ${Math.round(g.hqs[0].hp / g.hqs[0].max * 100)}%  |  Enemy HQ ${Math.round(g.hqs[1].hp / g.hqs[1].max * 100)}%`;
+    // While a cover screen is up, the previous player's roster must not be readable by the next one
+    const mine = this.pvp?.stage === "cover" ? [] : g.armies.filter((a) => a.team === T);
     const sel = this._selArmies();
     const battle = g.phase === "battle";
     for (const k of Object.keys(this.stBtns)) { this.stBtns[k].disabled = !battle || !sel.length; this.stBtns[k].classList.toggle("on", sel.length > 0 && sel.every((a) => a.stance === k)); }
@@ -1564,12 +1717,12 @@ export class WarMode {
       const ord = a.routed ? "Routed" : a.engaged ? "Fighting" : a.stance === "retreat" ? "Retreating" : a.route.length ? `Moving (${a.route.length})` : a.stance === "hold" ? "Holding" : a.chasing ? "Attacking" : "Ready";
       return { a, ord };
     });
-    const sig = rows.map((r) => `${r.a.id}|${Math.round(r.a.n)}|${Math.round(r.a.morale / 5)}|${r.ord}|${this.sel.has(r.a.id)}|${g.phase}`).join(";");
+    const sig = rows.map((r) => `${T}|${r.a.id}|${Math.round(r.a.n)}|${Math.round(r.a.morale / 5)}|${r.ord}|${this.sel.has(r.a.id)}|${g.phase}`).join(";");
     if (sig !== this.listSig) {
       this.listSig = sig; this.listBox.innerHTML = "";
       for (const { a, ord } of rows) {
         const row = el("div", "war-arow" + (this.sel.has(a.id) ? " sel" : ""));
-        const dot = el("span", "war-dot"); dot.style.background = TEAMS[0].color;
+        const dot = el("span", "war-dot"); dot.style.background = TEAMS[Math.max(0, T)].color;
         const nm = el("span", null, a.name);
         const mid = el("div"); mid.append(el("span", null, `${Math.round(a.n)} troops`));
         const bar = el("div", "war-mini"), bi = el("i"); bi.style.width = a.morale + "%"; bi.style.background = a.morale > 50 ? "#22c55e" : a.morale > 25 ? "#eab308" : "var(--danger)"; bar.appendChild(bi); mid.appendChild(bar);
@@ -1582,7 +1735,7 @@ export class WarMode {
       if (!rows.length) this.listBox.appendChild(el("div", "war-dim", "No armies."));
     }
     // deployment: refresh recruit readout as budget changes
-    if (g.phase === "deploy" && this._lastBudget !== Math.round(g.budget[0])) { this._lastBudget = Math.round(g.budget[0]); this._renderPhase(); }
+    if (g.phase === "deploy" && T >= 0 && this._lastBudget !== Math.round(g.budget[T])) { this._lastBudget = Math.round(g.budget[T]); this._renderPhase(); }
   }
 
   // ----- rendering -----
@@ -1648,13 +1801,17 @@ export class WarMode {
     const sc = this._scale();
     c.save(); c.translate(sc.ox, sc.oy); c.scale(sc.s, sc.s);
     c.drawImage(this._terrainImage(), 0, 0, WORLD_W, WORLD_H);
+    const pv = this.mode === "pvp", T = this._me();
+    if (pv && this.pvp && PV.hidesMap(this.pvp)) { c.restore(); return; }
+    const vt = pv ? PV.viewTeams(this.pvp, g.fog) : [0];
     const css = getComputedStyle(this.root);
     void css;
     // deployment zones
-    if (g.phase === "deploy") {
-      c.fillStyle = "rgba(59,130,246,0.14)"; c.fillRect(40, 50, 260, WORLD_H - 100);
-      c.strokeStyle = "rgba(59,130,246,0.7)"; c.setLineDash([10, 8]); c.lineWidth = 2; c.strokeRect(40, 50, 260, WORLD_H - 100); c.setLineDash([]);
-      c.fillStyle = "rgba(239,68,68,0.10)"; c.fillRect(WORLD_W - 300, 50, 260, WORLD_H - 100);
+    if (g.phase === "deploy" && (!pv || T >= 0)) {
+      const zx = T === 1 ? WORLD_W - 300 : 40, zc = T === 1 ? "239,68,68" : "59,130,246";
+      c.fillStyle = `rgba(${zc},0.14)`; c.fillRect(zx, 50, 260, WORLD_H - 100);
+      c.strokeStyle = `rgba(${zc},0.7)`; c.setLineDash([10, 8]); c.lineWidth = 2; c.strokeRect(zx, 50, 260, WORLD_H - 100); c.setLineDash([]);
+      if (!pv) { c.fillStyle = "rgba(239,68,68,0.10)"; c.fillRect(WORLD_W - 300, 50, 260, WORLD_H - 100); }
     }
     // control points
     for (const p of g.points) {
@@ -1694,7 +1851,11 @@ export class WarMode {
     }
     c.setLineDash([]);
     // fog visibility
-    const vis = (a) => visibleTo(g, 0, a);
+    // PvP: during deployment each player sees only their own armies; otherwise
+    // an entity is shown if any viewing team can see it (fog off: everything).
+    const vis = pv
+      ? (g.phase === "deploy" ? (a) => a.team === T : (a) => vt.some((tm) => visibleTo(g, tm, a)))
+      : (a) => visibleTo(g, 0, a);
     // blobs per team: outline pass then fill pass so allies merge into one shape
     for (const team of [1, 0]) {
       const list = g.armies.filter((a) => a.team === team && vis(a));
@@ -1712,6 +1873,7 @@ export class WarMode {
     }
     // contact sparks
     if (g.phase === "battle") for (const ct of g.contacts) {
+      if (!vis({ team: -1, x: ct.x, y: ct.y })) continue;
       for (let k = 0; k < 2; k++) { const a = Math.random() * 6.283, r = Math.random() * 14; c.fillStyle = Math.random() < 0.5 ? "#fff3b0" : "#ffb347"; c.beginPath(); c.arc(ct.x + Math.cos(a) * r, ct.y + Math.sin(a) * r, 1.5 + Math.random() * 2, 0, 6.283); c.fill(); }
     }
     // labels, bars
@@ -1735,8 +1897,8 @@ export class WarMode {
     }
     // placement ghost
     if (g.phase === "deploy" && this.placing && this.hover) {
-      const r = armyRadius(this.recruit.n), ok = inZone(0, this.hover.x, this.hover.y) && !blockedAt(g, this.hover.x, this.hover.y);
-      c.beginPath(); c.arc(this.hover.x, this.hover.y, r, 0, 6.283); c.fillStyle = ok ? "rgba(59,130,246,0.45)" : "rgba(239,68,68,0.45)"; c.fill();
+      const r = armyRadius(this.recruit.n), ok = inZone(Math.max(0, T), this.hover.x, this.hover.y) && !blockedAt(g, this.hover.x, this.hover.y);
+      c.beginPath(); c.arc(this.hover.x, this.hover.y, r, 0, 6.283); c.fillStyle = ok ? (T === 1 ? "rgba(239,68,68,0.45)" : "rgba(59,130,246,0.45)") : "rgba(255,255,255,0.35)"; c.fill();
     }
     // box select
     if (this.ptr && this.ptr.kind === "box") {
@@ -1745,7 +1907,7 @@ export class WarMode {
     }
     c.restore();
     // fog overlay
-    if (g.fog && g.phase !== "deploy") {
+    if (g.fog && g.phase !== "deploy" && vt.length) {
       const fc = this.fogCanvas, fw = Math.ceil(this.cw / 4), fh = Math.ceil(this.ch / 4);
       if (fc.width !== fw || fc.height !== fh) { fc.width = fw; fc.height = fh; }
       const f = fc.getContext("2d");
@@ -1753,8 +1915,8 @@ export class WarMode {
       f.globalCompositeOperation = "destination-out";
       const hole = (x, y, r) => { const gr = f.createRadialGradient(x, y, r * 0.6, x, y, r); gr.addColorStop(0, "rgba(0,0,0,1)"); gr.addColorStop(1, "rgba(0,0,0,0)"); f.fillStyle = gr; f.beginPath(); f.arc(x, y, r, 0, 6.283); f.fill(); };
       const k = sc.s / 4;
-      for (const a of g.armies) if (a.team === 0) hole((sc.ox + a.x * sc.s) / 4, (sc.oy + a.y * sc.s) / 4, 300 * k);
-      hole((sc.ox + g.hqs[0].x * sc.s) / 4, (sc.oy + g.hqs[0].y * sc.s) / 4, 320 * k);
+      for (const a of g.armies) if (vt.includes(a.team)) hole((sc.ox + a.x * sc.s) / 4, (sc.oy + a.y * sc.s) / 4, 300 * k);
+      for (const tm of vt) hole((sc.ox + g.hqs[tm].x * sc.s) / 4, (sc.oy + g.hqs[tm].y * sc.s) / 4, 320 * k);
       c.drawImage(fc, 0, 0, this.cw, this.ch);
     }
   }

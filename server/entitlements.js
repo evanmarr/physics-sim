@@ -41,13 +41,13 @@ const PLAN_INCLUDES_PLUS = new Set(["plus", "teacher"]);
 // value instead of one side seeing `Infinity` and the other seeing `null`.
 export const LIMITS = {
   free: {
-    maxWorlds: 6, maxMathItems: 6, maxCities: 3, maxCustomItems: 0,
+    maxWorlds: 6, maxMathItems: 6, maxCities: 3, maxStructures: 3, maxCustomItems: 0,
     notebookEntries: 8, compareRunsHistory: 2, graphHistorySeconds: 60,
     shareCodesEnabled: false, customItemsEnabled: false,
     maxAiChats: 6, maxWhiteboards: 6, maxNotes: 8, maxRocketFlights: 6,
   },
   plus: {
-    maxWorlds: 40, maxMathItems: 40, maxCities: 20, maxCustomItems: 30,
+    maxWorlds: 40, maxMathItems: 40, maxCities: 20, maxStructures: 40, maxCustomItems: 30,
     notebookEntries: null, compareRunsHistory: null, graphHistorySeconds: null,
     shareCodesEnabled: true, customItemsEnabled: true,
     maxAiChats: null, maxWhiteboards: null, maxNotes: null, maxRocketFlights: null,

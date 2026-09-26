@@ -38,6 +38,7 @@ const BUTTON_COOLDOWN_MS = 700;
 const SPRING_COOLDOWN_MS = 350;
 const PIVOT_ANGULAR_DAMPING = 0.25;
 const MAX_BODY_SPEED = 75; // world units/step — see _clampFastBodies
+const FAST_GUARD_SPEED = 9; // world units/step — above this, any dynamic body is swept for skipped-over solids
 const SMALL_FAST_BODY_SPEED = 22; // shards and the grab pointer — small enough that a thin object can be skipped over at higher speeds
 const WIND_PARTICLE_RADIUS = 3;
 const WIND_PARTICLE_LIFESPAN_MS = 2200;
@@ -841,6 +842,7 @@ export class PhysicsSim {
   // FIXED scenery on purpose (see enableGrabTool); only things it's meant
   // to bump into are guarded.
   _sweepGuards() {
+    this._guardFastBodies();
     const guarded = [];
     for (const body of Composite.allBodies(this.engine.world)) {
       if (body._sweepPrev && !body.isStatic) guarded.push(body);
@@ -859,6 +861,31 @@ export class PhysicsSim {
         Body.setPosition(body, { x: prev.x, y: prev.y });
         Body.setVelocity(body, { x: body.velocity.x * 0.1, y: body.velocity.y * 0.1 });
       }
+    }
+  }
+
+  // Same idea for every OTHER fast body (cannonballs, bomb-flung objects, anything
+  // fan- or spring-launched): if the straight path it just travelled cuts through
+  // a solid it wasn't already overlapping, it skipped over it — put it back at the
+  // start of the step and bounce it, and the solver takes it from there.
+  _guardFastBodies() {
+    const all = Composite.allBodies(this.engine.world);
+    for (const body of all) {
+      const prev = body._fgPrev;
+      if (!prev) continue;
+      body._fgPrev = null;
+      if (body.isStatic || body.isSensor || body._sweepPrev) continue;
+      const dist = Math.hypot(body.position.x - prev.x, body.position.y - prev.y);
+      if (dist < 6) continue;
+      const grp = body.collisionFilter.group;
+      const solids = all.filter((b) => b !== body && b.parent !== body.parent && !b.isSensor && b.label !== "grabTool"
+        && !(grp < 0 && b.collisionFilter.group === grp)
+        && !(b.collisionFilter.mask === 0) && !b.plugin?.render?.type?.startsWith?.("wind"));
+      const inside = new Set(Query.point(solids, prev).map((b) => b.id));
+      const hits = Query.ray(solids.filter((b) => !inside.has(b.id)), prev, body.position, 2);
+      if (!hits.length) continue;
+      Body.setPosition(body, { x: prev.x, y: prev.y });
+      Body.setVelocity(body, { x: -body.velocity.x * 0.35, y: -body.velocity.y * 0.35 });
     }
   }
 
@@ -891,6 +918,8 @@ export class PhysicsSim {
       }
       if (body.isSensor) continue;
       const speed = Vector.magnitude(body.velocity);
+      // Any fast mover gets the same "did it skip over something?" check as shards/the grab tool
+      if (speed > FAST_GUARD_SPEED && !body._sweepPrev) body._fgPrev = { x: body.position.x, y: body.position.y };
       const cap = body._sweepPrev ? SMALL_FAST_BODY_SPEED : MAX_BODY_SPEED;
       if (speed > cap) {
         const scale = cap / speed;
@@ -1429,7 +1458,7 @@ export class PhysicsSim {
     Composite.remove(world, bombBody);
     this.byId.delete(bombId);
     for (const glass of glassToShatter) this.pending.push({ type: "shatter", body: glass });
-    this.callbacks.onEvent?.({ type: "detonate", bombId });
+    this.callbacks.onEvent?.({ type: "detonate", bombId, x: bombBody.position.x, y: bombBody.position.y, radius: radiusOfEffect, power });
   }
 
   // 1.0 = ordinary Earth air (each material's own drag, unchanged); 0 is a
@@ -1617,26 +1646,41 @@ export class PhysicsSim {
     this.running = true;
     this.lastTime = null;
     this.timeScale = this.timeScale ?? 1;
+    // Fixed-timestep loop. The physics ALWAYS advances in identical 1/60 s steps,
+    // whatever the Speed slider says: 3x just runs three steps per frame and
+    // 0.5x runs one step every other frame. (It used to stretch each step's
+    // length by the speed factor, so a fast run took huge steps — different
+    // results, and things tunnelling through walls — and slow-mo wasn't the
+    // same simulation played slowly.)
+    const STEP = 1000 / 60, MAX_STEPS_PER_FRAME = 8;
+    this._acc = 0;
     const loop = (time) => {
       if (!this.running) return;
       if (this.lastTime == null) this.lastTime = time;
-      const delta = Math.min(time - this.lastTime, 33) * this.timeScale;
+      const frame = Math.min(time - this.lastTime, 50);
       this.lastTime = time;
-      this._lastDelta = delta;
-      this.simTime += delta;
-      // Grab tool: just move the spring's anchor to the live pointer
-      // position — Matter's own constraint solver (inside Engine.update
-      // below) is what actually moves grabBody toward it, the same as
-      // every other constraint in the scene, so it's genuinely subject to
-      // collisions the whole way there instead of being forced through them.
-      if (this.grabConstraint && this.grabTarget) {
-        this.grabConstraint.pointA.x = this.grabTarget.x;
-        this.grabConstraint.pointA.y = this.grabTarget.y;
+      this._acc += frame * this.timeScale;
+      let steps = 0;
+      while (this._acc >= STEP && steps < MAX_STEPS_PER_FRAME) {
+        this._acc -= STEP;
+        steps++;
+        this._lastDelta = STEP;
+        this.simTime += STEP;
+        // Grab tool: just move the spring's anchor to the live pointer
+        // position — Matter's own constraint solver (inside Engine.update
+        // below) is what actually moves grabBody toward it, the same as
+        // every other constraint in the scene, so it's genuinely subject to
+        // collisions the whole way there instead of being forced through them.
+        if (this.grabConstraint && this.grabTarget) {
+          this.grabConstraint.pointA.x = this.grabTarget.x;
+          this.grabConstraint.pointA.y = this.grabTarget.y;
+        }
+        Engine.update(this.engine, STEP);
+        this.processPending();
+        this._cullExpiredShards();
       }
-      Engine.update(this.engine, delta);
-      this.processPending();
-      this._cullExpiredShards();
-      this.callbacks.onFrame?.(this.collectRenderItems());
+      if (steps === MAX_STEPS_PER_FRAME) this._acc = 0; // the tab was starved — don't spiral
+      if (steps > 0) this.callbacks.onFrame?.(this.collectRenderItems());
       this.rafId = requestAnimationFrame(loop);
     };
     this.rafId = requestAnimationFrame(loop);

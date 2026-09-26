@@ -1,3 +1,5 @@
+import { openSavesPanel } from "./auth.js";
+import { serializeDesign, sanitizeDesign, DRAFT_KEY } from "./structureSave.js";
 // Structure Tester — build on a grid, then subject the structure to a disaster.
 //
 // Every grid cell is a rigid Matter.js body joined to its neighbours by stiff
@@ -427,6 +429,7 @@ export class StructureTester {
     this.built = false;
     this.painting = false;
     this.hover = null;
+    this._loadDraft();
   }
 
   mount() {
@@ -530,12 +533,21 @@ export class StructureTester {
       this._push(); this.grid = TEMPLATES[sel.value](); sel.value = ""; this.result = null; this._refresh();
     });
     ct.appendChild(sel);
+    // Save / Load designs — same saves panel the City tab and Rocket flights use (signed-in accounts; plan limits enforced server-side)
+    const saveRow = this._el("div", "st-row st-save-row");
+    const saveBtn = this._el("button", "st-btn st-save-btn", "Save / Load designs");
+    saveBtn.title = "Save this design to your account, or open one you saved before";
+    saveBtn.addEventListener("click", () => this._openSaves());
+    saveRow.appendChild(saveBtn);
+    ct.appendChild(saveRow);
+    ct.appendChild(this._el("div", "st-save-hint", "Your current design is also kept on this device automatically."));
     side.appendChild(ct);
     // disaster
     const cd = this._el("div", "st-card");
     cd.appendChild(this._el("h3", null, "Disaster"));
     this.disSel = this._el("select");
     for (const k of Object.keys(DISASTERS)) this.disSel.appendChild(new Option(DISASTERS[k].name, k));
+    this.disSel.value = this.disaster;
     this.disSel.addEventListener("change", () => { this.disaster = this.disSel.value; this._renderParams(); });
     cd.appendChild(this.disSel);
     this.paramBox = this._el("div");
@@ -666,8 +678,43 @@ export class StructureTester {
     this._refresh();
   }
 
+  _designData() {
+    return serializeDesign({ grid: this.grid, disaster: this.disaster, params: this.p, mat: this.mat });
+  }
+
+  _openSaves() {
+    openSavesPanel({
+      kind: "structures",
+      title: "Structure Tester",
+      itemNoun: "design",
+      serialize: () => this._designData(),
+      apply: (data) => this._applyData(data),
+      getSnapshot: () => { try { const c = document.createElement("canvas"); c.width = 240; c.height = 144; c.getContext("2d").drawImage(this.canvas, 0, 0, 240, 144); return c.toDataURL("image/jpeg", 0.6); } catch { return null; } },
+    });
+  }
+
+  // Restores a saved (or draft) design: grid, disaster, its sliders and the selected material
+  _applyData(raw) {
+    const d = sanitizeDesign(raw);
+    if (!d) return;
+    if (this.sim) this._reset();
+    this._push();
+    this.grid = d.grid; this.disaster = d.disaster; this.p = { ...this.p, ...d.params }; this.mat = d.mat; this.result = null;
+    if (this.built) { this.disSel.value = this.disaster; this._renderParams(); }
+    this._refresh();
+  }
+
+  _saveDraft() {
+    try { localStorage.setItem(DRAFT_KEY, JSON.stringify(this._designData())); } catch { /* storage unavailable */ }
+  }
+
+  _loadDraft() {
+    try { const raw = localStorage.getItem(DRAFT_KEY); if (raw) { const d = sanitizeDesign(JSON.parse(raw)); if (d && d.grid.some(Boolean)) { this.grid = d.grid; this.disaster = d.disaster; this.p = { ...this.p, ...d.params }; this.mat = d.mat; } } } catch { /* ignore a corrupt draft */ }
+  }
+
   _refresh() {
     if (!this.built) return;
+    if (!this.sim) this._saveDraft();
     const cost = gridCost(this.grid), testing = !!this.sim;
     this.budgetEl.innerHTML = "";
     const b1 = this._el("b", null, `$${cost} / $${BUDGET}`);

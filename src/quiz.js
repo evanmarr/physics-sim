@@ -412,10 +412,29 @@ function bankFor(mode) {
   return null;
 }
 
+// Hand-written questions list the right answer first, so shown as written the answer would almost always be
+// option 1. Re-deal every question's options so the correct answer lands in a different slot each time:
+// slots are dealt from a shuffled deck (every position used before any repeats), then the wrong options are shuffled around it.
+export function balanceAnswerPositions(questions, rand = Math.random) {
+  const shuf = (a) => { const b = a.slice(); for (let i = b.length - 1; i > 0; i--) { const j = Math.floor(rand() * (i + 1)); [b[i], b[j]] = [b[j], b[i]]; } return b; };
+  let deck = [];
+  return questions.map((q) => {
+    const opts = q.options || [];
+    const correct = opts.indexOf(q.answer);
+    if (opts.length < 2 || correct < 0) return q;
+    if (!deck.length) deck = shuf([0, 1, 2, 3]);
+    let slot = deck.pop();
+    if (slot >= opts.length) slot = Math.floor(rand() * opts.length);
+    const others = shuf(opts.filter((_, i) => i !== correct));
+    others.splice(slot, 0, q.answer);
+    return { ...q, options: others };
+  });
+}
+
 export function openQuiz(mode) {
   const bank = bankFor(mode);
   if (!bank || !bank.questions.length) return;
-  state = { ...bank, mode, index: 0, score: 0, answered: false };
+  state = { ...bank, questions: balanceAnswerPositions(bank.questions), mode, index: 0, score: 0, answered: false };
   document.getElementById("quiz-modal").classList.remove("hidden");
   renderQuiz();
 }

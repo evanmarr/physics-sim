@@ -324,8 +324,16 @@ let redoStack = [];
 let pendingUndoSnapshot = null;
 let undoCommitTimer = null;
 
+// Everything about the environment that belongs to a world: saved with it, shared with it, restored by undo
+function worldSettings() {
+  return { gravity: state.gravity, airFriction: state.airFriction, frictionScale: state.frictionScale, simSpeed: state.simSpeed };
+}
+function worldPayload() {
+  return { objects: state.objects, gravity: state.gravity, settings: worldSettings() };
+}
+
 function snapshotForUndo() {
-  return { objects: JSON.parse(JSON.stringify(state.objects)), gravity: state.gravity };
+  return { objects: JSON.parse(JSON.stringify(state.objects)), gravity: state.gravity, settings: worldSettings() };
 }
 
 function commitPendingUndo() {
@@ -359,6 +367,7 @@ function applySnapshot(snap) {
   document.getElementById("gravity-slider").value = state.gravity;
   document.getElementById("gravity-val").textContent = state.gravity.toFixed(1);
   if (sim) sim.setGravity(state.gravity);
+  if (snap.settings) applyWorldSettings(snap.settings);
   state.selectedIds = new Set();
   state.selectedId = null;
   renderAll();
@@ -560,13 +569,21 @@ function simulateCannonTrajectory(spec, gravity, allSpecs) {
   const dummyBall = Matter.Bodies.circle(spec.x, spec.y, 26, {});
   dummyBall.plugin = { render: { radius: 26, material: "rubber" } };
   sim._doCannonFire(spec.id, dummyBall);
-  const fired = Matter.Composite.allBodies(sim.engine.world).find((b) => b.label?.startsWith("ball:firedball"));
+  const findFired = () => Matter.Composite.allBodies(sim.engine.world).find((b) => b.label?.startsWith("ball:firedball"));
+  let fired = findFired();
   if (!fired) { sim.stop(); return null; }
 
+  // Follow the shot through the scene. If it drops into ANOTHER cannon's catcher,
+  // that cannon fires a fresh ball (the old body is removed) — keep tracing the new
+  // one, with a gap-free polyline, instead of stopping where the first ball vanished.
   const points = [{ x: fired.position.x, y: fired.position.y }];
-  for (let t = 0; t < 240; t++) {
+  for (let t = 0; t < 600; t++) {
     sim._lastDelta = 16;
     Matter.Engine.update(sim.engine, 16);
+    sim.processPending(); // this is what lets a catcher actually catch and re-fire
+    const cur = findFired();
+    if (!cur) break;
+    fired = cur;
     if (t % 4 === 0) points.push({ x: fired.position.x, y: fired.position.y });
     if (fired.position.y > WORLD.maxY || fired.position.x < WORLD.minX || fired.position.x > WORLD.maxX) break;
   }
@@ -659,10 +676,8 @@ function applyPhysicsWorldData(renderer, data, lockMeta = null) {
   pushUndoNow();
   state.objects = dropRemovedTypes(data.objects || []);
   migrateRopeSpecs(state.objects);
-  state.gravity = data.gravity ?? 1;
-  document.getElementById("gravity-slider").value = state.gravity;
-  document.getElementById("gravity-val").textContent = state.gravity.toFixed(1);
-  sim?.setGravity(state.gravity);
+  // A world carries its environment: older saves only have gravity, so anything missing resets to Earth-normal
+  applyWorldSettings({ gravity: data.gravity ?? 1, airFriction: 1, frictionScale: 1, simSpeed: 1, ...(data.settings || {}) });
   state.selectedIds = new Set();
   state.selectedId = null;
   state.activeChallengeId = null;
@@ -763,7 +778,7 @@ function wireTopbar(renderer) {
       kind: "worlds",
       title: "My Physics Worlds",
       itemNoun: "world",
-      serialize: () => ({ objects: state.objects, gravity: state.gravity }),
+      serialize: () => worldPayload(),
       apply: (data, lockMeta) => applyPhysicsWorldData(renderer, data, lockMeta),
       getSnapshot: () => generateSnapshot(state.objects),
     });
@@ -790,6 +805,7 @@ function wireTopbar(renderer) {
   } catch { /* streaks are a bonus — never block boot */ }
   wireInstallButton();
   initPresetPicker();
+  applyWorldSettings(worldSettings()); // put restored settings (from the autosave) on the sliders
   initMeasureTools({
     getRenderer: () => window._renderer,
     getSelectedId: () => state.selectedId,
@@ -827,7 +843,7 @@ function wireTopbar(renderer) {
   // (see buildHomeRails's own subscription).
   onAuthChange(rerenderExperiencePicker);
   initWorldShareUI({
-    getWorldData: () => ({ objects: state.objects, gravity: state.gravity }),
+    getWorldData: () => worldPayload(),
     applyWorldData: (data) => applyPhysicsWorldData(window._renderer, data),
     hasUnsavedWork: () => state.objects.length > 0,
   });
@@ -1134,6 +1150,7 @@ function massEstimate(spec) {
 
 function handleSimEvent(event) {
   if (event.type === "shatter") window._renderer.burst(event.x, event.y, event.radius);
+  if (event.type === "detonate" && event.x != null) window._renderer.explode(event.x, event.y, event.radius, event.power);
   if (!tracker) return;
   if (tracker.onEvent(event)) awardChallenge(tracker.challenge);
 }
@@ -2060,6 +2077,22 @@ function setEnvironment(env) {
   }
   updateTrajectoryPreview();
   syncPresetPicker();
+}
+
+// Applies a saved/shared/undone environment to the live sim and every slider that shows it
+function applyWorldSettings(st) {
+  const clampN = (v, lo, hi, d) => (typeof v === "number" && Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : d);
+  setEnvironment({
+    gravity: clampN(st.gravity, -2, 3, state.gravity),
+    airFriction: clampN(st.airFriction, 0, 10, state.airFriction),
+    frictionScale: clampN(st.frictionScale, 0, 3, state.frictionScale),
+  });
+  const speed = clampN(st.simSpeed, 0.1, 3, state.simSpeed);
+  state.simSpeed = speed;
+  const sl = document.getElementById("speed-slider"), lab = document.getElementById("speed-val");
+  if (sl) sl.value = speed;
+  if (lab) lab.textContent = speed.toFixed(1);
+  sim?.setTimeScale(speed);
 }
 
 function syncPresetPicker() {

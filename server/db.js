@@ -320,7 +320,7 @@ export function ensureSchema() {
     CREATE TABLE IF NOT EXISTS notifications (
       id TEXT PRIMARY KEY,
       recipient_email TEXT NOT NULL REFERENCES users(email) ON DELETE CASCADE,
-      kind TEXT NOT NULL, -- 'interaction' | 'new_world' | 'product_update' | 'newsletter' | 'donor_thanks'
+      kind TEXT NOT NULL, -- 'interaction' | 'new_world' | 'product_update' | 'newsletter' | 'donor_thanks' | 'featured'
       group_key TEXT,
       title TEXT NOT NULL,
       body TEXT NOT NULL DEFAULT '',
@@ -555,9 +555,28 @@ export async function getSavedItemName(email, kind, id) {
   return rows[0]?.name ?? null;
 }
 
+// Notifies the owner only on the not-featured -> featured transition;
+// notifications_oneshot_idx dedupes repeat feature cycles.
 export async function setCommunitySimFeatured(id, featured) {
-  const rows = await query("UPDATE community_sims SET is_featured = $2 WHERE id = $1 RETURNING id", [id, featured]);
-  return rows.length > 0;
+  const prev = await query("SELECT is_featured, owner_email, name FROM community_sims WHERE id = $1", [id]);
+  if (!prev.length) return false;
+  await query("UPDATE community_sims SET is_featured = $2 WHERE id = $1", [id, featured]);
+  if (featured && !prev[0].is_featured && prev[0].owner_email) {
+    try {
+      await insertFeaturedNotification({ recipientEmail: prev[0].owner_email, simId: id, simName: prev[0].name });
+    } catch (e) { console.error("[featured notification failed]", String(e.message).slice(0, 200)); }
+  }
+  return true;
+}
+
+export async function insertFeaturedNotification({ recipientEmail, simId, simName }) {
+  const now = Date.now();
+  await query(
+    `INSERT INTO notifications (id, recipient_email, kind, group_key, title, body, link_kind, link_id, count, created_at, updated_at, read_at)
+     VALUES ($1, $2, 'featured', NULL, $3, '', 'community-sim', $4, 1, $5, $5, NULL)
+     ON CONFLICT (recipient_email, kind, link_id) WHERE group_key IS NULL AND link_id IS NOT NULL DO NOTHING`,
+    [crypto.randomUUID(), recipientEmail, `Your world \u201c${simName}\u201d was featured on Kinetic!`, simId, now]
+  );
 }
 
 export async function incrementRemixCount(id) {
@@ -1032,7 +1051,8 @@ export async function listAllClassrooms() {
 // ---------- mailing list ----------
 
 export async function getMailingList() {
-  const rows = await query("SELECT email FROM mailing_list", []);
+  // Existence-filtered so a deleted account is never emailed again.
+  const rows = await query("SELECT m.email FROM mailing_list m JOIN users u ON u.email = m.email", []);
   return rows.map((r) => r.email);
 }
 

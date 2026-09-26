@@ -952,6 +952,7 @@ html, body, button, a, input, select, textarea, label, [role="button"], .mode-ta
 .notif-icon[data-kind="product_update"] { color: #8b5cf6; border-color: color-mix(in srgb, #8b5cf6 45%, var(--border)); }
 .notif-icon[data-kind="newsletter"] { color: #e0a34a; border-color: color-mix(in srgb, #e0a34a 45%, var(--border)); }
 .notif-icon[data-kind="donor_thanks"] { color: #e0544a; border-color: color-mix(in srgb, #e0544a 45%, var(--border)); }
+.notif-icon[data-kind="featured"] { color: #f2c94c; border-color: color-mix(in srgb, #f2c94c 45%, var(--border)); }
 .notif-row-main { flex: 1; min-width: 0; }
 .notif-row-top { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
 .notif-row-title { font-size: 13.5px; font-weight: 600; }
@@ -2321,3 +2322,22 @@ html, body, button, a, input, select, textarea, label, [role="button"], .mode-ta
 }
 .war-camp-toggle { padding: 8px 20px 0; margin: 0 0 12px; gap: 8px; }
 .war-camp-root { padding: 0 20px 24px; box-sizing: border-box; }
+
+/* Structure Tester save / load */
+.st-save-card { display: flex; flex-direction: column; gap: 8px; }
+.st-save-card .st-save-btn { width: 100%; box-sizing: border-box; }
+
+/* War PvP (hot-seat) */
+.war-root .war-banner.war-pvp-solid { background: var(--panel); backdrop-filter: none; z-index: 6; overflow-y: auto; }
+.war-pvp-cover { display: flex; flex-direction: column; align-items: center; gap: 12px; box-sizing: border-box; max-width: 100%; }
+.war-root .war-banner > .war-pvp-cover { border: 0; background: transparent; padding: 16px; }
+.war-pvp-cover h2 { margin: 0; font-size: 24px; color: var(--text); }
+.war-pvp-cover .war-btn { padding: 10px 22px; font-size: 14px; }
+.war-pvp-stats { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; width: 100%; }
+.war-pvp-statcol { display: flex; flex-direction: column; gap: 4px; flex: 1 1 150px; min-width: 0; padding: 10px; background: var(--panel-alt); border: 1px solid var(--border); border-left-width: 4px; border-radius: 8px; color: var(--text); font-size: 13px; text-align: left; box-sizing: border-box; }
+.war-pvp-btns { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; margin: 8px 0; }
+.war-root .war-pvp-seed { width: 110px; min-width: 0; box-sizing: border-box; background: var(--panel-alt); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 5px 9px; font-size: 12px; }
+.war-pvp-note { margin-top: 8px; }
+.st-save-row { margin-top: 10px; }
+.st-save-row .st-save-btn { width: 100%; box-sizing: border-box; }
+.st-save-hint { margin-top: 6px; font-size: 11.5px; color: var(--text-dim); line-height: 1.5; }
